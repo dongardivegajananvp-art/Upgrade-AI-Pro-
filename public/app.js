@@ -210,7 +210,7 @@ function renderMovers(fno) {
     container.append(note);
     return;
   }
-  for (const item of top) {
+  top.slice(0, 5).forEach((item, index) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'mover-card';
@@ -218,6 +218,7 @@ function renderMovers(fno) {
     const direction = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
     const cardState = item.fresh ? direction : 'stale';
     button.dataset.state = cardState;
+    button.dataset.rank = String(index + 1);
     button.title = item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : 'STALE ROLLING OBSERVATION · ' + Math.floor((item.ageSeconds || 0) / 60) + 'm old · not actionable';
     button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
@@ -229,7 +230,7 @@ function renderMovers(fno) {
     change.dataset.state = item.fresh ? direction : 'stale';
     button.append(name, price, change);
     container.append(button);
-  }
+  });
 }
 async function selectIndexSymbol(symbol) {
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;

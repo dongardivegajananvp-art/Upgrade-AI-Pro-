@@ -9,6 +9,8 @@ let optionChainRows = [];
 let selectedOptionSide = 'CE';
 let selectedContractSymbol = null;
 let accountRefreshRunning = false;
+let chartCandles = [];
+let chartZoom = 1;
 let lastAccountRefresh = 0;
 function tickStatusText(md, freshCount) {
   if (freshCount === 3 && md.socketStatus !== 'CONNECTED') return 'FYERS RECONNECTING · LAST TICKS NOT CONFIRMED';
@@ -200,56 +202,91 @@ async function selectSymbol(symbol, livePrice = null) {
   }
 }
 function drawHistoryChart(candles) {
+  chartCandles = Array.isArray(candles) ? candles.slice() : [];
+  renderChartViewport();
+}
+function renderChartViewport() {
   const area = document.querySelector('#chart-area');
+  const candles = chartCandles;
   area.replaceChildren();
+  if (!candles.length) return;
+  const visibleCount = Math.max(8, Math.ceil(candles.length / chartZoom));
+  const visible = candles.slice(-visibleCount);
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 1200 560');
+  svg.setAttribute('viewBox', '0 0 1200 620');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Verified FYERS completed five-minute candlestick chart');
+  svg.setAttribute('aria-label', 'FYERS completed five-minute candlestick chart with supply and demand structure zones');
   svg.setAttribute('preserveAspectRatio', 'none');
-  const max = Math.max(...candles.map(c => Number(c.high)));
-  const min = Math.min(...candles.map(c => Number(c.low)));
-  const range = Math.max(max - min, 0.000001);
-  const left = 34, right = 24, top = 24, bottom = 92;
-  const plotW = 1200 - left - right, plotH = 560 - top - bottom;
-  const xStep = plotW / candles.length;
-  const y = price => top + (max - price) / range * plotH;
-  for (let i = 0; i <= 4; i++) {
-    const gy = top + plotH * i / 4;
-    const grid = document.createElementNS(ns, 'line');
-    grid.setAttribute('x1', left); grid.setAttribute('x2', 1200 - right);
-    grid.setAttribute('y1', gy); grid.setAttribute('y2', gy);
-    grid.setAttribute('stroke', '#26364d'); grid.setAttribute('stroke-width', '1');
-    svg.append(grid);
+  const left=76,right=92,top=28,bottom=100,plotW=1200-left-right,plotH=620-top-bottom;
+  const highs=visible.map(c=>Number(c.high)), lows=visible.map(c=>Number(c.low));
+  const max=Math.max(...highs),min=Math.min(...lows),range=Math.max(max-min,0.000001);
+  const pad=range*.08, ceiling=max+pad, floor=min-pad, span=ceiling-floor;
+  const y=p=>top+(ceiling-p)/span*plotH;
+  const xStep=plotW/visible.length, xAt=i=>left+xStep*(i+.5);
+  for(let i=0;i<=4;i++){
+    const price=ceiling-span*i/4, gy=y(price);
+    const grid=document.createElementNS(ns,'line');
+    grid.setAttribute('x1',left);grid.setAttribute('x2',left+plotW);grid.setAttribute('y1',gy);grid.setAttribute('y2',gy);
+    grid.setAttribute('stroke','#26364d');grid.setAttribute('stroke-width','1');svg.append(grid);
+    const label=document.createElementNS(ns,'text');
+    label.setAttribute('x',left+plotW+12);label.setAttribute('y',gy+5);label.setAttribute('fill','#9bb0ca');label.setAttribute('font-size','14');
+    label.textContent=showNumber(price);svg.append(label);
   }
-  candles.forEach((candle, index) => {
-    const x = left + xStep * (index + 0.5);
-    const up = Number(candle.close) >= Number(candle.open);
-    const stroke = up ? '#32c48d' : '#ef6b73';
-    const wick = document.createElementNS(ns, 'line');
-    wick.setAttribute('x1', x); wick.setAttribute('x2', x);
-    wick.setAttribute('y1', y(Number(candle.high))); wick.setAttribute('y2', y(Number(candle.low)));
-    wick.setAttribute('stroke', stroke); wick.setAttribute('stroke-width', '2');
-    const body = document.createElementNS(ns, 'rect');
-    const bodyTop = y(Math.max(Number(candle.open), Number(candle.close)));
-    const bodyBottom = y(Math.min(Number(candle.open), Number(candle.close)));
-    body.setAttribute('x', x - Math.max(1.5, xStep * 0.3));
-    body.setAttribute('y', bodyTop);
-    body.setAttribute('width', Math.max(3, xStep * 0.6));
-    body.setAttribute('height', Math.max(1.5, bodyBottom - bodyTop));
-    body.setAttribute('fill', stroke);
-    svg.append(wick, body);
+  // Demand/supply are drawn only from confirmed local pivot candles in the visible completed history.
+  const pivots=[];
+  for(let i=2;i<visible.length-2;i++){
+    const c=visible[i],lo=Number(c.low),hi=Number(c.high);
+    const isDemand=visible.slice(i-2,i).every(v=>Number(v.low)>=lo)&&visible.slice(i+1,i+3).every(v=>Number(v.low)>lo);
+    const isSupply=visible.slice(i-2,i).every(v=>Number(v.high)<=hi)&&visible.slice(i+1,i+3).every(v=>Number(v.high)<hi);
+    if(isDemand)pivots.push({kind:'DEMAND',index:i,low:lo,high:Math.min(Number(c.open),Number(c.close))});
+    if(isSupply)pivots.push({kind:'SUPPLY',index:i,low:Math.max(Number(c.open),Number(c.close)),high:hi});
+  }
+  const latestDemand=[...pivots].reverse().find(p=>p.kind==='DEMAND');
+  const latestSupply=[...pivots].reverse().find(p=>p.kind==='SUPPLY');
+  for(const zone of [latestDemand,latestSupply].filter(Boolean)){
+    const rect=document.createElementNS(ns,'rect');
+    rect.setAttribute('x',left+xStep*zone.index);rect.setAttribute('width',Math.max(22,plotW*.18));
+    rect.setAttribute('y',y(zone.high));rect.setAttribute('height',Math.max(3,y(zone.low)-y(zone.high)));
+    rect.setAttribute('fill',zone.kind==='DEMAND'?'#16c784':'#ea3943');rect.setAttribute('fill-opacity','.14');
+    rect.setAttribute('stroke',zone.kind==='DEMAND'?'#16c784':'#ea3943');rect.setAttribute('stroke-opacity','.75');rect.setAttribute('stroke-dasharray','5 4');
+    svg.append(rect);
+    const tag=document.createElementNS(ns,'text');tag.setAttribute('x',left+plotW-5);tag.setAttribute('y',y((zone.high+zone.low)/2)-5);
+    tag.setAttribute('text-anchor','end');tag.setAttribute('font-size','13');tag.setAttribute('font-weight','700');tag.setAttribute('fill',zone.kind==='DEMAND'?'#35d99a':'#ff737c');
+    tag.textContent=zone.kind+' ZONE';svg.append(tag);
+  }
+  visible.forEach((c,i)=>{
+    const x=xAt(i),up=Number(c.close)>=Number(c.open),color=up?'#32c48d':'#ef6b73';
+    const wick=document.createElementNS(ns,'line');wick.setAttribute('x1',x);wick.setAttribute('x2',x);wick.setAttribute('y1',y(Number(c.high)));wick.setAttribute('y2',y(Number(c.low)));wick.setAttribute('stroke',color);wick.setAttribute('stroke-width','2');
+    const body=document.createElementNS(ns,'rect'),bodyTop=y(Math.max(Number(c.open),Number(c.close))),bodyBottom=y(Math.min(Number(c.open),Number(c.close)));
+    body.setAttribute('x',x-Math.max(2,xStep*.29));body.setAttribute('y',bodyTop);body.setAttribute('width',Math.max(4,xStep*.58));body.setAttribute('height',Math.max(2,bodyBottom-bodyTop));body.setAttribute('fill',color);
+    const title=document.createElementNS(ns,'title');
+    title.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · Vol '+showNumber(c.volume,0);
+    body.append(title);svg.append(wick,body);
   });
-  const first = document.createElementNS(ns, 'text');
-  first.setAttribute('x', left); first.setAttribute('y', 535); first.setAttribute('fill', '#91a2ba'); first.setAttribute('font-size', '15');
-  first.textContent = new Date((candles[0].time + 19800) * 1000).toISOString().slice(11,16) + ' IST';
-  const last = document.createElementNS(ns, 'text');
-  last.setAttribute('x', 1200 - right); last.setAttribute('y', 535); last.setAttribute('text-anchor', 'end'); last.setAttribute('fill', '#91a2ba'); last.setAttribute('font-size', '15');
-  last.textContent = new Date((candles.at(-1).time + 19800) * 1000).toISOString().slice(11,16) + ' IST';
-  svg.append(first, last);
+  for(let i=0;i<=4;i++){
+    const index=Math.min(visible.length-1,Math.round((visible.length-1)*i/4)),c=visible[index];
+    const label=document.createElementNS(ns,'text');label.setAttribute('x',xAt(index));label.setAttribute('y',550);label.setAttribute('text-anchor',i===0?'start':i===4?'end':'middle');label.setAttribute('fill','#9bb0ca');label.setAttribute('font-size','14');
+    label.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST';svg.append(label);
+  }
+  const crossV=document.createElementNS(ns,'line');crossV.setAttribute('id','chart-crosshair-v');crossV.setAttribute('y1',top);crossV.setAttribute('y2',top+plotH);crossV.setAttribute('stroke','#c6d4e6');crossV.setAttribute('stroke-dasharray','4 5');crossV.setAttribute('opacity','0');
+  const crossH=document.createElementNS(ns,'line');crossH.setAttribute('id','chart-crosshair-h');crossH.setAttribute('x1',left);crossH.setAttribute('x2',left+plotW);crossH.setAttribute('stroke','#c6d4e6');crossH.setAttribute('stroke-dasharray','4 5');crossH.setAttribute('opacity','0');
+  svg.append(crossV,crossH);
+  const info=document.createElementNS(ns,'text');info.setAttribute('id','chart-crosshair-info');info.setAttribute('x',left+8);info.setAttribute('y',18);info.setAttribute('fill','#dceaff');info.setAttribute('font-size','14');info.textContent='Move over chart for candle time and OHLCV';svg.append(info);
+  svg.addEventListener('pointermove',event=>{
+    const rect=svg.getBoundingClientRect(),px=(event.clientX-rect.left)/rect.width*1200,py=(event.clientY-rect.top)/rect.height*620;
+    if(px<left||px>left+plotW||py<top||py>top+plotH)return;
+    const index=Math.max(0,Math.min(visible.length-1,Math.floor((px-left)/xStep))),c=visible[index],price=ceiling-(py-top)/plotH*span;
+    crossV.setAttribute('x1',px);crossV.setAttribute('x2',px);crossV.setAttribute('opacity','1');crossH.setAttribute('y1',py);crossH.setAttribute('y2',py);crossH.setAttribute('opacity','1');
+    info.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · V '+showNumber(c.volume,0)+' · CURSOR '+showNumber(price);
+  });
+  svg.addEventListener('pointerleave',()=>{crossV.setAttribute('opacity','0');crossH.setAttribute('opacity','0');info.textContent='Move over chart for candle time and OHLCV';});
   area.append(svg);
+  document.querySelector('#chart-candle-status').textContent=visible.length+' COMPLETED CANDLES · LIVE CANDLE NOT YET AVAILABLE';
 }
+document.querySelector('#chart-zoom-in').addEventListener('click',()=>{chartZoom=Math.min(4,chartZoom*1.35);renderChartViewport();});
+document.querySelector('#chart-zoom-out').addEventListener('click',()=>{chartZoom=Math.max(1,chartZoom/1.35);renderChartViewport();});
+document.querySelector('#chart-reset').addEventListener('click',()=>{chartZoom=1;renderChartViewport();});
 
 async function clearSelectedOption() {
   selectedContractSymbol = null;

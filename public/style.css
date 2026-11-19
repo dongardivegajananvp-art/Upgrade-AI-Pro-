@@ -33,3 +33,5 @@ footer{color:#7890ae}
 .chart-area{overflow:hidden;touch-action:pan-y;cursor:crosshair}
 .chart-area svg{width:100%;height:100%;display:block}
 .chart-area svg text{font-family:Inter,system-ui,sans-serif}
+
+.levels{flex-wrap:wrap;align-items:center}.levels span{white-space:nowrap}#setup-state{font-weight:800;color:#f0bd63;max-width:100%;overflow-wrap:anywhere}#setup-state[data-state='confirmed']{color:#16c784}#setup-state[data-state='blocked']{color:#f0bd63}

@@ -10,6 +10,7 @@ let selectedOptionSide = 'CE';
 let selectedContractSymbol = null;
 let accountRefreshRunning = false;
 let chartCandles = [];
+let chartLiveCandle = null;
 let chartZoom = 1;
 let lastAccountRefresh = 0;
 function tickStatusText(md, freshCount) {
@@ -33,6 +34,11 @@ async function refresh() {
     const md = s.marketData || {};
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
+    const underlyingTick = md.selectedUnderlying;
+    if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh && underlyingTick.liveCandle) {
+      chartLiveCandle = underlyingTick.liveCandle;
+      renderChartViewport();
+    }
     const optionLtp = document.querySelector('#option-ltp');
     if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) optionLtp.textContent = '₹' + showNumber(optionTick.price);
     else if (selectedContractSymbol) optionLtp.textContent = optionTick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR LIVE OPTION TICK';
@@ -175,6 +181,8 @@ function renderMovers(fno) {
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol || symbol === selectedSymbol) return;
   selectedSymbol = symbol;
+  chartLiveCandle = null;
+  fetch('/api/select-underlying',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol})}).catch(()=>{});
   const title = document.querySelector('#symbol');
   const area = document.querySelector('#chart-area');
   title.textContent = symbol + ' · LOADING VERIFIED FYERS HISTORY';
@@ -207,7 +215,7 @@ function drawHistoryChart(candles) {
 }
 function renderChartViewport() {
   const area = document.querySelector('#chart-area');
-  const candles = chartCandles;
+  const candles = chartLiveCandle && chartLiveCandle.time > 0 ? [...chartCandles, chartLiveCandle] : chartCandles;
   area.replaceChildren();
   if (!candles.length) return;
   const visibleCount = Math.max(8, Math.ceil(candles.length / chartZoom));
@@ -282,7 +290,8 @@ function renderChartViewport() {
   });
   svg.addEventListener('pointerleave',()=>{crossV.setAttribute('opacity','0');crossH.setAttribute('opacity','0');info.textContent='Move over chart for candle time and OHLCV';});
   area.append(svg);
-  document.querySelector('#chart-candle-status').textContent=visible.length+' COMPLETED CANDLES · LIVE CANDLE NOT YET AVAILABLE';
+  const livePresent = Boolean(chartLiveCandle && visible.some(c=>c.time===chartLiveCandle.time));
+  document.querySelector('#chart-candle-status').textContent=(visible.length-(livePresent?1:0))+' COMPLETED CANDLES · '+(livePresent?'LIVE 5-MIN CANDLE · TICK BUILT':'WAITING FOR LIVE UNDERLYING TICK');
 }
 document.querySelector('#chart-zoom-in').addEventListener('click',()=>{chartZoom=Math.min(4,chartZoom*1.35);renderChartViewport();});
 document.querySelector('#chart-zoom-out').addEventListener('click',()=>{chartZoom=Math.max(1,chartZoom/1.35);renderChartViewport();});

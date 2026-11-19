@@ -7,7 +7,7 @@ import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, crea
 import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
 import { evaluateNineStrategies } from './src/strategy-engine.js';
-import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, validateNseSymbol } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -62,6 +62,12 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteHistory(url.searchParams.get('symbol')));
+      if (url.pathname === '/api/research-context') {
+        const symbol = url.searchParams.get('symbol');
+        if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
+        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol),getFifteenMinuteHistory(symbol)]);
+        return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
+      }
       if (url.pathname === '/api/quotes') {
         const symbols = (url.searchParams.get('symbols') || '').split(',').filter(Boolean);
         return send(res,200,await getFyersQuotes(symbols));

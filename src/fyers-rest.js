@@ -87,16 +87,21 @@ export function buildFyersUrl(base, path, params = {}) {
 }
 function istDate(now = Date.now()) { return new Date(now + 19800000).toISOString().slice(0, 10); }
 
+const fiveMinuteCache = new Map();
 export async function getFiveMinuteHistory(symbol, now = Date.now()) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   const date = istDate(now);
+  const cached = fiveMinuteCache.get(symbol);
+  if (cached && cached.sessionDate === date && now - cached.savedAt < 20_000) return cached.value;
   const body = await fyersGet(DATA_BASE, '/history', {
     symbol, resolution: '5', date_format: '1', range_from: date, range_to: date
   });
   if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified historical candles');
   const candles = normalizeFiveMinuteCandles(body.candles, now);
   if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the NSE session');
-  return { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, source: 'FYERS_HISTORY', actionable: true };
+  const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, source: 'FYERS_HISTORY', actionable: true };
+  fiveMinuteCache.set(symbol, { savedAt: now, sessionDate: date, value });
+  return value;
 }
 export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
   if (!Array.isArray(rows)) return [];

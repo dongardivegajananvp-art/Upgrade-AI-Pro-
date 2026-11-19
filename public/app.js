@@ -261,6 +261,9 @@ async function selectSymbol(symbol, livePrice = null) {
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');
     drawHistoryChart(data.candles);
     selectedUnderlyingPrice = Number(livePrice) > 0 ? Number(livePrice) : (Number(data.candles.at(-1)?.close) || null);
+    // Warm the selected symbol's verified daily and 15-minute research context
+    // while the option chain/subscription is loading, not after the 10-second tick gate starts.
+    fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' }).catch(() => {});
     await clearSelectedOption();
     await loadOptionChain(symbol, selectedUnderlyingPrice);
     title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;

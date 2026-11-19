@@ -44,7 +44,7 @@ let fnoStrategyScanCursor = 0;
 let fnoScannerNextTask = 'SCAN';
 let fnoStrategyScanRotation = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
-const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0 };
+const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0, warmupLastCompletedSymbol:null, warmupLastFailure:null, warmupLastRetryAt:null };
 function startFnoStrategyScanner() {
   if (fnoStrategyScanTimer) return;
   fnoStrategyScanStats.status='RUNNING';
@@ -75,12 +75,17 @@ function startFnoStrategyScanner() {
         await getDailyHistory(warmupSymbol);
         await getFifteenMinuteHistory(warmupSymbol);
         fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
+        fnoStrategyScanStats.warmupLastCompletedSymbol=warmupSymbol;
+        fnoStrategyScanStats.warmupLastFailure=null;
+        fnoStrategyScanStats.warmupLastRetryAt=null;
         fnoStrategyScanStats.warmupCompletedCount++;
       } catch(error) {
         const retry=fnoResearchWarmupQueue.fail(warmupSymbol);
         fnoStrategyScanStats.warmupStatus=retry.retry?'RETRY_QUEUED':'BLOCKED';
-        fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180)+
-          (retry.retry?(' · retry '+retry.attempt+'/'+retry.maxAttempts):' · retry limit exhausted; candidate remains unqualified');
+        fnoStrategyScanStats.warmupLastFailure=String(error.message||'Research history warmup failed').slice(0,180);
+        fnoStrategyScanStats.warmupLastRetryAt=retry.retry?new Date(Date.now()+retry.retryAfterMs).toISOString():null;
+        fnoStrategyScanStats.lastReason=fnoStrategyScanStats.warmupLastFailure+
+          (retry.retry?(' · retry '+retry.attempt+'/'+retry.maxAttempts+' after '+Math.ceil(retry.retryAfterMs/1000)+'s'):' · retry limit exhausted; candidate remains unqualified');
         if(retry.retry) fnoStrategyScanStats.warmupRetryCount++;
         else fnoStrategyScanStats.warmupRejectedCount++;
       } finally {
@@ -333,6 +338,12 @@ const server = http.createServer(async (req,res) => {
       if (!validateNseSymbol(body.underlying) || !['LONG','SHORT'].includes(body.side)) {
         return send(res,400,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Verified NSE underlying and confirmed LONG/SHORT direction are required'});
       }
+      const requestedExpiry = Number(body.timestamp);
+      const requestedExpirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
+        ? (requestedExpiry > 1e12 ? requestedExpiry / 1000 : requestedExpiry) : null;
+      if (!requestedExpirySeconds || !Number.isFinite(new Date(requestedExpirySeconds * 1000).getTime())) {
+        return send(res,400,{status:'AUTO_OPTION_EXPIRY_REQUIRED',reason:'Select a valid FYERS option expiry before automatic CE/PE selection'});
+      }
       const beforeChain = getMarketData();
       if (!beforeChain.selectedUnderlying?.fresh || beforeChain.selectedUnderlying.symbol !== body.underlying) {
         return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Fresh selected-underlying FYERS tick is required before strike selection'});
@@ -350,14 +361,11 @@ const server = http.createServer(async (req,res) => {
       });
       if (selection.status !== 'CANDIDATE_SELECTED') return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:selection.reason});
       const contract = getVerifiedOptionContract(selection.symbol);
-      const requestedExpiry = Number(body.timestamp);
-      const requestedExpirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
-        ? (requestedExpiry > 1e12 ? requestedExpiry / 1000 : requestedExpiry) : null;
       const expiryDay = value => new Date((Number(value) + 19800) * 1000).toISOString().slice(0,10);
       const expectedUnderlying=body.underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
       if (contract.side !== selection.side || contract.strike !== selection.strike ||
           contract.underlying !== expectedUnderlying ||
-          (requestedExpirySeconds && expiryDay(contract.expiry) !== expiryDay(requestedExpirySeconds))) {
+          expiryDay(contract.expiry) !== expiryDay(requestedExpirySeconds)) {
         return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate underlying, side, strike or expiry does not match the official active contract master'});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);
@@ -380,7 +388,7 @@ const server = http.createServer(async (req,res) => {
       const contract = getVerifiedOptionContract(body.symbol);
       const selectedUnderlying=getMarketData().selectedUnderlying;
       const expectedUnderlying=String(selectedUnderlying?.symbol||'').replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
-      if(!expectedUnderlying||contract.underlying!==expectedUnderlying) {
+      if(!selectedUnderlying?.fresh||!expectedUnderlying||contract.underlying!==expectedUnderlying) {
         return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:'Option contract underlying does not match the currently selected FYERS NSE underlying'});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);

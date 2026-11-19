@@ -39,7 +39,7 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
     blockedCount: evaluations.filter(row => row.status === 'DATA_UNAVAILABLE_NO_TRADE').length,
     candidateCount: candidates.length,
     coverageMode: 'ROLLING_FO_UNIVERSE_NOT_SIMULTANEOUS',
-    top3: candidates.slice(0,3),
+    top3: candidates.slice(0,3).map((item,index)=>({...item,rank:index+1})),
     evaluations
   };
 }

@@ -358,6 +358,22 @@ function renderOptionStrikes(underlyingPrice) {
   }
   selectOptionContract(select.value);
 }
+async function evaluateSelectedSetup() {
+  const state=document.querySelector('#setup-state');
+  state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
+  for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
+  try {
+    const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol})});
+    const setup=await response.json();
+    if(setup.status==='SETUP_CONFIRMED') {
+      document.querySelector('#setup-entry').textContent='₹'+showNumber(setup.entry);
+      document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
+      document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
+      document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
+      state.textContent=setup.strategy+' · '+setup.optionSide+' · VERIFIED'; state.dataset.state='confirmed';
+    } else { state.textContent=(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked'; }
+  } catch(error) { state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
+}
 async function selectOptionContract(symbol) {
   if (!symbol) return;
   const status = document.querySelector('#option-status');
@@ -372,6 +388,7 @@ async function selectOptionContract(symbol) {
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
     status.textContent = `${result.contract.side} · ${showNumber(result.contract.strike)} · MASTER VERIFIED · LIVE TICK PENDING`;
+    evaluateSelectedSetup();
   } catch (error) {
     selectedContractSymbol = null;
     document.querySelector('#option-quantity').textContent = '—';

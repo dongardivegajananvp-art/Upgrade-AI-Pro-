@@ -1,1 +1,17 @@
-{"name":"Upgrade AI Pro","short_name":"Upgrade AI Pro","start_url":"/","display":"standalone","background_color":"#0b1220","theme_color":"#0b1220"}
+{
+  "id": "/",
+  "name": "Upgrade AI Pro",
+  "short_name": "AI Pro",
+  "description": "Upgrade AI Pro NSE live trading workstation",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    { "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

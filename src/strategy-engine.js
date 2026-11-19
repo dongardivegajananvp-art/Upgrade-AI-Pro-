@@ -20,7 +20,7 @@ function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, co
   return { completed, lastClosed, ageSeconds, fresh, contiguous };
 }
 
-function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
+export function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
   const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&
     Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&
     now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&

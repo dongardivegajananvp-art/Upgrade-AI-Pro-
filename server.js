@@ -43,7 +43,7 @@ let fnoStrategyScanCursor = 0;
 let fnoStrategyScanRotation = null;
 let fnoResearchWarmupUsed = false;
 let fnoResearchWarmupQueue = [];
-const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE' };
+const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE' };
 function startFnoStrategyScanner() {
   if (fnoStrategyScanTimer) return;
   fnoStrategyScanStats.status='RUNNING';
@@ -55,6 +55,7 @@ function startFnoStrategyScanner() {
     if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
       fnoStrategyScanRotation=snapshot.rotationIndex;
       fnoStrategyScanCursor=0;
+      fnoStrategyScanStats.sliceScannedCount=0;
       fnoResearchWarmupUsed=false;
       fnoResearchWarmupQueue=[];
     }
@@ -76,6 +77,7 @@ function startFnoStrategyScanner() {
       return;
     }
     const symbol=active[fnoStrategyScanCursor++];
+    fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     try {
       const history=await getFiveMinuteHistory(symbol);

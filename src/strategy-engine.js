@@ -20,7 +20,27 @@ function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, co
   return { completed, lastClosed, ageSeconds, fresh, contiguous };
 }
 
-function analyzeEarlyWatch(){ return { status:'NO_WATCH' }; }
+function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
+  const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&
+    Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&
+    now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&
+    now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
+  if(!fresh||!Array.isArray(candles)||candles.length<50||!contiguousWindow(candles,50)||
+     !Array.isArray(dailyCandles)||dailyCandles.length<50||
+     !Array.isArray(fifteenMinuteCandles)||fifteenMinuteCandles.length<50) return {status:'NO_WATCH',reason:'Fresh tick and contiguous 5m plus verified 50-candle daily/15m context are required'};
+  const trend=rows=>{
+    const closes=rows.map(row=>Number(row.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);
+    if(!Number.isFinite(e20)||!Number.isFinite(e50))return 'NEUTRAL';
+    return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';
+  };
+  const daily=trend(dailyCandles),fifteen=trend(fifteenMinuteCandles),last=candles.at(-1);
+  const price=Number(tick.price);
+  if(daily==='BULLISH'&&fifteen==='BULLISH'&&price>Number(last.high))
+    return {status:'WATCH',side:'LONG',trigger:'LIVE_PRICE_ABOVE_LAST_COMPLETED_5M_HIGH',level:Number(last.high),price,reason:'Early momentum watch only; completed-candle strategy confirmation and fresh option gates are still mandatory'};
+  if(daily==='BEARISH'&&fifteen==='BEARISH'&&price<Number(last.low))
+    return {status:'WATCH',side:'SHORT',trigger:'LIVE_PRICE_BELOW_LAST_COMPLETED_5M_LOW',level:Number(last.low),price,reason:'Early momentum watch only; completed-candle strategy confirmation and fresh option gates are still mandatory'};
+  return {status:'NO_WATCH',reason:'No live breakout watch aligned with daily and 15-minute trend'};
+}
 
 // Deterministic, explainable multi-timeframe research from verified FYERS OHLCV.
 // This is not a claim of an external generative-AI model or paid AI service.
@@ -49,6 +69,10 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
   const pressure=setup?.breakoutConfirmation?.pressure || (setup?.side==='LONG'?'BUYING':'SELLING');
   const volume=Number(candles.find(c=>Number(c.time)===Number(setup?.confirmedAt))?.volume);
   const aligned=t=>t===expected;
+  const derivedRegime=dailyTrend===fifteenTrend&&dailyTrend!=='NEUTRAL'?'TRENDING_'+dailyTrend:
+    (dailyTrend==='NEUTRAL'&&fifteenTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
+  const regime=String(marketRegime||derivedRegime).toUpperCase();
+  const regimePenalty=regime.includes('RANGE')?12:regime.includes('MIXED')?8:0;
   const points={
     dailyTrend:aligned(dailyTrend)?20:dailyTrend==='NEUTRAL'?8:0,
     fifteenMinuteTrend:aligned(fifteenTrend)?20:fifteenTrend==='NEUTRAL'?8:0,
@@ -58,20 +82,23 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     liveTickFresh:5,
     strategyEvidence:setup?.strategy?20:0
   };
-  const qualityScore=Object.values(points).reduce((a,b)=>a+b,0);
-  // In-app AI research chooses a risk multiple from verified multi-timeframe
-  // alignment. Price levels remain deterministic and independently validated.
+  const rawQualityScore=Object.values(points).reduce((a,b)=>a+b,0);
+  const qualityScore=Math.max(0,rawQualityScore-regimePenalty);
+  // Research grade plus regime determines the target multiple. In mixed/range
+  // regimes stay at 2R; never lower the hard minimum or bypass price validation.
   const alignedFrames=[dailyTrend,fifteenTrend,fiveTrend].filter(value=>value===expected).length;
-  const targetR=qualityScore>=85&&alignedFrames===3?2.5:qualityScore>=70&&alignedFrames>=2?2.25:2;
+  const directionalRegime=regime.startsWith('TRENDING_')&&regime.endsWith(expected);
+  const targetR=directionalRegime&&qualityScore>=85&&alignedFrames===3?2.5:
+    !regime.includes('RANGE')&&!regime.includes('MIXED')&&qualityScore>=70&&alignedFrames>=2?2.25:2;
   const targetRationale=targetR===2.5?'A-grade research: all three timeframes align; 2.5R objective':
     targetR===2.25?'B-grade research: at least two timeframes align; 2.25R objective':
     'Conservative research objective: minimum 2R';
-  const regime=dailyTrend===fifteenTrend&&dailyTrend!=='NEUTRAL'?'TRENDING_'+dailyTrend:(dailyTrend==='NEUTRAL'&&fifteenTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
   const evidence=['Daily trend: '+dailyTrend,'15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,
     'Market regime: '+regime,'Breakout candle pressure: '+pressure,'Breakout candle volume: '+(Number.isFinite(volume)&&volume>0?'verified':'missing'),'FYERS tick: fresh'];
-  return {status:'COMPLETE',qualityScore,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
+  return {status:'COMPLETE',qualityScore,rawQualityScore,regimePenalty,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
     direction:setup.side,timeframes:{daily:dailyTrend,fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},
-    points,evidence,marketRegime:marketRegime||regime,targetR,targetRationale,targetMethod:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',
+    points,evidence,marketRegime:regime,targetR,targetRationale,targetMethod:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',
+    confidenceCalibration:{status:'PENDING_REALIZED_OUTCOME_SAMPLE',sampleCount:0,reason:'Do not label research quality as win probability until verified trade outcomes exist'},
     invalidation:'A completed 5-minute close back through the confirmed breakout level invalidates this research setup',
     source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',asOfExchangeTime:Number(tick.exchangeTime)};
 }
@@ -425,7 +452,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and verified breakout-candle volume are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
     if(!evaluated.length)return {...fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', ')),strategyLedger};
     if(researchEnabled){
-      const watch=analyzeEarlyWatch({candles:rows,dailyCandles,tick:underlyingTick,now});
+      const watch=analyzeEarlyWatch({candles:rows,dailyCandles,fifteenMinuteCandles,tick:underlyingTick,now});
       if(watch.status==='WATCH')return{status:'EARLY_WATCH',...watch,underlyingPrice:number(underlyingTick.price),evaluatedStrategies:evaluated,blockedStrategies:blocked};
     }
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};

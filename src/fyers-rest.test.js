@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateNseSymbol, normalizeFiveMinuteCandles } from './fyers-rest.js';
+import { validateNseSymbol, normalizeFiveMinuteCandles, buildFyersUrl } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
@@ -25,4 +25,9 @@ test('history normalization returns only valid completed NSE-session candles', (
   const candles = normalizeFiveMinuteCandles(rows, now);
   assert.deepEqual(candles.map(c => c.time), [first, first + 300]);
   assert.ok(candles.every(c => c.completed && c.source === 'FYERS_HISTORY'));
+});
+
+test('FYERS API paths preserve the data and v3 base path', () => {
+  assert.equal(buildFyersUrl('https://api-t1.fyers.in/data','/history',{symbol:'NSE:SBIN-EQ'}).pathname, '/data/history');
+  assert.equal(buildFyersUrl('https://api-t1.fyers.in/api/v3','/positions').pathname, '/api/v3/positions');
 });

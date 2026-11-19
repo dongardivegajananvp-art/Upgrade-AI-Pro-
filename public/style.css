@@ -2,3 +2,5 @@
 .account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.account-grid>div{min-width:0}.account-grid>div>strong{font-size:10px;letter-spacing:.08em;color:#a8bad2}.account-data{display:grid;gap:7px;margin-top:9px;color:#91a2ba;font-size:12px;overflow-wrap:anywhere}.account-line{padding:7px 9px;border:1px solid #26364d;border-radius:7px;background:#0c1727}@media(max-width:700px){.account-grid{grid-template-columns:1fr}}
 
 .mover-card{font:inherit;text-align:left;cursor:pointer;appearance:none;color:#e8eef9}.mover-card:hover,.mover-card:focus-visible{border-color:#3b82f6;outline:none;background:#12213a}.mover-card span[data-state="up"]{color:#32c48d}.mover-card span[data-state="down"]{color:#ef6b73}.chart-area svg{width:100%;height:100%;display:block}
+
+.option-pill{background:#0c1727;cursor:pointer;appearance:none}.option-pill.active{border-color:#3b82f6;color:#bfdbfe;background:#172554}.option-field select{display:block;max-width:140px;margin-top:5px;padding:5px 7px;border:1px solid #30415a;border-radius:6px;background:#0c1727;color:#e8eef9;font:inherit;font-size:12px}

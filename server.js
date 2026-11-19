@@ -19,6 +19,7 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
   if (req.method === 'GET' && url.pathname === '/api/status') return send(res,200,{
     app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(),
+    configuration:{ appIdConfigured:Boolean(process.env.FYERS_APP_ID?.trim()), redirectUriConfigured:Boolean(process.env.FYERS_REDIRECT_URI?.trim()), secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim()) },
     scanner:'NOT_STARTED', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
   });
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {

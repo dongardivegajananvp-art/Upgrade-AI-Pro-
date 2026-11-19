@@ -266,7 +266,16 @@ async function selectSymbol(symbol, livePrice = null) {
     // REST scheduler is shared and paced; background daily/15m history must not
     // sit ahead of the user's option-chain request in that queue.
     await loadOptionChain(symbol, selectedUnderlyingPrice);
-    fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' }).catch(() => {});
+    // Warm daily/15m caches after the user-facing option-chain request, then
+    // calculate underlying research independently of option-premium availability.
+    const contextResponse = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+    const contextPayload = await contextResponse.json();
+    let researchPayload = contextPayload;
+    if (contextResponse.ok) {
+      const researchResponse = await fetch('/api/research?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+      researchPayload = await researchResponse.json();
+    }
+    if (selectedSymbol === symbol) renderResearchResults(researchPayload);
     title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;
   } catch (error) {
     area.replaceChildren();
@@ -540,7 +549,7 @@ async function evaluateSelectedSetup() {
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
-    renderResearchResults(setup);
+    if (Array.isArray(setup.researchRanking) && setup.researchRanking.length) renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
     if(setup.status==='SETUP_CONFIRMED') {

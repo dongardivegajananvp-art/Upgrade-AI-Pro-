@@ -57,6 +57,7 @@ export function createResearchWarmupQueue({ maxSize = 500, maxAttempts = 3, retr
     },
     get size() { return pending.size; },
     has(symbol) { return pending.has(symbol); },
+    hasReady(now = Date.now()) { return items.some(symbol => (retryAt.get(symbol) || 0) <= now); },
     snapshot() { return [...items]; },
     getRetryAt(symbol) { return retryAt.get(symbol) || null; }
   };

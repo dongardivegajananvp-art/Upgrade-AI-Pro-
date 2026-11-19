@@ -46,11 +46,13 @@ function accept(item) {
   const exchangeTime = asEpochSeconds(item.exch_feed_time ?? item.last_traded_time ?? item.timestamp ?? item.tt);
   if (!Number.isFinite(price) || price <= 0 || !exchangeTime) return;
   const previousClose = Number(item.prev_close_price ?? item.prev_close ?? item.pc);
-  ticks.set(symbol, {
-    symbol, price, exchangeTime, receivedAt: Date.now(),
-    change: Number.isFinite(previousClose) && previousClose > 0 ? price - previousClose : null,
-    changePercent: Number.isFinite(previousClose) && previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null
-  });
+  const fallbackChange = Number.isFinite(previousClose) && previousClose > 0 ? price - previousClose : null;
+  const fallbackPercent = Number.isFinite(previousClose) && previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null;
+  const reportedChange = item.ch ?? item.change;
+  const reportedPercent = item.chp ?? item.changePercent;
+  const change = reportedChange !== undefined && reportedChange !== null && Number.isFinite(Number(reportedChange)) ? Number(reportedChange) : fallbackChange;
+  const changePercent = reportedPercent !== undefined && reportedPercent !== null && Number.isFinite(Number(reportedPercent)) ? Number(reportedPercent) : fallbackPercent;
+  ticks.set(symbol, { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null });
 }
 function nextSlice() {
   if (!universe.length) return [];

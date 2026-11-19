@@ -75,8 +75,10 @@ const server = http.createServer(async (req,res) => {
     }
   }
   if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
-  if (req.method === 'GET' && url.pathname === '/api/status') return send(res,200,{
-    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(), marketData:getMarketData(), rest:getRestDiagnostics(),
+  if (req.method === 'GET' && url.pathname === '/api/status') {
+    const market = getMarketData();
+    return send(res,200,{
+    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(market.selectedUnderlying), auth:getAuthStatus(), marketData:market, rest:getRestDiagnostics(),
     configuration:{
       appIdConfigured:Boolean(process.env.FYERS_APP_ID?.trim()),
       appIdHasNewFormat: Boolean(process.env.FYERS_APP_ID?.trim().endsWith('-200')),
@@ -84,8 +86,9 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    fnoCoverage:getMarketData().fno, scanner:'ROTATING_FNO_COVERAGE_ONLY · NOT FULL-UNIVERSE SCAN', strategyEngine:'NINE_STRATEGY_SELECTED_SYMBOL_EVALUATION · LIVE SCANNER NOT YET FULLY PROVEN', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
-  });
+    fnoCoverage:market.fno, scanner:'ROTATING_FNO_COVERAGE_ONLY · NOT FULL-UNIVERSE SCAN', strategyEngine:'NINE_STRATEGY_SELECTED_SYMBOL_EVALUATION · LIVE SCANNER NOT YET FULLY PROVEN', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    });
+  }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
     console.info('[FYERS_OAUTH] login route reached');
     try {

@@ -94,7 +94,7 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');
   const count = Number(strikecount);
   if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error('Option-chain strike count must be from 1 to 50');
-  return fyersGet(DATA_BASE, '/optionchain', { symbol, strikecount: count, timestamp, greeks: '0' });
+  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' });
 }
 export async function getFyersPositions() { return fyersGet(API_BASE, '/positions'); }
 export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders'); }

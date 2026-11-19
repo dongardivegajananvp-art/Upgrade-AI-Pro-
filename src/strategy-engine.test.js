@@ -88,3 +88,29 @@ test('multi-timeframe research refuses to invent a score when 15m history is inc
   assert.equal(result.status,'UNAVAILABLE');
   assert.match(result.reason,/50 verified 15-minute/);
 });
+
+
+test('diagnostic ledger reports all nine strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
+  const now=1800000000000;
+  const result=detectNineStrategySetup({underlyingCandles:[],underlyingTick:null,now});
+  assert.equal(result.strategyLedger.length,9);
+  assert.ok(result.strategyLedger.every(row=>row.status==='BLOCKED'&&row.reason));
+  assert.deepEqual(result.strategyLedger.map(row=>row.strategy),STRATEGIES);
+});
+
+test('direction-aware option selection is not actionable until independent live gates pass', async () => {
+  const { chooseDirectionalOption } = await import('./option-selection.js');
+  const rows=[
+    {symbol:'NSE:ABC100CE',option_type:'CE',strike_price:100},
+    {symbol:'NSE:ABC105CE',option_type:'CE',strike_price:105},
+    {symbol:'NSE:ABC100PE',option_type:'PE',strike_price:100}
+  ];
+  const call=chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'LONG'});
+  const put=chooseDirectionalOption({optionsChain:rows,underlyingPrice:101,side:'SHORT'});
+  assert.equal(call.side,'CE');
+  assert.equal(call.strike,105);
+  assert.equal(put.side,'PE');
+  assert.equal(put.strike,100);
+  assert.equal(call.actionable,false);
+  assert.equal(chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'FLAT'}).status,'UNAVAILABLE');
+});

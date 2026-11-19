@@ -587,7 +587,7 @@ function renderResearchResults(setup) {
     status.textContent=setup?.research?.status==='UNAVAILABLE'?'RESEARCH DATA INCOMPLETE':'NO VERIFIED RESEARCH RANKING';
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
-    container.append(note);return;
+    container.append(note);
   }
   status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';
   for(const item of ranking) {
@@ -600,6 +600,16 @@ function renderResearchResults(setup) {
     const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
     const invalid=document.createElement('small');invalid.textContent='Invalidation: '+item.invalidation;
     card.append(head,tf,evidence,invalid);container.append(card);
+  }
+  const ledger=Array.isArray(setup?.strategyLedger)?setup.strategyLedger:[];
+  if(ledger.length) {
+    const heading=document.createElement('strong');heading.textContent='NINE-STRATEGY DIAGNOSTIC LEDGER';container.append(heading);
+    for(const item of ledger) {
+      const row=document.createElement('div');row.className='strategy-ledger-row';
+      const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+      const reason=document.createElement('small');reason.textContent=item.reason||'No diagnostic reason returned';
+      row.append(label,reason);container.append(row);
+    }
   }
 }
 async function evaluateSelectedSetup() {
@@ -624,7 +634,7 @@ async function evaluateSelectedSetup() {
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
-    if (Array.isArray(setup.researchRanking) && setup.researchRanking.length) renderResearchResults(setup);
+    if (Array.isArray(setup.researchRanking) || Array.isArray(setup.strategyLedger)) renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
     if(setup.status==='SETUP_CONFIRMED') {

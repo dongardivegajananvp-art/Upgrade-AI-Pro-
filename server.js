@@ -240,8 +240,13 @@ const server = http.createServer(async (req,res) => {
       });
       if (selection.status !== 'CANDIDATE_SELECTED') return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:selection.reason});
       const contract = getVerifiedOptionContract(selection.symbol);
-      if (contract.side !== selection.side || contract.strike !== selection.strike) {
-        return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate does not match the official active contract master'});
+      const requestedExpiry = Number(body.timestamp);
+      const requestedExpirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
+        ? (requestedExpiry > 1e12 ? requestedExpiry / 1000 : requestedExpiry) : null;
+      const expiryDay = value => new Date((Number(value) + 19800) * 1000).toISOString().slice(0,10);
+      if (contract.side !== selection.side || contract.strike !== selection.strike ||
+          (requestedExpirySeconds && expiryDay(contract.expiry) !== expiryDay(requestedExpirySeconds))) {
+        return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate side, strike or expiry does not match the official active contract master'});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);
       if (subscription?.status === 'SUBSCRIPTION_FAILED') {

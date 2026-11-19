@@ -18,6 +18,9 @@ test('fixed premium plan enforces breakout, chase block and exact 1:2', () => {
   const plan = buildFixedPremiumPlan({ breakoutLevel: 100, tickSize: 0.05, livePremium: 100.05, swingLow: 99 });
   assert.equal(plan.status, 'SETUP_CONFIRMED');
   assert.equal(plan.rr, 2);
+  assert.equal(plan.entry,100.05);
+  assert.equal(plan.stopLoss,98.95);
+  assert.equal(plan.target,102.25);
   assert.equal(buildFixedPremiumPlan({ breakoutLevel:100,tickSize:0.05,livePremium:102,swingLow:99 }).status, 'NO_TRADE');
 });
 test('duplicate active underlying or option contract is rejected', () => {
@@ -113,4 +116,16 @@ test('direction-aware option selection is not actionable until independent live 
   assert.equal(put.strike,100);
   assert.equal(call.actionable,false);
   assert.equal(chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'FLAT'}).status,'UNAVAILABLE');
+});
+
+
+test('diagnostic ledger uses strategy-specific rejection reasons when verified windows are available', () => {
+  const now=Date.parse('2026-11-19T05:00:00Z');
+  const start=Math.floor(now/1000)-60*300;
+  const candles=Array.from({length:60},(_,i)=>({time:start+i*300,open:100,high:100.5,low:99.5,close:100,volume:100}));
+  const result=detectNineStrategySetup({underlyingCandles:candles,underlyingTick:{price:100,exchangeTime:now/1000,receivedAt:now},now});
+  assert.equal(result.strategyLedger.length,9);
+  assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED'].includes(row.status)&&row.reason));
+  assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
+  assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('daily candles')));
 });

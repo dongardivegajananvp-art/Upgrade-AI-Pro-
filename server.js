@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
+import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
 import { evaluateNineStrategies } from './src/strategy-engine.js';
@@ -27,8 +27,37 @@ function send(res, status, body, type='application/json; charset=utf-8') {
   if (Buffer.isBuffer(body) || body instanceof Uint8Array) return res.end(body);
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
+function parseCookies(header='') {
+  return Object.fromEntries(header.split(';').map(part=>part.trim()).filter(Boolean).map(part=>{
+    const i=part.indexOf('=');
+    return i<0 ? [part,''] : [part.slice(0,i),part.slice(i+1)];
+  }));
+}
+const consumedOAuthStates = new Set();
+let fnoUniverseLoadPromise = null;
+function ensureFyersMarketStarted() {
+  const market = startMarketSocket();
+  if (!fnoUniverseLoadPromise) {
+    fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
+      const coverage = setFnoUniverse(universe);
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount);
+      return true;
+    }).catch(error => {
+      fnoUniverseLoadPromise = null;
+      console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
+      return false;
+    });
+  }
+  return market;
+}
 const server = http.createServer(async (req,res) => {
   const url = new URL(req.url || '/', 'http://localhost');
+  const requestCookies = parseCookies(req.headers.cookie || '');
+  if (requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session, {
+    appId:process.env.FYERS_APP_ID, appSecret:process.env.FYERS_SECRET_KEY
+  })) {
+    ensureFyersMarketStarted();
+  }
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getMarketData());
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
@@ -60,6 +89,14 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
     console.info('[FYERS_OAUTH] login route reached');
     try {
+      const auth = getAuthStatus();
+      if (auth.tokenStored) {
+        ensureFyersMarketStarted();
+        const session = createSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
+        const sessionCookie = `fyers_session=${session.value}; Max-Age=${session.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`;
+        console.info('[FYERS_OAUTH] existing authenticated session reused; token exchange skipped');
+        res.writeHead(302,{location:'/?fyers=session-restored','set-cookie':sessionCookie,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+      }
       const login = createLoginUrl({ appId:process.env.FYERS_APP_ID, redirectUri:process.env.FYERS_REDIRECT_URI });
       console.info('[FYERS_OAUTH] redirect generated; app id configured:', Boolean(process.env.FYERS_APP_ID?.trim()), 'redirect matches expected:', process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI);
       res.writeHead(302,{location:login.url,'set-cookie':`fyers_oauth_state=${login.state}; Max-Age=600; Path=/api/fyers; HttpOnly; Secure; SameSite=Lax`,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
@@ -72,13 +109,15 @@ const server = http.createServer(async (req,res) => {
     console.info('[FYERS_OAUTH] callback route reached');
     const state = url.searchParams.get('state');
     const authCode = url.searchParams.get('auth_code');
-    const cookies = Object.fromEntries((req.headers.cookie || '').split(';').map(part=>part.trim()).filter(Boolean).map(part=>{const i=part.indexOf('=');return [part.slice(0,i),part.slice(i+1)];}));
+    const cookies = parseCookies(req.headers.cookie || '');
     const clearStateCookie = 'fyers_oauth_state=; Max-Age=0; Path=/api/fyers; HttpOnly; Secure; SameSite=Lax';
-    if (!verifyLoginState(state,cookies.fyers_oauth_state)) {
-      console.warn('[FYERS_OAUTH] callback rejected: state cookie missing or mismatched');
+    if (!verifyLoginState(state,cookies.fyers_oauth_state) || consumedOAuthStates.has(state)) {
+      console.warn('[FYERS_OAUTH] callback rejected: state missing, mismatched or already consumed');
       res.setHeader('set-cookie',clearStateCookie);
-      return send(res,400,{status:'REJECTED',reason:'OAuth state cookie is missing or does not match. Start Connect again.'});
+      return send(res,400,{status:'REJECTED',reason:'OAuth state is missing, mismatched or already used. Start Connect once again.'});
     }
+    consumedOAuthStates.add(state);
+    if (consumedOAuthStates.size > 2000) consumedOAuthStates.delete(consumedOAuthStates.values().next().value);
     res.setHeader('set-cookie',clearStateCookie);
     if (!authCode) {
       console.warn('[FYERS_OAUTH] callback missing auth_code');
@@ -87,15 +126,11 @@ const server = http.createServer(async (req,res) => {
     try {
       await exchangeAuthCode({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY,authCode});
       console.info('[FYERS_OAUTH] token exchange succeeded; token value withheld');
-      const market = startMarketSocket();
-      console.info('[FYERS_DATA] socket start requested; status:', market.status);
-      loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
-        const coverage = setFnoUniverse(universe);
-        console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount);
-      }).catch(error => {
-        console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
-      });
-      res.writeHead(302,{location:'/?fyers=connected','cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+      const session = createSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
+      const sessionCookie = `fyers_session=${session.value}; Max-Age=${session.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`;
+      const market = ensureFyersMarketStarted();
+      console.info('[FYERS_DATA] socket start requested; status:', market.status, 'encrypted session cookie issued');
+      res.writeHead(302,{location:'/?fyers=connected','set-cookie':[clearStateCookie,sessionCookie],'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
     } catch (error) {
       const d = error.fyersDiagnostics || {};
       console.error('[FYERS_OAUTH] token exchange failed:', error.message,

@@ -8,6 +8,9 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
 // Three indices + twenty rotating equities + one selected option = at most 24.
 const MAX_UNDERLYING_SLOTS = 20;
+// Twelve fresh 5-minute history reads per 60-second slice fit the existing
+// FYERS REST 4-second scheduler. Eight symbols overlap the next socket slice.
+const SCAN_PER_SLICE = 12;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
 let socketStatus = 'NOT_STARTED';
@@ -122,7 +125,7 @@ function applyFnoRotation() {
     }
   }
   activeFnoSymbols = next;
-  rotationIndex = universe.length > MAX_UNDERLYING_SLOTS ? (rotationIndex + MAX_UNDERLYING_SLOTS) % universe.length : 0;
+  rotationIndex = universe.length > MAX_UNDERLYING_SLOTS ? (rotationIndex + SCAN_PER_SLICE) % universe.length : 0;
 }
 export function setFnoUniverse(items) {
   const unique = new Map();
@@ -268,6 +271,7 @@ export function getFnoUniverseSnapshot() {
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,
+    scanPerSlice: SCAN_PER_SLICE,
     symbolCap: 100
   };
 }

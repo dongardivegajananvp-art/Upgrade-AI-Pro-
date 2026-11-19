@@ -34,6 +34,10 @@ function tickStatusText(md, freshCount) {
 function showNumber(value, digits=2) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
 }
+function showExpiry(value) {
+  const stamp=Number(value);
+  return Number.isFinite(stamp)&&stamp>0?new Date((stamp+19800)*1000).toISOString().slice(0,10):'—';
+}
 async function refreshUniverseScan() {
   if(universeScanRunning) return;
   universeScanRunning=true;lastUniverseScanRefresh=Date.now();
@@ -706,7 +710,7 @@ async function autoSelectDirectionalOption(optionSide) {
     if(optionChainRows.some(row=>row.symbol===selectedContractSymbol)) strikeSelect.value=selectedContractSymbol;
     document.querySelector('#option-quantity').textContent=showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent='WAITING FOR LIVE OPTION TICK';
-    status.textContent='AUTO '+result.contract.side+' · '+showNumber(result.contract.strike)+' · '+result.contract.expiry+' · MASTER VERIFIED · '+(result.subscription?.status||'SUBSCRIPTION PENDING');
+    status.textContent='AUTO '+result.contract.side+' · STRIKE '+showNumber(result.contract.strike)+' · EXP '+showExpiry(result.contract.expiry)+' · LOT '+showNumber(result.contract.lotSize,0)+' · TICK '+showNumber(result.contract.tickSize,4)+' · MASTER VERIFIED · '+(result.subscription?.status||'SUBSCRIPTION PENDING');
     setupEvaluationDone=false;
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch(error) {
@@ -731,7 +735,7 @@ async function selectOptionContract(symbol) {
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
     const subscriptionState = result.subscription?.status || 'SUBSCRIPTION_STATE_UNAVAILABLE';
-    status.textContent = result.contract.side + ' · ' + showNumber(result.contract.strike) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
+    status.textContent = result.contract.side + ' · STRIKE ' + showNumber(result.contract.strike) + ' · EXP ' + showExpiry(result.contract.expiry) + ' · LOT ' + showNumber(result.contract.lotSize,0) + ' · TICK ' + showNumber(result.contract.tickSize,4) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch (error) {
     selectedContractSymbol = null;

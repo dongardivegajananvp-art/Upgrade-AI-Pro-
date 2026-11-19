@@ -104,7 +104,7 @@ function pivotLow(rows, i, width=2) {
 // This is a shared entry-quality condition inside the existing nine strategies,
 // not a tenth strategy. For retest setups, validate the original level-crossing
 // candle; for trend/pullback setups without a fresh level cross, validate trigger candle.
-export function confirmBreakoutPressureVolume(rows, side, lookback = 20, volumeMultiple = 1.5, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
+export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
   if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) return { ok: false, reason: 'Verified completed OHLCV candles and direction are required' };
   const signalIndex = signalTime == null ? rows.length - 1 : rows.findIndex(c => number(c.time) === number(signalTime));
   if (signalIndex < 0) return { ok: false, reason: 'The strategy trigger candle is missing from verified history' };
@@ -118,23 +118,16 @@ export function confirmBreakoutPressureVolume(rows, side, lookback = 20, volumeM
     }
   }
   if (requireLevelCross && !levelCrossFound) return { ok: false, reason: 'Original breakout/breakdown candle could not be verified; retest candle cannot substitute' };
-  if (breakoutIndex < lookback) return { ok: false, reason: 'Breakout candle needs 20 prior completed candles for volume comparison' };
-  const candle = rows[breakoutIndex], prior = rows.slice(breakoutIndex - lookback, breakoutIndex);
-  if (![...prior, candle].every(c => validOhlcv(c) && finite(c.volume) && number(c.volume) > 0)) return { ok: false, reason: 'Breakout candle and prior 20 completed candles must have verified positive volume' };
-  const volumeWindow = [...prior, candle];
-  if (!contiguousWindow(volumeWindow, volumeWindow.length)) return { ok: false, reason: 'Breakout candle and its 20-candle volume baseline are not contiguous 5-minute trading candles' };
-  const averageVolume = prior.reduce((sum, c) => sum + number(c.volume), 0) / lookback;
-  const volumeRatio = number(candle.volume) / averageVolume, range = number(candle.high) - number(candle.low);
-  if (!(range > 0) || !(averageVolume > 0)) return { ok: false, reason: 'Breakout candle range or reference volume is invalid' };
-  const body = number(candle.close) - number(candle.open), bodyRatio = Math.abs(body) / range;
-  const closeLocation = (number(candle.close) - number(candle.low)) / range;
-  const pressureOk = side === 'LONG' ? body > 0 && bodyRatio >= 0.55 && closeLocation >= 0.75 : body < 0 && bodyRatio >= 0.55 && closeLocation <= 0.25;
-  const volumeOk = volumeRatio >= volumeMultiple;
+  const candle = rows[breakoutIndex];
+  if (!validOhlcv(candle)) return { ok: false, reason: 'Original breakout/breakdown candle OHLC is missing or invalid' };
+  if (!finite(candle.volume) || number(candle.volume) <= 0) return { ok: false, reason: 'Original breakout/breakdown candle volume is missing or invalid' };
+  const body = number(candle.close) - number(candle.open);
+  const pressureOk = side === 'LONG' ? body > 0 : body < 0;
+  if (!pressureOk) return { ok: false, reason: side === 'LONG' ? 'Buying pressure is absent on the breakout candle' : 'Selling pressure is absent on the breakdown candle' };
   return {
-    ok: pressureOk && volumeOk,
-    reason: !pressureOk ? (side === 'LONG' ? 'Buying pressure is insufficient on the breakout candle' : 'Selling pressure is insufficient on the breakdown candle') : !volumeOk ? 'Breakout candle volume is below 1.5x the prior 20-candle average' : 'Directional pressure and volume expansion confirmed on the actual breakout candle',
-    candleTime: number(candle.time), averageVolume: Number(averageVolume.toFixed(4)), breakoutVolume: number(candle.volume),
-    volumeRatio: Number(volumeRatio.toFixed(2)), bodyRatio: Number(bodyRatio.toFixed(2)), closeLocation: Number(closeLocation.toFixed(2)),
+    ok: true,
+    reason: side === 'LONG' ? 'Buying pressure and verified breakout-candle volume confirmed' : 'Selling pressure and verified breakdown-candle volume confirmed',
+    candleTime: number(candle.time), breakoutVolume: number(candle.volume),
     pressure: side === 'LONG' ? 'BUYING' : 'SELLING'
   };
 }
@@ -348,7 +341,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const rejectedForConfirmation = [];
   const confirmedCandidates = candidates.filter(item => {
     const requireOriginalCross = ['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(item.strategy);
-    const confirmation = confirmBreakoutPressureVolume(rows, item.side, 20, 1.5, item.breakoutLevel, item.confirmedAt, requireOriginalCross);
+    const confirmation = confirmBreakoutPressureVolume(rows, item.side, item.breakoutLevel, item.confirmedAt, requireOriginalCross);
     if (!confirmation.ok) {
       rejectedForConfirmation.push({ strategy: item.strategy, reason: confirmation.reason, metrics: confirmation });
       return false;
@@ -358,7 +351,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   });
   candidates.splice(0, candidates.length, ...confirmedCandidates);
   if(!candidates.length){
-    if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and 1.5x volume confirmation are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked};
+    if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and verified breakout-candle volume are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked};
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
     if(researchEnabled){
       const watch=analyzeEarlyWatch({candles:rows,dailyCandles,tick:underlyingTick,now});

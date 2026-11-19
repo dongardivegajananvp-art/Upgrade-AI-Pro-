@@ -165,7 +165,7 @@ function renderMovers(fno) {
     container.append(note);
     return;
   }
-  document.querySelector('#movers-status').textContent = 'LIVE SLICE · ' + fno.activeCount + '/' + fno.universeCount + ' · 20s · ' + fno.subscriptionCount + '/100 SYMBOLS';
+  document.querySelector('#movers-status').textContent = 'LIVE SLICE · ' + fno.activeCount + '/' + fno.universeCount + ' · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's · ' + fno.subscriptionCount + '/100 SYMBOLS';
   if (!top.length) {
     const note = document.createElement('div');
     note.className = 'empty-inline';

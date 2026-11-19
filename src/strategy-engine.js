@@ -364,25 +364,40 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const u=completed(underlyingCandles,underlyingTick,'Underlying',maxCandleAgeSeconds);
   if(u.error)return fail(u.error);
   const rows=u.rows,last=u.last;
-  const candidates=[], evaluated=[], blocked=[];
-  const consider=(name,eligible,detect)=>{
-    if(!eligible){blocked.push(name);return;}
+  const candidates=[], evaluated=[], blocked=[], strategyLedger=[];
+  const consider=(name,eligible,detect,blockedReason)=>{
+    if(!eligible){
+      blocked.push(name);
+      strategyLedger.push({strategy:name,status:'BLOCKED',reason:blockedReason});
+      return;
+    }
     evaluated.push(name);
-    const result=detect();if(result)candidates.push(result);
+    const result=detect();
+    if(result){
+      candidates.push(result);
+      strategyLedger.push({strategy:name,status:'DETECTED',reason:'Strategy pattern and trigger conditions detected; common confirmation/research gates still apply',side:result.side,confirmedAt:result.confirmedAt});
+    } else {
+      strategyLedger.push({strategy:name,status:'REJECTED',reason:'Required candle window is valid, but this strategy pattern/trigger conditions are not present on the latest completed data'});
+    }
   };
   // Each strategy validates only the candle history it actually consumes.
   // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
-  consider('EMA20_EMA50_TREND',contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute),()=>detectEmaTrend(rows));
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute),()=>detectTopGainerMomentum(rows,isTopGainer));
-  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
+  const w50=contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute);
+  const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
+  const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
+  const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
+  const dailyValid=Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50;
+  consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous');
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles');
+  consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed daily candles from FYERS');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
-  consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows));
-  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute),()=>detectDoublePattern(rows));
-  consider('BULLISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'LONG'));
-  consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
-  consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
-  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)));
+  consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous');
+  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles');
+  consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles');
+  consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles');
+  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles');
+  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous');
   // Apply one identical pressure+volume gate to every strategy signal.
   const rejectedForConfirmation = [];
   const confirmedCandidates = candidates.filter(item => {
@@ -390,6 +405,8 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     const confirmation = confirmBreakoutPressureVolume(rows, item.side, item.breakoutLevel, item.confirmedAt, requireOriginalCross);
     if (!confirmation.ok) {
       rejectedForConfirmation.push({ strategy: item.strategy, reason: confirmation.reason, metrics: confirmation });
+      const row=strategyLedger.find(entry=>entry.strategy===item.strategy);
+      if(row){row.status='REJECTED';row.reason=confirmation.reason;}
       return false;
     }
     item.breakoutConfirmation = confirmation;
@@ -397,20 +414,21 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   });
   candidates.splice(0, candidates.length, ...confirmedCandidates);
   if(!candidates.length){
-    if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and verified breakout-candle volume are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked};
-    if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
+    if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and verified breakout-candle volume are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
+    if(!evaluated.length)return {...fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', ')),strategyLedger};
     if(researchEnabled){
       const watch=analyzeEarlyWatch({candles:rows,dailyCandles,tick:underlyingTick,now});
       if(watch.status==='WATCH')return{status:'EARLY_WATCH',...watch,underlyingPrice:number(underlyingTick.price),evaluatedStrategies:evaluated,blockedStrategies:blocked};
     }
-    return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
+    return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
   }
   if(researchEnabled){
     for(const item of candidates)item.research=analyzeSetupResearch({candles:rows,dailyCandles,fifteenMinuteCandles,tick:underlyingTick,setup:item,marketRegime,now});
     const researchReady=candidates.filter(item=>item.research?.status==='COMPLETE'&&finite(item.research.qualityScore));
     if(!researchReady.length){
       const pending=candidates[0]?.research||null;
-      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:pending?.reason||'Complete fresh multi-timeframe AI research is required before an NSE setup can advance',research:pending,rejectedStrategies:candidates.map(item=>item.strategy)};
+      for(const item of candidates){const row=strategyLedger.find(entry=>entry.strategy===item.strategy);if(row){row.status='BLOCKED';row.reason=pending?.reason||'Verified multi-timeframe research is incomplete';}}
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:pending?.reason||'Complete fresh multi-timeframe AI research is required before an NSE setup can advance',research:pending,rejectedStrategies:candidates.map(item=>item.strategy),strategyLedger};
     }
     candidates.splice(0,candidates.length,...researchReady);
     candidates.sort((a,b)=>Number(b.research.qualityScore)-Number(a.research.qualityScore)||a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
@@ -420,7 +438,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     grade:item.research.grade,evidence:item.research.evidence,timeframes:item.research.timeframes,
     invalidation:item.research.invalidation
   })):[];
-  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
+  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,strategyLedger,underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 
 export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {

@@ -4,6 +4,10 @@ const labels = [
   ['BSE:SENSEX-INDEX','sensex','sensex-change']
 ];
 let selectedSymbol = null;
+let selectedUnderlyingPrice = null;
+let optionChainRows = [];
+let selectedOptionSide = 'CE';
+let selectedContractSymbol = null;
 let accountRefreshRunning = false;
 let lastAccountRefresh = 0;
 function showNumber(value, digits=2) {
@@ -21,6 +25,10 @@ async function refresh() {
     }
     const md = s.marketData || {};
     renderMovers(md.fno || {});
+    const optionTick = md.selectedOption;
+    const optionLtp = document.querySelector('#option-ltp');
+    if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) optionLtp.textContent = '₹' + showNumber(optionTick.price);
+    else if (selectedContractSymbol) optionLtp.textContent = optionTick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR LIVE OPTION TICK';
     const indices = md.indices || {};
     let freshCount = 0;
     for (const [symbol, priceId, changeId] of labels) {
@@ -157,6 +165,9 @@ async function selectSymbol(symbol) {
     const data = await response.json();
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');
     drawHistoryChart(data.candles);
+    selectedUnderlyingPrice = Number(data.candles.at(-1)?.close) || null;
+    await clearSelectedOption();
+    await loadOptionChain(symbol, selectedUnderlyingPrice);
     title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;
   } catch (error) {
     area.replaceChildren();
@@ -218,3 +229,101 @@ function drawHistoryChart(candles) {
   svg.append(first, last);
   area.append(svg);
 }
+
+async function clearSelectedOption() {
+  selectedContractSymbol = null;
+  document.querySelector('#option-quantity').textContent = '—';
+  document.querySelector('#option-ltp').textContent = '—';
+  try {
+    await fetch('/api/select-option', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({symbol:null}) });
+  } catch {}
+}
+async function loadOptionChain(symbol, underlyingPrice, timestamp = '') {
+  const status = document.querySelector('#option-status');
+  status.textContent = 'LOADING FYERS OPTION CHAIN';
+  try {
+    const query = new URLSearchParams({symbol, strikecount:'10'});
+    if (timestamp) query.set('timestamp', timestamp);
+    const response = await fetch('/api/option-chain?' + query.toString(), {cache:'no-store'});
+    const payload = await response.json();
+    if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable');
+    const data = payload.data || payload;
+    optionChainRows = Array.isArray(data.optionsChain) ? data.optionsChain : [];
+    const expiries = Array.isArray(data.expiryData) ? data.expiryData : [];
+    const expirySelect = document.querySelector('#expiry-select');
+    if (!timestamp) {
+      expirySelect.replaceChildren();
+      for (const expiry of expiries) {
+        const option = document.createElement('option');
+        option.value = String(expiry.expiry);
+        option.textContent = expiry.date;
+        expirySelect.append(option);
+      }
+      if (expiries.length) expirySelect.value = String(expiries[0].expiry);
+    }
+    if (!optionChainRows.length) throw new Error('No active option contracts returned by FYERS');
+    renderOptionStrikes(underlyingPrice);
+    status.textContent = 'FYERS CHAIN LOADED · CONTRACT MASTER CHECK REQUIRED';
+  } catch (error) {
+    optionChainRows = [];
+    document.querySelector('#strike-select').replaceChildren(new Option('—',''));
+    status.textContent = 'OPTION CHAIN UNAVAILABLE · ' + String(error.message || 'No verified contracts');
+  }
+}
+function renderOptionStrikes(underlyingPrice) {
+  const select = document.querySelector('#strike-select');
+  select.replaceChildren();
+  const rows = optionChainRows.filter(row => row.option_type === selectedOptionSide && row.symbol && Number(row.strike_price) > 0);
+  rows.sort((a,b)=>Number(a.strike_price)-Number(b.strike_price));
+  for (const row of rows) {
+    const option = document.createElement('option');
+    option.value = row.symbol;
+    option.textContent = showNumber(Number(row.strike_price),2);
+    select.append(option);
+  }
+  if (!rows.length) {
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No contracts'; select.append(empty);
+    return;
+  }
+  if (Number.isFinite(Number(underlyingPrice))) {
+    const nearest = rows.reduce((best,row)=>Math.abs(Number(row.strike_price)-underlyingPrice)<Math.abs(Number(best.strike_price)-underlyingPrice)?row:best,rows[0]);
+    select.value = nearest.symbol;
+  }
+  selectOptionContract(select.value);
+}
+async function selectOptionContract(symbol) {
+  if (!symbol) return;
+  const status = document.querySelector('#option-status');
+  status.textContent = 'VERIFYING EXACT CONTRACT IN FYERS MASTER';
+  try {
+    const response = await fetch('/api/select-option', {
+      method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({symbol})
+    });
+    const result = await response.json();
+    if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
+    selectedContractSymbol = result.contract.symbol;
+    document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
+    document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
+    status.textContent = `${result.contract.side} · ${showNumber(result.contract.strike)} · MASTER VERIFIED · LIVE TICK PENDING`;
+  } catch (error) {
+    selectedContractSymbol = null;
+    document.querySelector('#option-quantity').textContent = '—';
+    status.textContent = 'CONTRACT NOT VERIFIED · ' + String(error.message || 'No action');
+  }
+}
+document.querySelector('#ce-select').addEventListener('click',()=>{
+  selectedOptionSide='CE';
+  document.querySelector('#ce-select').classList.add('active');
+  document.querySelector('#pe-select').classList.remove('active');
+  renderOptionStrikes(selectedUnderlyingPrice);
+});
+document.querySelector('#pe-select').addEventListener('click',()=>{
+  selectedOptionSide='PE';
+  document.querySelector('#pe-select').classList.add('active');
+  document.querySelector('#ce-select').classList.remove('active');
+  renderOptionStrikes(selectedUnderlyingPrice);
+});
+document.querySelector('#strike-select').addEventListener('change',event=>selectOptionContract(event.target.value));
+document.querySelector('#expiry-select').addEventListener('change',()=>{
+  if (selectedSymbol && document.querySelector('#expiry-select').value) loadOptionChain(selectedSymbol,selectedUnderlyingPrice,document.querySelector('#expiry-select').value);
+});

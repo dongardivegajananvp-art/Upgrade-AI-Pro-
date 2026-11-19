@@ -331,9 +331,11 @@ const server = http.createServer(async (req,res) => {
       const requestedExpirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
         ? (requestedExpiry > 1e12 ? requestedExpiry / 1000 : requestedExpiry) : null;
       const expiryDay = value => new Date((Number(value) + 19800) * 1000).toISOString().slice(0,10);
+      const expectedUnderlying=body.underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
       if (contract.side !== selection.side || contract.strike !== selection.strike ||
+          contract.underlying !== expectedUnderlying ||
           (requestedExpirySeconds && expiryDay(contract.expiry) !== expiryDay(requestedExpirySeconds))) {
-        return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate side, strike or expiry does not match the official active contract master'});
+        return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate underlying, side, strike or expiry does not match the official active contract master'});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);
       if (subscription?.status === 'SUBSCRIPTION_FAILED') {
@@ -353,6 +355,11 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'OPTION_SUBSCRIPTION_CLEARED'});
       }
       const contract = getVerifiedOptionContract(body.symbol);
+      const selectedUnderlying=getMarketData().selectedUnderlying;
+      const expectedUnderlying=String(selectedUnderlying?.symbol||'').replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
+      if(!expectedUnderlying||contract.underlying!==expectedUnderlying) {
+        return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:'Option contract underlying does not match the currently selected FYERS NSE underlying'});
+      }
       const subscription = setSelectedOptionSymbol(contract.symbol);
       if (subscription?.status === 'SUBSCRIPTION_FAILED') {
         return send(res,503,{status:'OPTION_SUBSCRIPTION_FAILED',reason:subscription.reason || 'FYERS option subscription failed',subscription});

@@ -259,3 +259,15 @@ export function getMarketData(now = Date.now()) {
     }
   };
 }
+
+// Read-only snapshot for the rolling strategy engine; never treats old ticks as fresh.
+export function getFnoUniverseSnapshot() {
+  return {
+    universe: universe.map(item => ({ ...item })),
+    ticks: new Map(universe.map(item => [item.symbol, ticks.get(item.symbol)]).filter(([, tick]) => Boolean(tick))),
+    activeSymbols: [...activeFnoSymbols],
+    rotationIndex,
+    rotationIntervalMs: ROTATION_INTERVAL_MS,
+    symbolCap: 100
+  };
+}

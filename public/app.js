@@ -153,16 +153,19 @@ function renderMovers(fno) {
   container.replaceChildren();
   const top = Array.isArray(fno.topGainers) ? fno.topGainers : [];
   if (fno.status !== 'ROTATING_LIVE_COVERAGE') {
-    document.querySelector('#movers-status').textContent = 'FEED / SYMBOL MASTER NOT READY';
+    const labels = { SYMBOL_MASTER_NOT_LOADED: 'SYMBOL MASTER NOT READY', SOCKET_ERROR: 'FYERS SOCKET ERROR', WAITING_FOR_FNO_TICKS: 'WAITING FOR F&O TICKS' };
+    document.querySelector('#movers-status').textContent = labels[fno.status] || 'F&O FEED PENDING';
     const note = document.createElement('div');
     note.className = 'empty-inline';
     note.textContent = fno.status === 'SYMBOL_MASTER_NOT_LOADED'
       ? 'Official FYERS NSE F&O symbol master is not loaded. No sample gainers are shown.'
-      : 'Waiting for verified FYERS F&O WebSocket feed.';
+      : fno.status === 'SOCKET_ERROR'
+        ? 'FYERS rejected or closed the F&O subscription. ' + (fno.lastError || 'Socket error detail unavailable.')
+        : 'Waiting for fresh exchange-timestamped F&O ticks in the active rotating slice.';
     container.append(note);
     return;
   }
-  document.querySelector('#movers-status').textContent = `ROTATING · ${fno.activeCount}/${fno.universeCount} · 20s`;
+  document.querySelector('#movers-status').textContent = 'LIVE SLICE · ' + fno.activeCount + '/' + fno.universeCount + ' · 20s · ' + fno.subscriptionCount + '/100 SYMBOLS';
   if (!top.length) {
     const note = document.createElement('div');
     note.className = 'empty-inline';

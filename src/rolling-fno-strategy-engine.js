@@ -28,7 +28,7 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
     };
     evaluations.push(row);
     if (result.status === 'UNDERLYING_SETUP_CONFIRMED' && result.research?.status === 'COMPLETE') {
-      candidates.push({ ...row, side: result.side, strategy: result.strategy, qualityScore: result.research.qualityScore, grade: result.research.grade, evidence: result.research.evidence, invalidation: result.research.invalidation });
+      candidates.push({ ...row, side: result.side, strategy: result.strategy, qualityScore: result.research.qualityScore, grade: result.research.grade, targetR: result.research.targetR, targetRationale: result.research.targetRationale, evidence: result.research.evidence, invalidation: result.research.invalidation });
     }
   }
   candidates.sort((a,b) => b.qualityScore - a.qualityScore || String(a.symbol).localeCompare(String(b.symbol)));

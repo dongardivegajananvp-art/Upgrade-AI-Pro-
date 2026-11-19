@@ -61,7 +61,7 @@ async function fyersGet(base, path, params = {}) {
   const appId = process.env.FYERS_APP_ID?.trim();
   if (!token || !appId) throw new Error('FYERS authentication is not active in this server process');
   if (Date.now() < cooldownUntil) throw new Error('FYERS REST cooldown active; no upstream request was sent');
-  const url = new URL(path, base);
+  const url = new URL(path.replace(/^\\/+/, ''), base.endsWith('/') ? base : base + '/');
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
   }

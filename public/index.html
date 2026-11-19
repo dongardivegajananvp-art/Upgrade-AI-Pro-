@@ -35,13 +35,13 @@
   </section>
 
   <section class="panel options">
-    <div class="section-heading"><h2>OPTIONS PANEL</h2><small>CONTRACT VERIFICATION PENDING</small></div>
+    <div class="section-heading"><h2>OPTIONS PANEL</h2><small id="option-status">FYERS OPTION CHAIN PENDING</small></div>
     <div class="option-row">
-      <div class="option-choice"><span class="option-pill">CE</span><span class="option-pill">PE</span></div>
-      <div class="option-field"><small>EXPIRY</small><strong>—</strong></div>
-      <div class="option-field"><small>STRIKE</small><strong>—</strong></div>
-      <div class="option-field"><small>QUANTITY</small><strong>—</strong></div>
-      <div class="option-field"><small>OPTION LTP</small><strong>—</strong></div>
+      <div class="option-choice"><button id="ce-select" class="option-pill active" type="button">CE</button><button id="pe-select" class="option-pill" type="button">PE</button></div>
+      <div class="option-field"><small>EXPIRY</small><select id="expiry-select"><option value="">—</option></select></div>
+      <div class="option-field"><small>STRIKE</small><select id="strike-select"><option value="">—</option></select></div>
+      <div class="option-field"><small>LOT QTY</small><strong id="option-quantity">—</strong></div>
+      <div class="option-field"><small>OPTION LTP</small><strong id="option-ltp">—</strong></div>
       <button disabled>ORDERS DISABLED</button>
     </div>
     <p class="safety-note">Initial verification mode · No broker orders · Fresh underlying + option data required</p>

@@ -11,6 +11,7 @@ const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf
 
 function send(res, status, body, type='application/json; charset=utf-8') {
   res.writeHead(status, { 'content-type': type, 'cache-control':'no-store', 'x-content-type-options':'nosniff', 'referrer-policy':'no-referrer' });
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) return res.end(body);
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
 const server = http.createServer(async (req,res) => {

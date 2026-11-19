@@ -14,6 +14,7 @@ let chartLiveCandle = null;
 let chartZoom = 1;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
+let setupLastBucket = null;
 let lastAccountRefresh = 0;
 function tickStatusText(md, freshCount) {
   if (freshCount === 3 && md.socketStatus !== 'CONNECTED') return 'FYERS RECONNECTING · LAST TICKS NOT CONFIRMED';
@@ -44,7 +45,10 @@ async function refresh() {
     const optionLtp = document.querySelector('#option-ltp');
     if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) {
       optionLtp.textContent = '₹' + showNumber(optionTick.price);
-      if (!setupEvaluationDone && !setupEvaluationRunning && md.selectedUnderlying?.fresh && md.selectedUnderlying.symbol === selectedSymbol) evaluateSelectedSetup();
+      const selectedTick = md.selectedUnderlying;
+      const bucket = selectedTick?.exchangeTime ? Math.floor(Number(selectedTick.exchangeTime)/300)*300 : null;
+      if (bucket && setupLastBucket !== null && bucket !== setupLastBucket) setupEvaluationDone = false;
+      if (!setupEvaluationDone && !setupEvaluationRunning && selectedTick?.fresh && selectedTick.symbol === selectedSymbol) evaluateSelectedSetup();
     }
     else if (selectedContractSymbol) optionLtp.textContent = optionTick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR LIVE OPTION TICK';
     const indices = md.indices || {};
@@ -374,6 +378,8 @@ async function evaluateSelectedSetup() {
     const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol})});
     const setup=await response.json();
     setupEvaluationDone = true;
+    const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
+    setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
     if(setup.status==='SETUP_CONFIRMED') {
       document.querySelector('#setup-entry').textContent='₹'+showNumber(setup.entry);
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);

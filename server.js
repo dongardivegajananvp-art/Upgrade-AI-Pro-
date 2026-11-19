@@ -2,7 +2,8 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assessFeed, buildRiskPlan, tradingEnabled } from './src/safety.js';
+import { assessFeed, tradingEnabled } from './src/safety.js';
+import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -16,9 +17,25 @@ const server = http.createServer(async (req,res) => {
   const url = new URL(req.url || '/', 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
   if (req.method === 'GET' && url.pathname === '/api/status') return send(res,200,{
-    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), scanner:'NOT_STARTED',
-    orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(),
+    scanner:'NOT_STARTED', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
   });
+  if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
+    try {
+      const loginUrl = createLoginUrl({ appId:process.env.FYERS_APP_ID, redirectUri:process.env.FYERS_REDIRECT_URI });
+      res.writeHead(302,{location:loginUrl,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+    } catch (error) { return send(res,503,{status:'NOT_CONFIGURED',reason:error.message}); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/fyers/auth/callback') {
+    const state = url.searchParams.get('state');
+    const authCode = url.searchParams.get('auth_code');
+    if (!consumeLoginState(state)) return send(res,400,{status:'REJECTED',reason:'OAuth state is missing, expired, or already used'});
+    if (!authCode) return send(res,400,{status:'FAILED',reason:'FYERS authorization code was not returned'});
+    try {
+      await exchangeAuthCode({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY,authCode});
+      res.writeHead(302,{location:'/?fyers=connected','cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+    } catch (error) { return send(res,502,{status:'TOKEN_EXCHANGE_FAILED',reason:error.message}); }
+  }
   if (req.method === 'POST' && url.pathname.startsWith('/api/orders')) return send(res,423,{status:'BLOCKED',reason:'Order placement is disabled during build and initial verification'});
   if (req.method !== 'GET') return send(res,405,{error:'Method not allowed'});
   const requested = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));

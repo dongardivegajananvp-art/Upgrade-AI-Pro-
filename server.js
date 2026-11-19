@@ -97,8 +97,11 @@ const server = http.createServer(async (req,res) => {
       });
       res.writeHead(302,{location:'/?fyers=connected','cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
     } catch (error) {
-      console.error('[FYERS_OAUTH] token exchange failed:', error.message);
-      return send(res,502,{status:'TOKEN_EXCHANGE_FAILED',reason:error.message});
+      const d = error.fyersDiagnostics || {};
+      console.error('[FYERS_OAUTH] token exchange failed:', error.message,
+        JSON.stringify({httpStatus:d.status || null, elapsedMs:d.elapsedMs || null, retryAfter:d.retryAfter || null, cfRay:d.cfRay || null, server:d.server || null, contentType:d.contentType || null}));
+      const upstream429 = /FYERS_UPSTREAM_HTTP_429/.test(String(error.message));
+      return send(res,upstream429 ? 429 : 502,{status:upstream429 ? 'FYERS_UPSTREAM_RATE_LIMIT' : 'TOKEN_EXCHANGE_FAILED',reason:error.message});
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/select-underlying') {

@@ -18,7 +18,7 @@ test('ranks rolling observations across all symbols and exposes partial coverage
 test('marks old rolling ticks non-fresh and excludes prior-session observations', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];
   const ticks=new Map([
-    ['NSE:A-EQ',{symbol:'NSE:A-EQ',price:10,changePercent:5,exchangeTime:sec,receivedAt:now-180000}],
+    ['NSE:A-EQ',{symbol:'NSE:A-EQ',price:10,changePercent:5,exchangeTime:sec,receivedAt:now-90000}],
     ['NSE:B-EQ',{symbol:'NSE:B-EQ',price:20,changePercent:9,exchangeTime:sec-86400,receivedAt:now-1000}]
   ]);
   const result=buildRollingFnoLeaderboard({universe,ticks,now,slotCount:20,rotationIntervalMs:60000});

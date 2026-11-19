@@ -13,6 +13,10 @@ let lastRestError = null;
 export function validateNseSymbol(symbol) {
   return typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]{1,48}$/.test(symbol);
 }
+const INDEX_HISTORY_SYMBOLS = new Set(['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX']);
+export function validateHistorySymbol(symbol) {
+  return validateNseSymbol(symbol) || INDEX_HISTORY_SYMBOLS.has(symbol);
+}
 export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
   if (!Array.isArray(rows)) return [];
   const currentBucket = Math.floor(now / 300000) * 300;
@@ -74,7 +78,7 @@ export function buildFyersUrl(base, path, params = {}) {
 function istDate(now = Date.now()) { return new Date(now + 19800000).toISOString().slice(0, 10); }
 
 export async function getFiveMinuteHistory(symbol, now = Date.now()) {
-  if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
+  if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   const date = istDate(now);
   const body = await fyersGet(DATA_BASE, '/history', {
     symbol, resolution: '5', date_format: '1', range_from: date, range_to: date
@@ -83,6 +87,32 @@ export async function getFiveMinuteHistory(symbol, now = Date.now()) {
   const candles = normalizeFiveMinuteCandles(body.candles, now);
   if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the NSE session');
   return { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, source: 'FYERS_HISTORY', actionable: true };
+}
+export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
+  if (!Array.isArray(rows)) return [];
+  const currentBucket = Math.floor((now / 1000) / 900) * 900;
+  const seen = new Set();
+  return rows.map(row => {
+    if (!Array.isArray(row) || row.length < 6) return null;
+    const [time,open,high,low,close,volume]=row.map(Number);
+    if (![time,open,high,low,close,volume].every(Number.isFinite) || time<=0 || open<=0 ||
+        high<Math.max(open,close,low) || low>Math.min(open,close) || close<=0 || volume<0 ||
+        time>=currentBucket || seen.has(time)) return null;
+    const ist=new Date((time+19800)*1000),minute=ist.getUTCHours()*60+ist.getUTCMinutes();
+    if(minute<555||minute>=930||((minute-555)%15)!==0)return null;
+    seen.add(time);
+    return {time,open,high,low,close,volume,completed:true,source:'FYERS_HISTORY_15M'};
+  }).filter(Boolean).sort((a,b)=>a.time-b.time);
+}
+export async function getFifteenMinuteHistory(symbol, now = Date.now()) {
+  if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
+  const to=istDate(now);
+  const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
+  const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to});
+  if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute research candles');
+  const candles=normalizeFifteenMinuteCandles(body.candles,now);
+  if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles for research');
+  return {symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M'};
 }
 export async function getFyersQuotes(symbols) {
   if (!Array.isArray(symbols) || symbols.length < 1 || symbols.length > 50 || !symbols.every(validateNseSymbol)) {

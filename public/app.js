@@ -38,6 +38,7 @@ async function refresh() {
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;
+    renderLiveCandleSummary(underlyingTick);
     // Restore the backend's selected chart symbol after a page reload; otherwise
     // the server can build a live candle while the client never renders it.
     if (!selectedSymbol && underlyingTick?.symbol && underlyingTick.fresh) {
@@ -233,6 +234,41 @@ function drawHistoryChart(candles) {
   chartCandles = Array.isArray(candles) ? candles.slice() : [];
   renderChartViewport();
 }
+function renderLiveCandleSummary(tick) {
+  const panel = document.querySelector('#live-candle-summary');
+  if (!panel) return;
+  panel.replaceChildren();
+  const heading = document.createElement('strong');
+  heading.textContent = 'LIVE 5-MIN CANDLE';
+  const fresh = Boolean(tick?.fresh && tick.symbol === selectedSymbol && chartLiveCandle);
+  const state = document.createElement('span');
+  state.className = 'live-candle-state';
+  state.dataset.state = fresh ? 'fresh' : 'stale';
+  state.textContent = fresh ? 'FRESH FYERS TICK' : 'WAITING FOR FRESH FYERS TICK';
+  panel.append(heading, state);
+  if (!chartLiveCandle || chartLiveCandle.time <= 0) return;
+  const c = chartLiveCandle;
+  const time = new Date((Number(c.time) + 19800) * 1000).toISOString().slice(11,16);
+  const fields = [
+    ['TIME', time + '–' + new Date((Number(c.time) + 498) * 1000).toISOString().slice(11,16) + ' IST'],
+    ['LIVE PRICE', fresh ? '₹' + showNumber(tick.price) : '—'],
+    ['OPEN', showNumber(c.open)],
+    ['HIGH', showNumber(c.high)],
+    ['LOW', showNumber(c.low)],
+    ['CLOSE', showNumber(c.close)],
+    ['VOLUME', showNumber(c.volume, 0)]
+  ];
+  for (const [label, value] of fields) {
+    const item = document.createElement('div');
+    item.className = 'live-candle-metric';
+    const name = document.createElement('small');
+    name.textContent = label;
+    const number = document.createElement('b');
+    number.textContent = value;
+    item.append(name, number);
+    panel.append(item);
+  }
+}
 function renderChartViewport() {
   const area = document.querySelector('#chart-area');
   const candles = chartLiveCandle && chartLiveCandle.time > 0 ? [...chartCandles, chartLiveCandle] : chartCandles;
@@ -284,13 +320,23 @@ function renderChartViewport() {
     tag.textContent=zone.kind+' ZONE';svg.append(tag);
   }
   visible.forEach((c,i)=>{
-    const x=xAt(i),up=Number(c.close)>=Number(c.open),color=up?'#32c48d':'#ef6b73';
-    const wick=document.createElementNS(ns,'line');wick.setAttribute('x1',x);wick.setAttribute('x2',x);wick.setAttribute('y1',y(Number(c.high)));wick.setAttribute('y2',y(Number(c.low)));wick.setAttribute('stroke',color);wick.setAttribute('stroke-width','2');
+    const x=xAt(i),isLive=Boolean(chartLiveCandle && c.time===chartLiveCandle.time);
+    const up=Number(c.close)>=Number(c.open),color=up?'#32c48d':'#ef6b73';
+    if(isLive){
+      const guide=document.createElementNS(ns,'line');
+      guide.setAttribute('x1',x);guide.setAttribute('x2',x);guide.setAttribute('y1',top);guide.setAttribute('y2',top+plotH);
+      guide.setAttribute('stroke','#55c8ff');guide.setAttribute('stroke-width','2');guide.setAttribute('stroke-dasharray','7 6');guide.setAttribute('opacity','.85');svg.append(guide);
+    }
+    const wick=document.createElementNS(ns,'line');wick.setAttribute('x1',x);wick.setAttribute('x2',x);wick.setAttribute('y1',y(Number(c.high)));wick.setAttribute('y2',y(Number(c.low)));wick.setAttribute('stroke',isLive?'#7bd8ff':color);wick.setAttribute('stroke-width',isLive?'4':'2');
     const body=document.createElementNS(ns,'rect'),bodyTop=y(Math.max(Number(c.open),Number(c.close))),bodyBottom=y(Math.min(Number(c.open),Number(c.close)));
-    body.setAttribute('x',x-Math.max(2,xStep*.29));body.setAttribute('y',bodyTop);body.setAttribute('width',Math.max(4,xStep*.58));body.setAttribute('height',Math.max(2,bodyBottom-bodyTop));body.setAttribute('fill',color);
+    body.setAttribute('x',x-Math.max(isLive?6:2,xStep*(isLive?.39:.29)));body.setAttribute('y',bodyTop);body.setAttribute('width',Math.max(isLive?12:4,xStep*(isLive?.78:.58)));body.setAttribute('height',Math.max(3,bodyBottom-bodyTop));body.setAttribute('fill',color);
+    if(isLive){body.setAttribute('stroke','#d8f5ff');body.setAttribute('stroke-width','2');body.setAttribute('filter','drop-shadow(0 0 7px #43bdff)');}
     const title=document.createElementNS(ns,'title');
-    title.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · Vol '+showNumber(c.volume,0);
+    title.textContent=(isLive?'LIVE · ':'')+new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · Vol '+showNumber(c.volume,0);
     body.append(title);svg.append(wick,body);
+    if(isLive){
+      const tag=document.createElementNS(ns,'text');tag.setAttribute('x',x);tag.setAttribute('y',top+18);tag.setAttribute('text-anchor','middle');tag.setAttribute('font-size','15');tag.setAttribute('font-weight','900');tag.setAttribute('fill','#7bd8ff');tag.textContent='LIVE';svg.append(tag);
+    }
   });
   for(let i=0;i<=4;i++){
     const index=Math.min(visible.length-1,Math.round((visible.length-1)*i/4)),c=visible[index];

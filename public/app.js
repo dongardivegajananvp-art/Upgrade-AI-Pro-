@@ -178,7 +178,8 @@ function renderMovers(fno) {
     container.append(note);
     return;
   }
-  document.querySelector('#movers-status').textContent = 'LIVE SLICE · ' + fno.activeCount + '/' + fno.universeCount + ' · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's · ' + fno.subscriptionCount + '/100 SYMBOLS';
+  const coverageText = (fno.observedCount ?? 0) + '/' + fno.universeCount + ' OBSERVED';
+  document.querySelector('#movers-status').textContent = (fno.coverageComplete ? 'ROLLING FULL-UNIVERSE · ' : 'ROLLING PARTIAL · ') + coverageText + ' · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's/SLICE · NON-SIMULTANEOUS · ' + fno.subscriptionCount + '/100 SYMBOLS';
   if (!top.length) {
     const note = document.createElement('div');
     note.className = 'empty-inline';
@@ -190,6 +191,7 @@ function renderMovers(fno) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'mover-card';
+    button.title = item.fresh ? 'Fresh FYERS tick; chart selection still requires a fresh selected-symbol tick' : 'Rolling observation only; not a fresh live tick. Selection will wait for a fresh tick';
     button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
     name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
@@ -197,7 +199,7 @@ function renderMovers(fno) {
     price.textContent = `₹${showNumber(item.price)}`;
     const change = document.createElement('span');
     const pct = Number(item.changePercent);
-    change.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% · LIVE`;
+    change.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% · ${item.fresh ? 'FRESH' : 'SEEN ' + Math.floor((item.ageSeconds || 0) / 60) + 'm AGO'}`;
     change.dataset.state = pct >= 0 ? 'up' : 'down';
     button.append(name, price, change);
     container.append(button);

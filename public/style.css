@@ -35,3 +35,14 @@ footer{color:#7890ae}
 .chart-area svg text{font-family:Inter,system-ui,sans-serif}
 
 .levels{flex-wrap:wrap;align-items:center}.levels span{white-space:nowrap}#setup-state{font-weight:800;color:#f0bd63;max-width:100%;overflow-wrap:anywhere}#setup-state[data-state='confirmed']{color:#16c784}#setup-state[data-state='blocked']{color:#f0bd63}
+
+
+/* High-contrast live candle and readable OHLCV strip */
+.live-candle-summary{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;padding:10px 12px;margin:0 0 9px;border:1px solid #28547a;border-radius:9px;background:linear-gradient(100deg,#0b2136,#0a1728)}
+.live-candle-summary>strong{display:flex;align-items:center;padding:0 12px;color:#7bd8ff;font-size:11px;letter-spacing:.12em;border-right:1px solid #31506b}
+.live-candle-state{display:flex;align-items:center;padding:0 10px;color:#f2c45b;font-size:10px;font-weight:900;letter-spacing:.08em}
+.live-candle-state[data-state="fresh"]{color:#38e0a0}
+.live-candle-metric{min-width:76px;display:grid;align-content:center;gap:4px;padding:2px 8px}
+.live-candle-metric small{color:#8fa9c7;font-size:9px;letter-spacing:.1em}
+.live-candle-metric b{color:#f2f7ff;font-size:13px;font-variant-numeric:tabular-nums}
+@media(max-width:700px){.live-candle-summary{gap:5px;padding:8px}.live-candle-summary>strong{width:100%;border-right:0;border-bottom:1px solid #31506b;padding:0 0 7px}.live-candle-state{padding:3px 0;width:100%}.live-candle-metric{min-width:calc(25% - 5px);padding:4px 3px}.live-candle-metric b{font-size:12px}}

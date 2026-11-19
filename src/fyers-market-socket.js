@@ -4,7 +4,9 @@ import { getAccessTokenForServer } from './fyers-auth.js';
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
 const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
-const MAX_UNDERLYING_SLOTS = 80;
+// Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
+// Three indices + twenty rotating equities + one selected option = at most 24.
+const MAX_UNDERLYING_SLOTS = 20;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
 let socketStatus = 'NOT_STARTED';
@@ -126,7 +128,7 @@ export function setFnoUniverse(items) {
     rotationTimer = setInterval(applyFnoRotation, ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
-  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100 };
+  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
 }
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;

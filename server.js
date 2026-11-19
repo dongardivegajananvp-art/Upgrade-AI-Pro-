@@ -62,6 +62,12 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteHistory(url.searchParams.get('symbol')));
+      if (url.pathname === '/api/research-context') {
+        const symbol = url.searchParams.get('symbol');
+        if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
+        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol),getFifteenMinuteHistory(symbol)]);
+        return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
+      }
       if (url.pathname === '/api/quotes') {
         const symbols = (url.searchParams.get('symbols') || '').split(',').filter(Boolean);
         return send(res,200,await getFyersQuotes(symbols));

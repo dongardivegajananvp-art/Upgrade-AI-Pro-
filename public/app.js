@@ -66,9 +66,29 @@ async function refreshUniverseScan() {
     }
     if(!(data.top3||[]).length) {
       const blocked=document.createElement('small');
-      blocked.textContent='No verified Top 3 yet. Per-stock BLOCKED/REJECTED reasons remain available from each stock’s strategy ledger; no scores are fabricated.';
+      blocked.textContent='No verified Top 3 yet. Missing/stale data and unconfirmed patterns are not scored.';
       container.append(blocked);
     }
+    const activeSet=new Set(data.activeSymbols||[]);
+    const activeEvaluations=(data.evaluations||[]).filter(row=>activeSet.has(row.symbol));
+    const diagnostics=document.createElement('details');
+    const diagnosticsTitle=document.createElement('summary');
+    diagnosticsTitle.textContent='ACTIVE SLICE · PER-STOCK NINE-STRATEGY DIAGNOSTICS ('+activeEvaluations.length+')';
+    diagnostics.append(diagnosticsTitle);
+    for(const stock of activeEvaluations) {
+      const group=document.createElement('details');
+      const summary=document.createElement('summary');
+      summary.textContent=stock.symbol+' · '+stock.status+' · '+(stock.fresh?'FRESH TICK':'STALE / MISSING TICK');
+      group.append(summary);
+      for(const item of stock.strategyLedger||[]) {
+        const row=document.createElement('div');row.className='strategy-ledger-row';
+        const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+        const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+        row.append(label,reason);group.append(row);
+      }
+      diagnostics.append(group);
+    }
+    container.append(diagnostics);
   } catch(error) {
     status.textContent='UNIVERSE SCAN UNAVAILABLE';
     container.textContent=String(error.message||'Cached FYERS universe evaluation unavailable');

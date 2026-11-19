@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 const AUTH_URL = 'https://api-t1.fyers.in/api/v3/generate-authcode';
 const TOKEN_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode';
@@ -49,8 +49,13 @@ export async function exchangeAuthCode({ appId, appSecret, authCode }) {
 
 export function getAuthStatus(now = Date.now()) {
   if (accessToken && tokenReceivedAt) {
-    const local = new Date(now).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false });
-    if (local >= '06:30' && now - tokenReceivedAt > 24 * 60 * 60 * 1000) {
+    const istOffsetMs = 330 * 60 * 1000;
+    const receivedIst = new Date(tokenReceivedAt + istOffsetMs);
+    const receivedHour = receivedIst.getUTCHours();
+    const receivedMinute = receivedIst.getUTCMinutes();
+    let expiry = Date.UTC(receivedIst.getUTCFullYear(), receivedIst.getUTCMonth(), receivedIst.getUTCDate(), 6, 30) - istOffsetMs;
+    if (receivedHour > 6 || (receivedHour === 6 && receivedMinute >= 30)) expiry += 24 * 60 * 60 * 1000;
+    if (now >= expiry) {
       accessToken = null;
       tokenReceivedAt = null;
     }

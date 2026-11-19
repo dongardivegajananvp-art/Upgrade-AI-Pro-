@@ -236,6 +236,14 @@ export function getMarketData(now = Date.now()) {
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
     socketStatus, lastError, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
+    optionSubscription: {
+      status: optionSubscriptionStatus,
+      symbol: selectedOptionSymbol,
+      reason: optionSubscriptionError,
+      requestedAt: optionSubscriptionRequestedAt,
+      lastTickAt: optionLastTickAt,
+      tickAgeSeconds: optionLastTickAt ? Math.max(0, Math.floor((now - optionLastTickAt) / 1000)) : null
+    },
     selectedUnderlying: selectedUnderlyingSymbol && ticks.get(selectedUnderlyingSymbol) ? { ...ticks.get(selectedUnderlyingSymbol), fresh: isFresh(ticks.get(selectedUnderlyingSymbol), now), liveCandle: selectedLiveCandle ? { ...selectedLiveCandle } : null } : null,
     selectedOptionSymbol,
     subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),

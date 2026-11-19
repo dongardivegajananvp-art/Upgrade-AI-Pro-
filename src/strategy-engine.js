@@ -446,13 +446,13 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
-  if(!tickFresh(optionTick))return fail('Fresh FYERS option premium tick is required');
-  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
+  if(!tickFresh(optionTick))return {...fail('Fresh FYERS option premium tick is required'),strategyLedger:setup.strategyLedger||[]};
+  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return {...fail('Verified active CE/PE contract and tick size are required'),strategyLedger:setup.strategyLedger||[]};
   const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds);
-  if(o.error)return fail(o.error);
-  if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return fail('Option premium needs only 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
+  if(o.error)return {...fail(o.error),strategyLedger:setup.strategyLedger||[]};
+  if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return {...fail('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle'),strategyLedger:setup.strategyLedger||[]};
   const chosen=setup;
-  if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
+  if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy,strategyLedger:setup.strategyLedger||[]};
   const premiumRows=o.rows,tickSize=number(contract.tickSize);
   const prior=premiumRows.at(-2),reference=premiumRows.at(-1);
   // The underlying strategy already confirmed on a completed 5-minute candle.
@@ -460,13 +460,13 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   // option premium crossing the latest completed option candle high + one tick.
   const premiumLevel=number(reference.high);
   const entry=Number((Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize).toFixed(8));
-  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Underlying setup is confirmed; waiting for live option premium to break the latest completed 5-minute candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel};
+  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Underlying setup is confirmed; waiting for live option premium to break the latest completed 5-minute candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,strategyLedger:setup.strategyLedger||[]};
   // Structural risk uses the last two completed option candles; the live quote is
   // the trigger. This removes the redundant extra 5-minute confirmation delay.
   const swingLow=Math.min(number(prior.low),number(reference.low));
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
-  if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'EXACT_2R',confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[]};
+  if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,strategyLedger:setup.strategyLedger||[]};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'EXACT_2R',confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',entryTiming:'EARLY_VERIFIED_LIVE_PREMIUM_BREAK',entryBasis:'LATEST_COMPLETED_OPTION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'AI_RESEARCH_VALIDATED_MINIMUM_1_TO_2_RISK_MULTIPLE',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};

@@ -88,9 +88,9 @@ const server = http.createServer(async (req,res) => {
       console.info('[FYERS_OAUTH] token exchange succeeded; token value withheld');
       const market = startMarketSocket();
       console.info('[FYERS_DATA] socket start requested; status:', market.status);
-      loadFnoEquityUniverse().then(({ universe }) => {
+      loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
         const coverage = setFnoUniverse(universe);
-        console.info('[FYERS_SCANNER] official NSE F&O underlyings loaded:', coverage.universeCount, 'active socket slots:', coverage.activeCount);
+        console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount);
       }).catch(error => {
         console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
       });

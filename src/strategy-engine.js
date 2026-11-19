@@ -443,7 +443,8 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   }else candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   const researchRanking=researchEnabled?candidates.slice(0,3).map((item,index)=>({
     rank:index+1,strategy:item.strategy,side:item.side,qualityScore:item.research.qualityScore,
-    grade:item.research.grade,evidence:item.research.evidence,timeframes:item.research.timeframes,
+    grade:item.research.grade,targetR:item.research.targetR,targetRationale:item.research.targetRationale,
+    evidence:item.research.evidence,timeframes:item.research.timeframes,
     invalidation:item.research.invalidation
   })):[];
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,strategyLedger,underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};

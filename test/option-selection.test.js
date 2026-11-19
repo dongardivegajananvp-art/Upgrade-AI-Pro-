@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseDirectionalOption } from '../src/option-selection.js';
+import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from '../src/option-selection.js';
 import { verifyOptionContractRow } from '../src/fyers-symbol-master.js';
 
 const now = Date.parse('2026-11-19T06:00:00Z');
@@ -41,4 +41,15 @@ test('official master rejects expired, inactive or incomplete option contracts',
   assert.throws(()=>verifyOptionContractRow({...base,fyToken:''},base.symTicker,now),/invalid/i);
   assert.throws(()=>verifyOptionContractRow({...base,strikePrice:0},base.symTicker,now),/invalid/i);
   assert.throws(()=>verifyOptionContractRow({...base,optType:'XX'},base.symTicker,now),/official FYERS/i);
+});
+
+test('automatic selection requires a valid exact requested expiry day', () => {
+  const expiry=Date.parse('2026-11-26T10:00:00Z')/1000;
+  assert.equal(normalizeExpiryTimestamp(''),null);
+  assert.equal(normalizeExpiryTimestamp('not-a-date'),null);
+  assert.equal(normalizeExpiryTimestamp(expiry*1000),expiry);
+  assert.equal(matchesRequestedExpiry(expiry,expiry),true);
+  assert.equal(matchesRequestedExpiry(expiry,Date.parse('2026-12-03T10:00:00Z')/1000),false);
+  assert.equal(matchesRequestedExpiry(expiry,null),false);
+  assert.equal(matchesRequestedExpiry(null,expiry),false);
 });

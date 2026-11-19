@@ -4,8 +4,8 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
-import { startMarketSocket, getMarketData, setFnoUniverse } from './src/fyers-market-socket.js';
-import { loadFnoEquityUniverse } from './src/fyers-symbol-master.js';
+import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol } from './src/fyers-market-socket.js';
+import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
 import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
@@ -13,6 +13,14 @@ const port = Number(process.env.PORT || 3000);
 const EXPECTED_REDIRECT_URI = 'https://upgrade-ai-pro.onrender.com/api/fyers/auth/callback';
 const mime = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.webmanifest':'application/manifest+json' };
 
+async function readJson(req) {
+  let raw = '';
+  for await (const chunk of req) {
+    raw += chunk.toString();
+    if (raw.length > 4096) throw new Error('Request body too large');
+  }
+  return raw ? JSON.parse(raw) : {};
+}
 function send(res, status, body, type='application/json; charset=utf-8') {
   res.writeHead(status, { 'content-type': type, 'cache-control':'no-store', 'x-content-type-options':'nosniff', 'referrer-policy':'no-referrer' });
   if (Buffer.isBuffer(body) || body instanceof Uint8Array) return res.end(body);
@@ -90,6 +98,16 @@ const server = http.createServer(async (req,res) => {
     } catch (error) {
       console.error('[FYERS_OAUTH] token exchange failed:', error.message);
       return send(res,502,{status:'TOKEN_EXCHANGE_FAILED',reason:error.message});
+    }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/select-option') {
+    try {
+      const body = await readJson(req);
+      const contract = getVerifiedOptionContract(body.symbol);
+      setSelectedOptionSymbol(contract.symbol);
+      return send(res,200,{status:'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',contract});
+    } catch (error) {
+      return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:String(error.message || 'Option contract verification failed').slice(0,180)});
     }
   }
   if (req.method === 'POST' && url.pathname.startsWith('/api/orders')) return send(res,423,{status:'BLOCKED',reason:'Order placement is disabled during build and initial verification'});

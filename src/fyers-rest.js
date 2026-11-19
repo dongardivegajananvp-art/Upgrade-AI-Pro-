@@ -65,7 +65,7 @@ async function fyersGet(base, path, params = {}) {
   return scheduledFetch(url, { method: 'GET', headers: { Authorization: `${appId}:${token}`, Accept: 'application/json' } });
 }
 export function buildFyersUrl(base, path, params = {}) {
-  const url = new URL(path.replace(/^\\/+/, ''), base.endsWith('/') ? base : base + '/');
+  const url = new URL(path.replace(/^\/+/, ''), base.endsWith('/') ? base : base + '/');
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
   }

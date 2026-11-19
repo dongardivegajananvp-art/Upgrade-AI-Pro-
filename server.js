@@ -4,6 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
+import { startMarketSocket, getMarketData } from './src/fyers-market-socket.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -17,9 +18,10 @@ function send(res, status, body, type='application/json; charset=utf-8') {
 }
 const server = http.createServer(async (req,res) => {
   const url = new URL(req.url || '/', 'http://localhost');
+  if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getMarketData());
   if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
   if (req.method === 'GET' && url.pathname === '/api/status') return send(res,200,{
-    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(),
+    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(), marketData:getMarketData(),
     configuration:{
       appIdConfigured:Boolean(process.env.FYERS_APP_ID?.trim()),
       appIdHasNewFormat: Boolean(process.env.FYERS_APP_ID?.trim().endsWith('-200')),
@@ -59,6 +61,8 @@ const server = http.createServer(async (req,res) => {
     try {
       await exchangeAuthCode({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY,authCode});
       console.info('[FYERS_OAUTH] token exchange succeeded; token value withheld');
+      const market = startMarketSocket();
+      console.info('[FYERS_DATA] socket start requested; status:', market.status);
       res.writeHead(302,{location:'/?fyers=connected','cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
     } catch (error) {
       console.error('[FYERS_OAUTH] token exchange failed:', error.message);

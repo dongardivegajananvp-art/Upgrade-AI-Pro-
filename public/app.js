@@ -149,14 +149,20 @@ async function refresh() {
       if (tick?.fresh) {
         freshCount++;
         price.textContent = showNumber(tick.price);
+        const points = tick.change != null && Number.isFinite(Number(tick.change)) ? Number(tick.change) : null;
         const pct = tick.changePercent != null && Number.isFinite(Number(tick.changePercent)) ? Number(tick.changePercent) : null;
-        change.textContent = pct === null ? 'CHANGE UNAVAILABLE' : (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        const pointsText = points === null ? 'POINTS UNAVAILABLE' : (points >= 0 ? '+' : '') + showNumber(points) + ' pts';
+        const pctText = pct === null ? 'CHANGE % UNAVAILABLE' : (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        change.textContent = pointsText + ' · ' + pctText;
         change.dataset.state = pct === null ? 'unknown' : pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
         price.dataset.state = 'fresh';
       } else if (tick) {
         price.textContent = showNumber(tick.price);
+        const points = tick.change != null && Number.isFinite(Number(tick.change)) ? Number(tick.change) : null;
         const pct = tick.changePercent != null && Number.isFinite(Number(tick.changePercent)) ? Number(tick.changePercent) : null;
-        change.textContent = pct === null ? 'STALE · CHANGE UNAVAILABLE' : 'STALE · ' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        const pointsText = points === null ? 'POINTS UNAVAILABLE' : (points >= 0 ? '+' : '') + showNumber(points) + ' pts';
+        const pctText = pct === null ? 'CHANGE % UNAVAILABLE' : (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        change.textContent = 'STALE · ' + pointsText + ' · ' + pctText;
         change.dataset.state = 'stale';
         price.dataset.state = 'stale';
       } else {

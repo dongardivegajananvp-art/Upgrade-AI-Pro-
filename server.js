@@ -41,6 +41,7 @@ let fnoUniverseLoadPromise = null;
 let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
+let fnoScannerNextTask = 'SCAN';
 let fnoStrategyScanRotation = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
 const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0 };
@@ -60,7 +61,8 @@ function startFnoStrategyScanner() {
       // discovered in the previous slice must not be discarded.
     }
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
-    if (fnoStrategyScanCursor>=scanLimit) {
+    const shouldWarmup=fnoResearchWarmupQueue.size>0 && (fnoScannerNextTask==='WARMUP' || fnoStrategyScanCursor>=scanLimit);
+    if (shouldWarmup) {
       const warmupSymbol=fnoResearchWarmupQueue.take();
       fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
       if (!warmupSymbol) return;
@@ -79,10 +81,12 @@ function startFnoStrategyScanner() {
       } finally {
         fnoResearchWarmupQueue.complete(warmupSymbol);
         fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
+        fnoScannerNextTask='SCAN';
         fnoStrategyScanBusy=false;
       }
       return;
     }
+    if (fnoStrategyScanCursor>=scanLimit) return;
     const symbol=active[fnoStrategyScanCursor++];
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
@@ -112,6 +116,7 @@ function startFnoStrategyScanner() {
           fnoStrategyScanStats.lastReason='Research warmup queue is at capacity; candidate remains un-warmed and cannot qualify for Top 3';
         }
       }
+      fnoScannerNextTask=fnoResearchWarmupQueue.size>0?'WARMUP':'SCAN';
     } catch(error) {
       fnoStrategyScanStats.lastSymbol=symbol;
       fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';

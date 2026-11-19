@@ -599,7 +599,7 @@ async function selectOptionContract(symbol) {
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
     const subscriptionState = result.subscription?.status || 'SUBSCRIPTION_STATE_UNAVAILABLE';
-    status.textContent = `${result.contract.side} · `${showNumber(result.contract.strike)} · MASTER VERIFIED · `${subscriptionState} · LIVE TICK PENDING`;
+    status.textContent = result.contract.side + ' · ' + showNumber(result.contract.strike) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch (error) {
     selectedContractSymbol = null;

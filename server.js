@@ -223,11 +223,19 @@ const server = http.createServer(async (req,res) => {
       if (!validateNseSymbol(body.underlying) || !['LONG','SHORT'].includes(body.side)) {
         return send(res,400,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Verified NSE underlying and confirmed LONG/SHORT direction are required'});
       }
+      const beforeChain = getMarketData();
+      if (!beforeChain.selectedUnderlying?.fresh || beforeChain.selectedUnderlying.symbol !== body.underlying) {
+        return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Fresh selected-underlying FYERS tick is required before strike selection'});
+      }
       const chainPayload = await getFyersOptionChain(body.underlying,10,body.timestamp || '');
       const chainData = chainPayload.data || chainPayload;
+      const latestUnderlying = getMarketData().selectedUnderlying;
+      if (!latestUnderlying?.fresh || latestUnderlying.symbol !== body.underlying) {
+        return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Underlying tick became stale while the FYERS option chain was loading'});
+      }
       const selection = chooseDirectionalOption({
         optionsChain:chainData.optionsChain,
-        underlyingPrice:Number(getMarketData().selectedUnderlying?.price),
+        underlyingPrice:Number(latestUnderlying.price),
         side:body.side
       });
       if (selection.status !== 'CANDIDATE_SELECTED') return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:selection.reason});

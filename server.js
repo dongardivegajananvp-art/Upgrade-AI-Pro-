@@ -53,6 +53,8 @@ function startFnoStrategyScanner() {
     const snapshot=getFnoUniverseSnapshot();
     const active=snapshot.activeSymbols || [];
     if (!active.length) { fnoStrategyScanStats.status='WAITING_FOR_ACTIVE_FNO_SLICE'; return; }
+    // Do not consume warmup retry attempts or advance scans during FYERS's 429 cooldown.
+    if (getRestDiagnostics().cooldownActive) { fnoStrategyScanStats.status='FYERS_REST_COOLDOWN_WAIT'; return; }
     if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
       fnoStrategyScanRotation=snapshot.rotationIndex;
       fnoStrategyScanCursor=0;

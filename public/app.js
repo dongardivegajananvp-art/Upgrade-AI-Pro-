@@ -43,19 +43,21 @@ async function refreshUniverseScan() {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
     container.replaceChildren();
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.scannedCount||0)+' HISTORY SCANS · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
     for(const item of data.top3||[]) {
-      const card=document.createElement('article');card.className='research-card';
+      const card=document.createElement('button');card.type='button';card.className='research-card';
       const head=document.createElement('div');head.className='research-card-head';
       const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
       const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
       head.append(title,score);
       const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
       const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
-      card.append(head,evidence,reason);container.append(card);
+      card.append(head,evidence,reason);
+      card.addEventListener('click',()=>selectSymbol(item.symbol));
+      container.append(card);
     }
     if(!(data.top3||[]).length) {
       const blocked=document.createElement('small');
@@ -625,7 +627,7 @@ function renderResearchResults(setup) {
     note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
     container.append(note);
   }
-  status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';
+  if(ranking.length) status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';
   for(const item of ranking) {
     const card=document.createElement('article');card.className='research-card';
     const head=document.createElement('div');head.className='research-card-head';

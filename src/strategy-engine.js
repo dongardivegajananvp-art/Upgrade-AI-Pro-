@@ -104,45 +104,37 @@ function pivotLow(rows, i, width=2) {
 // This is a shared entry-quality condition inside the existing nine strategies,
 // not a tenth strategy. For retest setups, validate the original level-crossing
 // candle; for trend/pullback setups without a fresh level cross, validate trigger candle.
-export function confirmBreakoutPressureVolume(rows, side, lookback = 20, volumeMultiple = 1.5, breakoutLevel = null, signalTime = null) {
-  if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) {
-    return { ok: false, reason: 'Verified completed OHLCV candles and direction are required' };
-  }
-  let signalIndex = signalTime == null ? rows.length - 1 : rows.findIndex(c => number(c.time) === number(signalTime));
-  if (signalIndex < 0) signalIndex = rows.length - 1;
-  // If a strategy has a breakout/retest level, locate the actual candle that
-  // crossed it, rather than accidentally checking the later retest candle.
+export function confirmBreakoutPressureVolume(rows, side, lookback = 20, volumeMultiple = 1.5, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
+  if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) return { ok: false, reason: 'Verified completed OHLCV candles and direction are required' };
+  const signalIndex = signalTime == null ? rows.length - 1 : rows.findIndex(c => number(c.time) === number(signalTime));
+  if (signalIndex < 0) return { ok: false, reason: 'The strategy trigger candle is missing from verified history' };
+  let breakoutIndex = signalIndex, levelCrossFound = false;
   if (finite(breakoutLevel)) {
     for (let i = signalIndex; i >= 1; i--) {
       const crossed = side === 'LONG'
         ? number(rows[i].close) > number(breakoutLevel) && number(rows[i-1].close) <= number(breakoutLevel)
         : number(rows[i].close) < number(breakoutLevel) && number(rows[i-1].close) >= number(breakoutLevel);
-      if (crossed) { signalIndex = i; break; }
+      if (crossed) { breakoutIndex = i; levelCrossFound = true; break; }
     }
   }
-  if (signalIndex < lookback) return { ok: false, reason: 'Breakout candle needs 20 prior completed candles for volume comparison' };
-  const candle = rows[signalIndex];
-  const prior = rows.slice(signalIndex - lookback, signalIndex);
-  if (![...prior, candle].every(c => validOhlcv(c) && finite(c.volume) && number(c.volume) > 0)) {
-    return { ok: false, reason: 'Breakout candle and prior 20 completed candles must have verified positive volume' };
-  }
+  if (requireLevelCross && !levelCrossFound) return { ok: false, reason: 'Original breakout/breakdown candle could not be verified; retest candle cannot substitute' };
+  if (breakoutIndex < lookback) return { ok: false, reason: 'Breakout candle needs 20 prior completed candles for volume comparison' };
+  const candle = rows[breakoutIndex], prior = rows.slice(breakoutIndex - lookback, breakoutIndex);
+  if (![...prior, candle].every(c => validOhlcv(c) && finite(c.volume) && number(c.volume) > 0)) return { ok: false, reason: 'Breakout candle and prior 20 completed candles must have verified positive volume' };
+  const volumeWindow = [...prior, candle];
+  if (!contiguousWindow(volumeWindow, volumeWindow.length)) return { ok: false, reason: 'Breakout candle and its 20-candle volume baseline are not contiguous 5-minute trading candles' };
   const averageVolume = prior.reduce((sum, c) => sum + number(c.volume), 0) / lookback;
-  const volumeRatio = number(candle.volume) / averageVolume;
-  const range = number(candle.high) - number(candle.low);
+  const volumeRatio = number(candle.volume) / averageVolume, range = number(candle.high) - number(candle.low);
   if (!(range > 0) || !(averageVolume > 0)) return { ok: false, reason: 'Breakout candle range or reference volume is invalid' };
-  const body = number(candle.close) - number(candle.open);
-  const bodyRatio = Math.abs(body) / range;
+  const body = number(candle.close) - number(candle.open), bodyRatio = Math.abs(body) / range;
   const closeLocation = (number(candle.close) - number(candle.low)) / range;
-  const pressureOk = side === 'LONG'
-    ? body > 0 && bodyRatio >= 0.55 && closeLocation >= 0.75
-    : body < 0 && bodyRatio >= 0.55 && closeLocation <= 0.25;
+  const pressureOk = side === 'LONG' ? body > 0 && bodyRatio >= 0.55 && closeLocation >= 0.75 : body < 0 && bodyRatio >= 0.55 && closeLocation <= 0.25;
   const volumeOk = volumeRatio >= volumeMultiple;
   return {
     ok: pressureOk && volumeOk,
     reason: !pressureOk ? (side === 'LONG' ? 'Buying pressure is insufficient on the breakout candle' : 'Selling pressure is insufficient on the breakdown candle') : !volumeOk ? 'Breakout candle volume is below 1.5x the prior 20-candle average' : 'Directional pressure and volume expansion confirmed on the actual breakout candle',
-    candleTime: number(candle.time), averageVolume: Number(averageVolume.toFixed(4)),
-    breakoutVolume: number(candle.volume), volumeRatio: Number(volumeRatio.toFixed(2)),
-    bodyRatio: Number(bodyRatio.toFixed(2)), closeLocation: Number(closeLocation.toFixed(2)),
+    candleTime: number(candle.time), averageVolume: Number(averageVolume.toFixed(4)), breakoutVolume: number(candle.volume),
+    volumeRatio: Number(volumeRatio.toFixed(2)), bodyRatio: Number(bodyRatio.toFixed(2)), closeLocation: Number(closeLocation.toFixed(2)),
     pressure: side === 'LONG' ? 'BUYING' : 'SELLING'
   };
 }
@@ -355,7 +347,8 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   // Apply one identical pressure+volume gate to every strategy signal.
   const rejectedForConfirmation = [];
   const confirmedCandidates = candidates.filter(item => {
-    const confirmation = confirmBreakoutPressureVolume(rows, item.side, 20, 1.5, item.breakoutLevel, item.confirmedAt);
+    const requireOriginalCross = ['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(item.strategy);
+    const confirmation = confirmBreakoutPressureVolume(rows, item.side, 20, 1.5, item.breakoutLevel, item.confirmedAt, requireOriginalCross);
     if (!confirmation.ok) {
       rejectedForConfirmation.push({ strategy: item.strategy, reason: confirmation.reason, metrics: confirmation });
       return false;

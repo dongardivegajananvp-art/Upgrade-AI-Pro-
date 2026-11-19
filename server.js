@@ -4,7 +4,8 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
-import { startMarketSocket, getMarketData } from './src/fyers-market-socket.js';
+import { startMarketSocket, getMarketData, setFnoUniverse } from './src/fyers-market-socket.js';
+import { loadFnoEquityUniverse } from './src/fyers-symbol-master.js';
 import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
@@ -45,7 +46,7 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    scanner:'NOT_STARTED', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    scanner:getMarketData().fno.status, orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
   });
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
     console.info('[FYERS_OAUTH] login route reached');
@@ -79,6 +80,12 @@ const server = http.createServer(async (req,res) => {
       console.info('[FYERS_OAUTH] token exchange succeeded; token value withheld');
       const market = startMarketSocket();
       console.info('[FYERS_DATA] socket start requested; status:', market.status);
+      loadFnoEquityUniverse().then(({ universe }) => {
+        const coverage = setFnoUniverse(universe);
+        console.info('[FYERS_SCANNER] official NSE F&O underlyings loaded:', coverage.universeCount, 'active socket slots:', coverage.activeCount);
+      }).catch(error => {
+        console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
+      });
       res.writeHead(302,{location:'/?fyers=connected','cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
     } catch (error) {
       console.error('[FYERS_OAUTH] token exchange failed:', error.message);

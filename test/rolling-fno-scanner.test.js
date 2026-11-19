@@ -23,10 +23,24 @@ test('marks old rolling ticks non-fresh and excludes prior-session observations'
   ]);
   const result=buildRollingFnoLeaderboard({universe,ticks,now,slotCount:20,rotationIntervalMs:60000});
   assert.equal(result.observedCount,1);
-  assert.equal(result.topGainers[0].fresh,false);
+  assert.equal(result.freshCount,0);
+  assert.equal(result.topGainers.length,0);
 });
 test('reports complete coverage only after every current-session symbol was observed', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];
   const ticks=new Map(universe.map(item=>[item.symbol,{symbol:item.symbol,price:10,changePercent:1,exchangeTime:sec,receivedAt:now-5000}]));
   assert.equal(buildRollingFnoLeaderboard({universe,ticks,now}).coverageComplete,true);
+});
+
+
+test('live Top Gainers never retains a stale rolling observation', () => {
+  const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];
+  const ticks=new Map([
+    ['NSE:A-EQ',{symbol:'NSE:A-EQ',price:10,changePercent:9,exchangeTime:sec,receivedAt:now-5000}],
+    ['NSE:B-EQ',{symbol:'NSE:B-EQ',price:20,changePercent:2,exchangeTime:sec,receivedAt:now-90000}]
+  ]);
+  const result=buildRollingFnoLeaderboard({universe,ticks,now,slotCount:20,rotationIntervalMs:60000});
+  assert.equal(result.freshCount,1);
+  assert.equal(result.topGainers.length,1);
+  assert.equal(result.topGainers[0].symbol,'NSE:A-EQ');
 });

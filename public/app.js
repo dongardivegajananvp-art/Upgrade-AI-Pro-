@@ -571,13 +571,25 @@ function renderResearchResults(setup) {
   const status=document.querySelector('#research-status'),container=document.querySelector('#research-results');
   container.replaceChildren();
   const ranking=Array.isArray(setup?.researchRanking)?setup.researchRanking:[];
+  if(ranking.length && ['LONG','SHORT'].includes(ranking[0]?.side)) {
+    const desiredSide=ranking[0].side==='LONG'?'CE':'PE';
+    const sideChanged=selectedOptionSide!==desiredSide;
+    if(sideChanged) {
+      selectedOptionSide=desiredSide;
+      document.querySelector('#ce-select').classList.toggle('active',desiredSide==='CE');
+      document.querySelector('#pe-select').classList.toggle('active',desiredSide==='PE');
+    }
+    if((sideChanged || !selectedContractSymbol) && optionChainRows.length && selectedUnderlyingPrice>0) {
+      renderOptionStrikes(selectedUnderlyingPrice);
+    }
+  }
   if(!ranking.length) {
     status.textContent=setup?.research?.status==='UNAVAILABLE'?'RESEARCH DATA INCOMPLETE':'NO VERIFIED RESEARCH RANKING';
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
     container.append(note);return;
   }
-  status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length;
+  status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';
   for(const item of ranking) {
     const card=document.createElement('article');card.className='research-card';
     const head=document.createElement('div');head.className='research-card-head';

@@ -52,3 +52,18 @@ test('common confirmation rejects a wick-only breakout without directional press
   rows[20] = { time: 1800000000 + 20 * 300, open: 100, high: 103, low: 99.5, close: 100.5, volume: 200 };
   assert.equal(confirmBreakoutPressureVolume(rows, 'LONG').ok, false);
 });
+
+test('common confirmation rejects a gap inside the 20-candle volume baseline', () => {
+  const rows = Array.from({ length: 21 }, (_, i) => ({ time: 1800000000 + i * 300, open: 100, high: 101, low: 99, close: 100.2, volume: 100 }));
+  rows[20] = { time: 1800000000 + 20 * 300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 200 };
+  rows[10].time += 300;
+  assert.equal(confirmBreakoutPressureVolume(rows, 'LONG').ok, false);
+});
+
+test('retest cannot substitute its candle when original level cross is missing', () => {
+  const rows = Array.from({ length: 21 }, (_, i) => ({ time: 1800000000 + i * 300, open: 100, high: 101, low: 99, close: 100.2, volume: 100 }));
+  rows[20] = { time: 1800000000 + 20 * 300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 200 };
+  const result = confirmBreakoutPressureVolume(rows, 'LONG', 20, 1.5, 105, rows[20].time, true);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Original breakout/);
+});

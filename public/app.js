@@ -10,6 +10,11 @@ let selectedOptionSide = 'CE';
 let selectedContractSymbol = null;
 let accountRefreshRunning = false;
 let lastAccountRefresh = 0;
+function tickStatusText(md, freshCount) {
+  if (freshCount === 3 && md.socketStatus !== 'CONNECTED') return 'FYERS RECONNECTING · LAST TICKS NOT CONFIRMED';
+  if (freshCount > 0) return 'FYERS PARTIAL / STALE · ' + freshCount + '/3 INDEX TICKS FRESH';
+  return 'FYERS STALE · WAITING FOR FRESH EXCHANGE TICKS';
+}
 function showNumber(value, digits=2) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
 }
@@ -38,19 +43,34 @@ async function refresh() {
       if (tick?.fresh) {
         freshCount++;
         price.textContent = showNumber(tick.price);
-        const pct = Number.isFinite(Number(tick.changePercent)) ? Number(tick.changePercent) : null;
-        change.textContent = pct === null ? 'CHANGE UNAVAILABLE' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-        change.dataset.state = pct === null ? 'unknown' : pct >= 0 ? 'up' : 'down';
+        const pct = tick.changePercent != null && Number.isFinite(Number(tick.changePercent)) ? Number(tick.changePercent) : null;
+        change.textContent = pct === null ? 'CHANGE UNAVAILABLE' : (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        change.dataset.state = pct === null ? 'unknown' : pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+        price.dataset.state = 'fresh';
+      } else if (tick) {
+        price.textContent = showNumber(tick.price);
+        const pct = tick.changePercent != null && Number.isFinite(Number(tick.changePercent)) ? Number(tick.changePercent) : null;
+        change.textContent = pct === null ? 'STALE · CHANGE UNAVAILABLE' : 'STALE · ' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+        change.dataset.state = 'stale';
+        price.dataset.state = 'stale';
       } else {
         price.textContent = '—';
-        change.textContent = tick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR FYERS TICK';
+        change.textContent = 'WAITING FOR FYERS TICK';
         change.dataset.state = 'unknown';
+        price.dataset.state = 'unknown';
       }
     }
     const feed = document.querySelector('#feed');
-    if (freshCount === 3) feed.textContent = 'FYERS · 3/3 INDEX TICKS FRESH · NSE ONLY';
-    else if (freshCount > 0) feed.textContent = `FYERS · ${freshCount}/3 INDEX TICKS FRESH · PARTIAL FEED`;
-    else feed.textContent = 'FYERS · ' + (md.socketStatus || s.auth?.status || 'NOT CONNECTED').replaceAll('_',' ') + ' · NO VERIFIED LIVE TICK';
+    if (md.socketStatus === 'CONNECTED' && freshCount === 3) {
+      feed.textContent = 'FYERS CONNECTED · 3/3 INDEX TICKS FRESH · NSE ONLY';
+      feed.dataset.state = 'connected';
+    } else if (md.socketStatus === 'CONNECTED' || freshCount > 0 || s.auth?.tokenStored) {
+      feed.textContent = tickStatusText(md, freshCount);
+      feed.dataset.state = 'stale';
+    } else {
+      feed.textContent = 'FYERS DISCONNECTED · NO VERIFIED LIVE TICK';
+      feed.dataset.state = 'disconnected';
+    }
   } catch {
     document.querySelector('#feed').textContent = 'BACKEND DISCONNECTED';
   }

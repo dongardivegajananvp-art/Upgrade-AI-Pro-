@@ -32,6 +32,9 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
   if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
   if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
   if (!valid(fifteenMinuteCandles) || fifteenMinuteCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified 15-minute candles are required for multi-timeframe research'};
+  const latest15m=Number(fifteenMinuteCandles.at(-1).time);
+  if(!Number.isFinite(latest15m)||Number(tick?.exchangeTime)-latest15m < -3||Number(tick?.exchangeTime)-latest15m > 1800)
+    return {status:'UNAVAILABLE',reason:'Latest completed FYERS 15-minute candle is stale or out of sequence'};
   if (!tick || !Number.isFinite(Number(tick.exchangeTime)) || !Number.isFinite(Number(tick.receivedAt)) ||
       now-Number(tick.receivedAt)<0 || now-Number(tick.receivedAt)>10000 ||
       now/1000-Number(tick.exchangeTime)<-3 || now/1000-Number(tick.exchangeTime)>10)

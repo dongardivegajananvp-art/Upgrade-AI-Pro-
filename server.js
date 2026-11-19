@@ -6,7 +6,7 @@ import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
-import { chooseDirectionalOption } from './src/option-selection.js';
+import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
@@ -338,10 +338,8 @@ const server = http.createServer(async (req,res) => {
       if (!validateNseSymbol(body.underlying) || !['LONG','SHORT'].includes(body.side)) {
         return send(res,400,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Verified NSE underlying and confirmed LONG/SHORT direction are required'});
       }
-      const requestedExpiry = Number(body.timestamp);
-      const requestedExpirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
-        ? (requestedExpiry > 1e12 ? requestedExpiry / 1000 : requestedExpiry) : null;
-      if (!requestedExpirySeconds || !Number.isFinite(new Date(requestedExpirySeconds * 1000).getTime())) {
+      const requestedExpirySeconds = normalizeExpiryTimestamp(body.timestamp);
+      if (requestedExpirySeconds === null) {
         return send(res,400,{status:'AUTO_OPTION_EXPIRY_REQUIRED',reason:'Select a valid FYERS option expiry before automatic CE/PE selection'});
       }
       const beforeChain = getMarketData();
@@ -361,11 +359,10 @@ const server = http.createServer(async (req,res) => {
       });
       if (selection.status !== 'CANDIDATE_SELECTED') return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:selection.reason});
       const contract = getVerifiedOptionContract(selection.symbol);
-      const expiryDay = value => new Date((Number(value) + 19800) * 1000).toISOString().slice(0,10);
       const expectedUnderlying=body.underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
       if (contract.side !== selection.side || contract.strike !== selection.strike ||
           contract.underlying !== expectedUnderlying ||
-          expiryDay(contract.expiry) !== expiryDay(requestedExpirySeconds)) {
+          !matchesRequestedExpiry(contract.expiry,requestedExpirySeconds)) {
         return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate underlying, side, strike or expiry does not match the official active contract master'});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);

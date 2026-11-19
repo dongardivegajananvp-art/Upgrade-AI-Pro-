@@ -27,10 +27,10 @@ test('fixed premium plan fails closed on missing tick size or invalid structural
   assert.equal(buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:100.1,targetR:2}).status,'NO_TRADE');
 });
 
-function risingCandles(count,start,step,interval) {
+function risingCandles(count,start,step,interval,endTime=null) {
   return Array.from({length:count},(_,i)=>{
     const open=start+i*step,close=open+step;
-    return {time:interval?Math.floor(Date.now()/1000)-((count-1-i)*interval):i+1,open,high:close+step,low:open-step,close,volume:1000+i};
+    return {time:interval?(endTime===null?Math.floor(Date.now()/1000):endTime)-((count-1-i)*interval):i+1,open,high:close+step,low:open-step,close,volume:1000+i};
   });
 }
 function flatCandles(count,baseTime,interval) {
@@ -53,9 +53,9 @@ test('early breakout watch requires fresh tick and aligned daily plus 15m trends
 test('research targets adapt to aligned trend versus range regime without reducing 2R floor', () => {
   const now=Date.parse('2026-11-19T08:00:00Z'), exchangeTime=now/1000;
   const tick={price:110,exchangeTime,receivedAt:now};
-  const five=risingCandles(50,100,.1,300);
-  const daily=risingCandles(50,100,.5,86400);
-  const fifteen=risingCandles(50,100,.2,900);
+  const five=risingCandles(50,100,.1,300,exchangeTime-300);
+  const daily=risingCandles(50,100,.5,86400,exchangeTime-86400);
+  const fifteen=risingCandles(50,100,.2,900,exchangeTime-900);
   const setup={side:'LONG',strategy:'EMA20_EMA50_TREND',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
   const aligned=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick,setup,now});
   assert.equal(aligned.status,'COMPLETE');

@@ -332,21 +332,6 @@ function renderChartViewport() {
     .replace('NIFTY50', 'NIFTY 50')
     .replace('NIFTYBANK', 'BANK NIFTY');
   svg.setAttribute('aria-label', chartSymbolLabel + ' FYERS five-minute candlestick chart with supply and demand structure zones');
-  // A low-opacity SVG watermark keeps the selected instrument identifiable
-  // behind candles without obscuring price action or changing chart data.
-  const watermark = document.createElementNS(ns, 'text');
-  watermark.setAttribute('x', '592');
-  watermark.setAttribute('y', '315');
-  watermark.setAttribute('text-anchor', 'middle');
-  watermark.setAttribute('dominant-baseline', 'middle');
-  watermark.setAttribute('fill', '#9bb0ca');
-  watermark.setAttribute('fill-opacity', '0.13');
-  watermark.setAttribute('font-size', '68');
-  watermark.setAttribute('font-weight', '800');
-  watermark.setAttribute('letter-spacing', '5');
-  watermark.setAttribute('pointer-events', 'none');
-  watermark.textContent = chartSymbolLabel;
-  svg.append(watermark);
   const left=76,right=92,top=28,bottom=100,plotW=1200-left-right,plotH=620-top-bottom;
   const highs=visible.map(c=>Number(c.high)), lows=visible.map(c=>Number(c.low));
   const max=Math.max(...highs),min=Math.min(...lows),range=Math.max(max-min,0.000001);
@@ -420,6 +405,25 @@ function renderChartViewport() {
     info.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · V '+showNumber(c.volume,0)+' · CURSOR '+showNumber(price);
   });
   svg.addEventListener('pointerleave',()=>{crossV.setAttribute('opacity','0');crossH.setAttribute('opacity','0');info.textContent='Move over chart for candle time and OHLCV';});
+  // Draw the watermark after candles/zones so it remains visible on dark charts.
+  // Pointer events stay disabled so chart crosshair and OHLCV inspection keep working.
+  const watermark = document.createElementNS(ns, 'text');
+  watermark.setAttribute('class', 'chart-symbol-watermark');
+  watermark.setAttribute('x', '592');
+  watermark.setAttribute('y', '315');
+  watermark.setAttribute('text-anchor', 'middle');
+  watermark.setAttribute('dominant-baseline', 'middle');
+  watermark.setAttribute('fill', '#b8c9df');
+  watermark.setAttribute('fill-opacity', '0.22');
+  watermark.setAttribute('stroke', '#b8c9df');
+  watermark.setAttribute('stroke-opacity', '0.08');
+  watermark.setAttribute('stroke-width', '1');
+  watermark.setAttribute('font-size', '72');
+  watermark.setAttribute('font-weight', '900');
+  watermark.setAttribute('letter-spacing', '4');
+  watermark.setAttribute('pointer-events', 'none');
+  watermark.textContent = chartSymbolLabel;
+  svg.append(watermark);
   area.append(svg);
   const livePresent = Boolean(chartLiveCandle && visible.some(c=>c.time===chartLiveCandle.time));
   document.querySelector('#chart-candle-status').textContent=(visible.length-(livePresent?1:0))+' COMPLETED CANDLES · '+(livePresent?'LIVE 5-MIN CANDLE · TICK BUILT':'WAITING FOR LIVE UNDERLYING TICK');
@@ -518,6 +522,14 @@ async function evaluateSelectedSetup() {
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;
   const state=document.querySelector('#setup-state');
   state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
+  const researchStatus=document.querySelector('#research-status');
+  researchStatus.textContent=(evaluatedSymbol.replace(/^(NSE|BSE):/,'').replace(/-EQ$/,'')+' · NINE-STRATEGY RESEARCH RUNNING');
+  const researchResults=document.querySelector('#research-results');
+  researchResults.replaceChildren();
+  const researchNote=document.createElement('div');
+  researchNote.className='empty-inline';
+  researchNote.textContent='Checking verified FYERS daily, 15-minute and completed 5-minute candles for the selected stock.';
+  researchResults.append(researchNote);
   for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
   try {
     const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol})});

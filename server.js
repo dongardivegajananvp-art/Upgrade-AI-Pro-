@@ -54,7 +54,7 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    scanner:getMarketData().fno.status, orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:getMarketData().fno, scanner:'NOT_CONNECTED', strategyEngine:'NINE_STRATEGIES_NOT_YET_CONNECTED_TO_LIVE_SCAN', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
   });
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
     console.info('[FYERS_OAUTH] login route reached');

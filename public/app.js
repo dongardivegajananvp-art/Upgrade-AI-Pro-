@@ -54,8 +54,9 @@ async function refreshUniverseScan() {
       const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
       head.append(title,score);
       const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
+      const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
       const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
-      card.append(head,evidence,reason);
+      card.append(head,evidence,target,reason);
       card.addEventListener('click',()=>selectSymbol(item.symbol));
       container.append(card);
     }
@@ -636,8 +637,9 @@ function renderResearchResults(setup) {
     head.append(name,score);
     const tf=document.createElement('p');tf.textContent='Daily '+item.timeframes.daily+' · 15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
     const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
+    const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
     const invalid=document.createElement('small');invalid.textContent='Invalidation: '+item.invalidation;
-    card.append(head,tf,evidence,invalid);container.append(card);
+    card.append(head,tf,evidence,target,invalid);container.append(card);
   }
   const ledger=Array.isArray(setup?.strategyLedger)?setup.strategyLedger:[];
   if(ledger.length) {
@@ -680,7 +682,7 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
       document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
-      state.textContent=setup.strategy+' · '+setup.optionSide+' · VERIFIED'; state.dataset.state='confirmed';
+      state.textContent=setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · EARLY ENTRY · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
       chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
       renderChartViewport();
     } else {

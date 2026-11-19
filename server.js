@@ -6,7 +6,7 @@ import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
-import { evaluateNineStrategies } from './src/strategy-engine.js';
+import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, validateNseSymbol } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
@@ -67,6 +67,38 @@ const server = http.createServer(async (req,res) => {
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
         const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol),getFifteenMinuteHistory(symbol)]);
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
+      }
+      if (url.pathname === '/api/research') {
+        const symbol = url.searchParams.get('symbol');
+        if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
+        const market = getMarketData();
+        const underlying = market.selectedUnderlying;
+        if (!underlying?.fresh || underlying.symbol !== symbol) {
+          return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Fresh selected-underlying FYERS tick is required for independent research'});
+        }
+        const [fiveMinute,daily,fifteenMinute] = await Promise.all([
+          getFiveMinuteHistory(symbol), getDailyHistory(symbol), getFifteenMinuteHistory(symbol)
+        ]);
+        const latestMarket = getMarketData();
+        const latestUnderlying = latestMarket.selectedUnderlying;
+        if (!latestUnderlying?.fresh || latestUnderlying.symbol !== symbol) {
+          return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Underlying tick became stale while verified research history was loading'});
+        }
+        const isTopGainer = (latestMarket.fno?.topGainers || []).some(item => item.symbol === symbol);
+        const research = detectNineStrategySetup({
+          underlyingCandles:fiveMinute.candles, underlyingTick:latestUnderlying,
+          dailyCandles:daily.candles, fifteenMinuteCandles:fifteenMinute.candles,
+          isTopGainer, researchEnabled:true, now:Date.now()
+        });
+        return send(res,200,{
+          status:research.status,
+          researchRanking:research.researchRanking || [],
+          reason:research.reason || (research.status === 'NO_TRADE' ? 'No strategy passed the verified setup filters' : ''),
+          research:research.research || null,
+          underlying:symbol,
+          source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',
+          asOfExchangeTime:latestUnderlying.exchangeTime
+        });
       }
       if (url.pathname === '/api/quotes') {
         const symbols = (url.searchParams.get('symbols') || '').split(',').filter(Boolean);
@@ -192,8 +224,11 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'OPTION_SUBSCRIPTION_CLEARED'});
       }
       const contract = getVerifiedOptionContract(body.symbol);
-      setSelectedOptionSymbol(contract.symbol);
-      return send(res,200,{status:'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',contract});
+      const subscription = setSelectedOptionSymbol(contract.symbol);
+      if (subscription?.status === 'SUBSCRIPTION_FAILED') {
+        return send(res,503,{status:'OPTION_SUBSCRIPTION_FAILED',reason:subscription.reason || 'FYERS option subscription failed',subscription});
+      }
+      return send(res,200,{status:'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',contract,subscription});
     } catch (error) {
       return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:String(error.message || 'Option contract verification failed').slice(0,180)});
     }

@@ -16,6 +16,13 @@ let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
 let setupLastBucket = null;
 let lastAccountRefresh = 0;
+document.querySelectorAll('.indices article[data-symbol]').forEach(card => {
+  const open = () => selectIndexSymbol(card.dataset.symbol);
+  card.addEventListener('click', open);
+  card.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+  });
+});
 function tickStatusText(md, freshCount) {
   if (freshCount === 3 && md.socketStatus !== 'CONNECTED') return 'FYERS RECONNECTING · LAST TICKS NOT CONFIRMED';
   if (freshCount > 0) return 'FYERS PARTIAL / STALE · ' + freshCount + '/3 INDEX TICKS FRESH';
@@ -194,6 +201,40 @@ function renderMovers(fno) {
     change.dataset.state = pct >= 0 ? 'up' : 'down';
     button.append(name, price, change);
     container.append(button);
+  }
+}
+async function selectIndexSymbol(symbol) {
+  if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
+  selectedSymbol = symbol; selectedUnderlyingPrice = null; selectedContractSymbol = null;
+  setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
+  const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
+  title.textContent=symbol+' · LOADING VERIFIED FYERS INDEX HISTORY';
+  area.replaceChildren();
+  const loading=document.createElement('div');loading.className='chart-empty';
+  loading.textContent='Loading completed FYERS index candles. No synthetic candles are used.';area.append(loading);
+  for(const id of ['setup-entry','setup-sl','setup-target','setup-rr'])document.getElementById(id).textContent='—';
+  document.querySelector('#setup-state').textContent='INDEX CHART · OPTIONS STRATEGY NOT APPLICABLE';
+  document.querySelector('#option-status').textContent='INDEX SELECTED · OPTION CHAIN NOT APPLICABLE';
+  document.querySelector('#option-ltp').textContent='—';document.querySelector('#option-quantity').textContent='—';
+  document.querySelector('#expiry-select').replaceChildren(new Option('—',''));
+  document.querySelector('#strike-select').replaceChildren(new Option('—',''));
+  document.querySelector('#research-status').textContent='INDEX VIEW · STOCK SETUP RESEARCH NOT RUN';
+  document.querySelector('#research-results').textContent='Select an NSE F&O gainer to run the nine-strategy research engine.';
+  renderLiveCandleSummary(null);
+  try {
+    await clearSelectedOption();
+    const response=await fetch('/api/history?symbol='+encodeURIComponent(symbol),{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok||!Array.isArray(data.candles)||!data.candles.length)throw new Error(data.reason||'Verified FYERS index history unavailable');
+    if(selectedSymbol!==symbol)return;
+    drawHistoryChart(data.candles);selectedUnderlyingPrice=Number(data.candles.at(-1)?.close)||null;
+    title.textContent=`${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN INDEX CANDLES`;
+    document.querySelector('#chart-candle-status').textContent='INDEX HISTORY · COMPLETED FYERS CANDLES';
+  } catch(error) {
+    if(selectedSymbol!==symbol)return;
+    area.replaceChildren();const note=document.createElement('div');note.className='chart-empty';
+    note.textContent=String(error.message||'Index history unavailable')+' · NO SYNTHETIC DATA';
+    area.append(note);title.textContent=symbol+' · INDEX HISTORY UNAVAILABLE';
   }
 }
 async function selectSymbol(symbol, livePrice = null) {
@@ -424,16 +465,42 @@ function renderOptionStrikes(underlyingPrice) {
   }
   selectOptionContract(select.value);
 }
+function renderResearchResults(setup) {
+  const status=document.querySelector('#research-status'),container=document.querySelector('#research-results');
+  container.replaceChildren();
+  const ranking=Array.isArray(setup?.researchRanking)?setup.researchRanking:[];
+  if(!ranking.length) {
+    status.textContent=setup?.research?.status==='UNAVAILABLE'?'RESEARCH DATA INCOMPLETE':'NO VERIFIED RESEARCH RANKING';
+    const note=document.createElement('div');note.className='empty-inline';
+    note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
+    container.append(note);return;
+  }
+  status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length;
+  for(const item of ranking) {
+    const card=document.createElement('article');card.className='research-card';
+    const head=document.createElement('div');head.className='research-card-head';
+    const name=document.createElement('strong');name.textContent='#'+item.rank+' '+item.strategy;
+    const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
+    head.append(name,score);
+    const tf=document.createElement('p');tf.textContent='Daily '+item.timeframes.daily+' · 15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
+    const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
+    const invalid=document.createElement('small');invalid.textContent='Invalidation: '+item.invalidation;
+    card.append(head,tf,evidence,invalid);container.append(card);
+  }
+}
 async function evaluateSelectedSetup() {
   if (setupEvaluationRunning || setupEvaluationDone || !selectedSymbol || !selectedContractSymbol) return;
   setupEvaluationRunning = true;
+  const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;
   const state=document.querySelector('#setup-state');
   state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
   for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
   try {
     const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol})});
     const setup=await response.json();
+    if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
+    renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
     if(setup.status==='SETUP_CONFIRMED') {

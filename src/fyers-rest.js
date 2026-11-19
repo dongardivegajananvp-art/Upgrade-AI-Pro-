@@ -90,6 +90,26 @@ export async function getFyersQuotes(symbols) {
   }
   return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') });
 }
+const dailyCache = new Map();
+export async function getDailyHistory(symbol, now = Date.now()) {
+  if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
+  const cached = dailyCache.get(symbol);
+  if (cached && now - cached.savedAt < 60000) return cached.value;
+  const to = istDate(now);
+  const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
+  const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to });
+  if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
+  const seen = new Set();
+  const candles = body.candles.map(row => {
+    if (!Array.isArray(row) || row.length < 6) return null;
+    const [time,open,high,low,close,volume]=row.map(Number);
+    if (![time,open,high,low,close,volume].every(Number.isFinite) || time<=0 || open<=0 || close<=0 || high<Math.max(open,close,low) || low>Math.min(open,close) || volume<0 || seen.has(time)) return null;
+    seen.add(time); return {time,open,high,low,close,volume,completed:true,source:'FYERS_DAILY_HISTORY'};
+  }).filter(Boolean).sort((a,b)=>a.time-b.time);
+  const value={symbol,candles,count:candles.length,source:'FYERS_DAILY_HISTORY'};
+  dailyCache.set(symbol,{savedAt:now,value});
+  return value;
+}
 export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = '') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');
   const count = Number(strikecount);

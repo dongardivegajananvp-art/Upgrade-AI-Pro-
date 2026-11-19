@@ -17,6 +17,10 @@ let activeFnoSymbols = [];
 let rotationIndex = 0;
 let rotationTimer = null;
 let selectedOptionSymbol = null;
+let optionSubscriptionStatus = 'NOT_SELECTED';
+let optionSubscriptionError = null;
+let optionSubscriptionRequestedAt = null;
+let optionLastTickAt = null;
 let selectedUnderlyingSymbol = null;
 let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
@@ -66,6 +70,11 @@ function accept(item) {
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
+  if (symbol === selectedOptionSymbol) {
+    optionSubscriptionStatus = 'TICK_RECEIVED';
+    optionSubscriptionError = null;
+    optionLastTickAt = tick.receivedAt;
+  }
   if (symbol === selectedUnderlyingSymbol) {
     const bucket = Math.floor(exchangeTime / 300) * 300;
     const local = new Date((bucket + 19800) * 1000);
@@ -142,18 +151,36 @@ export function setSelectedUnderlyingSymbol(symbol) {
 }
 export function setSelectedOptionSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+$/.test(symbol) ? symbol : null;
-  if (next === selectedOptionSymbol) return;
+  if (next === selectedOptionSymbol) {
+    return { status: optionSubscriptionStatus, symbol: next, reason: optionSubscriptionError };
+  }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      if (selectedOptionSymbol && typeof socket.unsubscribe === 'function') socket.unsubscribe([selectedOptionSymbol]);
+      if (selectedOptionSymbol) {
+        if (typeof socket.unsubscribe !== 'function') {
+          optionSubscriptionStatus = 'SUBSCRIPTION_FAILED';
+          optionSubscriptionError = 'FYERS SDK unsubscribe is unavailable; previous option subscription retained to protect the symbol cap';
+          return { status: optionSubscriptionStatus, symbol: selectedOptionSymbol, reason: optionSubscriptionError };
+        }
+        socket.unsubscribe([selectedOptionSymbol]);
+      }
       if (next && !activeFnoSymbols.includes(next) && !INDEX_SYMBOLS.includes(next)) socket.subscribe([next]);
     } catch (error) {
       lastError = safeError(error);
+      optionSubscriptionStatus = 'SUBSCRIPTION_FAILED';
+      optionSubscriptionError = lastError;
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
-      return;
+      console.error('[FYERS_DATA] option subscription update failed:', lastError);
+      return { status: optionSubscriptionStatus, symbol: selectedOptionSymbol, reason: lastError };
     }
   }
   selectedOptionSymbol = next;
+  optionSubscriptionRequestedAt = next ? Date.now() : null;
+  optionLastTickAt = null;
+  optionSubscriptionError = null;
+  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_SENT' : 'QUEUED_UNTIL_SOCKET_CONNECT';
+  console.info('[FYERS_DATA] option subscription state:', optionSubscriptionStatus, next || 'cleared');
+  return { status: optionSubscriptionStatus, symbol: next };
 }
 export function startMarketSocket() {
   const token = getAccessTokenForServer();
@@ -172,6 +199,10 @@ export function startMarketSocket() {
         return;
       }
       socket.subscribe(subscriptions);
+      if (selectedOptionSymbol) {
+        optionSubscriptionStatus = 'SUBSCRIPTION_SENT';
+        optionSubscriptionError = null;
+      }
       socket.autoreconnect(10);
       console.info('[FYERS_DATA] connected; subscribed symbols:', subscriptions.length, 'indices:', INDEX_SYMBOLS.length, 'F&O underlyings:', activeFnoSymbols.length);
     });

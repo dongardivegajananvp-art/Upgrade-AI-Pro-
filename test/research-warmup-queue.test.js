@@ -75,3 +75,12 @@ test('warmup retry uses exponential backoff without blocking other ready candida
   assert.equal(queue.take(12999), null);
   assert.equal(queue.take(13000), 'NSE:A-EQ');
 });
+
+test('scanner can distinguish delayed retry work from immediately ready warmups', () => {
+  const queue = createResearchWarmupQueue({ retryBaseMs: 2000 });
+  queue.enqueue('NSE:A-EQ');
+  assert.equal(queue.take(5000), 'NSE:A-EQ');
+  queue.fail('NSE:A-EQ', 5000);
+  assert.equal(queue.hasReady(6999), false);
+  assert.equal(queue.hasReady(7000), true);
+});

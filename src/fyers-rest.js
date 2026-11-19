@@ -9,6 +9,7 @@ let cooldownUntil = 0;
 let queue = Promise.resolve();
 let lastRestStatus = 'IDLE';
 let lastRestError = null;
+let lastRestMeta = { retryAfter: null, cfRay: null, server: null, contentType: null };
 
 export function validateNseSymbol(symbol) {
   return typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]{1,48}$/.test(symbol);
@@ -41,13 +42,22 @@ async function scheduledFetch(url, options) {
     if (delay) await wait(delay);
     const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
     nextRequestAt = Date.now() + MIN_REST_GAP_MS;
+    lastRestMeta = {
+      retryAfter: response.headers.get('retry-after'),
+      cfRay: response.headers.get('cf-ray'),
+      server: response.headers.get('server'),
+      contentType: response.headers.get('content-type')
+    };
+    const rawBody = await response.text().catch(() => '');
+    let body = {};
+    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
     if (response.status === 429) {
       cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
       lastRestStatus = 'RATE_LIMITED';
-      lastRestError = 'FYERS HTTP 429; one-hour REST cooldown active';
+      const markers = [lastRestMeta.retryAfter ? 'Retry-After=' + lastRestMeta.retryAfter : null, lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null, lastRestMeta.server ? 'Server=' + lastRestMeta.server : null].filter(Boolean).join(' · ');
+      lastRestError = 'FYERS HTTP 429; one-hour REST safety cooldown active' + (markers ? ' · ' + markers : '');
       throw new Error(lastRestError);
     }
-    const body = await response.json().catch(() => ({}));
     if (!response.ok || body.s === 'error' || (Number(body.code) < 0)) {
       lastRestStatus = 'ERROR';
       lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
@@ -157,6 +167,7 @@ export function getRestDiagnostics(now = Date.now()) {
   return {
     status: lastRestStatus,
     lastError: lastRestError,
+    upstream: { ...lastRestMeta },
     minGapMs: MIN_REST_GAP_MS,
     cooldownActive: now < cooldownUntil,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null

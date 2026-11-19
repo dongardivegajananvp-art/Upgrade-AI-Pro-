@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
+import { buildRollingFnoLeaderboard } from './rolling-fno-scanner.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -199,8 +200,8 @@ export function getMarketData(now = Date.now()) {
     const tick = ticks.get(symbol) || null;
     indices[symbol] = tick ? { ...tick, fresh: isFresh(tick, now) } : null;
   }
-  const activeTicks = activeFnoSymbols.map(symbol => ticks.get(symbol)).filter(tick => isFresh(tick, now) && Number.isFinite(tick.changePercent));
-  const topGainers = activeTicks.sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
+  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: MAX_UNDERLYING_SLOTS, rotationIntervalMs: ROTATION_INTERVAL_MS });
+  const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
     socketStatus, lastError, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
@@ -211,9 +212,11 @@ export function getMarketData(now = Date.now()) {
     fno: {
       status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
+      observedCount: rolling.observedCount, coverageComplete: rolling.coverageComplete,
+      rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
       rotationIntervalMs: ROTATION_INTERVAL_MS, currentSliceStart: universe.length ? rotationIndex : 0,
       subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
-      topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: true }))
+      topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: tick.fresh, ageSeconds: tick.ageSeconds, actionable: false }))
     }
   };
 }

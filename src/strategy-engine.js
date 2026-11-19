@@ -101,6 +101,41 @@ function pivotLow(rows, i, width=2) {
   for(let j=Math.max(0,i-width);j<=Math.min(rows.length-1,i+width);j++) if(j!==i&&number(rows[j].low)<=value)return false;
   return true;
 }
+// Common breakout-candle confirmation used by all nine strategies.
+// OHLCV cannot prove bid/ask delta; directional body/close-location is the
+// pressure proxy, and volume must expand versus the prior 20 completed candles.
+export function confirmBreakoutPressureVolume(rows, side, lookback = 20, volumeMultiple = 1.5) {
+  if (!Array.isArray(rows) || rows.length < lookback + 1 || !['LONG','SHORT'].includes(side)) {
+    return { ok: false, reason: 'Requires breakout candle plus 20 prior completed candles with volume' };
+  }
+  const prior = rows.slice(-(lookback + 1), -1);
+  const candle = rows.at(-1);
+  if (![...prior, candle].every(c => validOhlcv(c) && finite(c.volume) && number(c.volume) > 0)) {
+    return { ok: false, reason: 'Breakout candle and prior 20 candles must have verified positive volume' };
+  }
+  const averageVolume = prior.reduce((sum, c) => sum + number(c.volume), 0) / lookback;
+  const volumeRatio = number(candle.volume) / averageVolume;
+  const range = number(candle.high) - number(candle.low);
+  if (!(range > 0) || !(averageVolume > 0)) return { ok: false, reason: 'Breakout candle range or reference volume is invalid' };
+  const body = number(candle.close) - number(candle.open);
+  const bodyRatio = Math.abs(body) / range;
+  const closeLocation = (number(candle.close) - number(candle.low)) / range;
+  const pressureOk = side === 'LONG'
+    ? body > 0 && bodyRatio >= 0.55 && closeLocation >= 0.75
+    : body < 0 && bodyRatio >= 0.55 && closeLocation <= 0.25;
+  const volumeOk = volumeRatio >= volumeMultiple;
+  return {
+    ok: pressureOk && volumeOk,
+    reason: !pressureOk ? (side === 'LONG' ? 'Buying pressure is insufficient on breakout candle' : 'Selling pressure is insufficient on breakdown candle') : !volumeOk ? 'Breakout candle volume is below 1.5x the prior 20-candle average' : 'Directional candle pressure and volume expansion confirmed',
+    averageVolume: Number(averageVolume.toFixed(4)),
+    breakoutVolume: number(candle.volume),
+    volumeRatio: Number(volumeRatio.toFixed(2)),
+    bodyRatio: Number(bodyRatio.toFixed(2)),
+    closeLocation: Number(closeLocation.toFixed(2)),
+    pressure: side === 'LONG' ? 'BUYING' : 'SELLING'
+  };
+}
+
 function candidate(strategy, side, level, candle, details={}) {
   if (!finite(level) || number(level)<=0) return null;
   return { strategy, side, breakoutLevel:number(level), confirmedAt:number(candle.time), confirmationClose:number(candle.close), ...details };
@@ -306,7 +341,20 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
   consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
   consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)));
+  // Apply one identical pressure+volume gate to every strategy signal.
+  const rejectedForConfirmation = [];
+  const confirmedCandidates = candidates.filter(item => {
+    const confirmation = confirmBreakoutPressureVolume(rows, item.side);
+    if (!confirmation.ok) {
+      rejectedForConfirmation.push({ strategy: item.strategy, reason: confirmation.reason, metrics: confirmation });
+      return false;
+    }
+    item.breakoutConfirmation = confirmation;
+    return true;
+  });
+  candidates.splice(0, candidates.length, ...confirmedCandidates);
   if(!candidates.length){
+    if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and 1.5x volume confirmation are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked};
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
     if(researchEnabled){
       const watch=analyzeEarlyWatch({candles:rows,dailyCandles,tick:underlyingTick,now});

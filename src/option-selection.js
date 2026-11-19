@@ -25,3 +25,18 @@ export function chooseDirectionalOption({ optionsChain = [], underlyingPrice, si
     selection: 'NEAREST_ATM_IN_SELECTED_EXPIRY', actionable: false
   };
 }
+
+export function normalizeExpiryTimestamp(value) {
+  const raw=Number(value);
+  if(!Number.isFinite(raw)||raw<=0)return null;
+  const seconds=raw>1e12?raw/1000:raw;
+  return Number.isFinite(new Date(seconds*1000).getTime())?seconds:null;
+}
+
+export function matchesRequestedExpiry(contractExpiry, requestedExpiry) {
+  const contract=normalizeExpiryTimestamp(contractExpiry);
+  const requested=normalizeExpiryTimestamp(requestedExpiry);
+  if(contract===null||requested===null)return false;
+  const istDay=value=>new Date((value+19800)*1000).toISOString().slice(0,10);
+  return istDay(contract)===istDay(requested);
+}

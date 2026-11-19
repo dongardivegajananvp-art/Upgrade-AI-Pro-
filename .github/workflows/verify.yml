@@ -14,4 +14,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Check JavaScript syntax
+        run: |
+          node --check server.js
+          node --check public/app.js
+          node --check src/fyers-market-socket.js
+          node --check src/fyers-rest.js
+          node --check src/fyers-symbol-master.js
+          node --check src/rolling-fno-scanner.js
+          node --check src/rolling-fno-strategy-engine.js
+          node --check src/option-selection.js
+          node --check src/strategy-engine.js
       - run: npm test

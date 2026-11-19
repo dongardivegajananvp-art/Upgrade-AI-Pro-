@@ -136,7 +136,7 @@ function renderMovers(fno) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'mover-card';
-    button.addEventListener('click', () => selectSymbol(item.symbol));
+    button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
     name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
     const price = document.createElement('span');
@@ -149,7 +149,7 @@ function renderMovers(fno) {
     container.append(button);
   }
 }
-async function selectSymbol(symbol) {
+async function selectSymbol(symbol, livePrice = null) {
   if (!symbol || symbol === selectedSymbol) return;
   selectedSymbol = symbol;
   const title = document.querySelector('#symbol');
@@ -165,7 +165,7 @@ async function selectSymbol(symbol) {
     const data = await response.json();
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');
     drawHistoryChart(data.candles);
-    selectedUnderlyingPrice = Number(data.candles.at(-1)?.close) || null;
+    selectedUnderlyingPrice = Number(livePrice) > 0 ? Number(livePrice) : (Number(data.candles.at(-1)?.close) || null);
     await clearSelectedOption();
     await loadOptionChain(symbol, selectedUnderlyingPrice);
     title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;

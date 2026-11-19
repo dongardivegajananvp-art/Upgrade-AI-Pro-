@@ -35,3 +35,10 @@ test('PWA supports standalone desktop/mobile layout and responsive breakpoints',
   assert.ok(css.includes('@media(max-width:700px)'));
   assert.match(serviceWorker, /upgrade-ai-pro-shell-v8/);
 });
+
+test('top five gainers use distinct rank-based card colors', () => {
+  assert.ok(app.includes('button.dataset.rank = String(index + 1)'));
+  for (const rank of ['1', '2', '3', '4', '5']) {
+    assert.ok(css.includes('.mover-card[data-rank="' + rank + '"]'));
+  }
+});

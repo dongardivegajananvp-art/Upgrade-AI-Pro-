@@ -4,7 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
-import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol } from './src/fyers-market-socket.js';
+import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
 import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics } from './src/fyers-rest.js';
 
@@ -98,6 +98,16 @@ const server = http.createServer(async (req,res) => {
     } catch (error) {
       console.error('[FYERS_OAUTH] token exchange failed:', error.message);
       return send(res,502,{status:'TOKEN_EXCHANGE_FAILED',reason:error.message});
+    }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/select-underlying') {
+    try {
+      const body = await readJson(req);
+      const result = setSelectedUnderlyingSymbol(body.symbol || null);
+      if (body.symbol && result.status !== 'UNDERLYING_PINNED_TO_SOCKET_SLICE' && result.status !== 'UNCHANGED') return send(res,400,{status:'UNDERLYING_NOT_VERIFIED',reason:'Underlying is not in the official active NSE F&O universe'});
+      return send(res,200,result);
+    } catch (error) {
+      return send(res,400,{status:'UNDERLYING_NOT_VERIFIED',reason:String(error.message || 'Underlying selection failed').slice(0,180)});
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/select-option') {

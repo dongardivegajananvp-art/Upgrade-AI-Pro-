@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -67,4 +67,24 @@ test('retest cannot substitute its candle when original level cross is missing',
   const result = confirmBreakoutPressureVolume(rows, 'LONG', 105, rows[1].time, true);
   assert.equal(result.ok, false);
   assert.match(result.reason, /Original breakout/);
+});
+
+test('multi-timeframe research returns an explainable score only with verified daily, 15m and 5m candles', () => {
+  const now=1800000000000;
+  const make=(count,step)=>Array.from({length:count},(_,i)=>({time:1700000000+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
+  const five=make(60,300),daily=make(60,86400),fifteen=make(60,900);
+  const setup={strategy:'EMA20_EMA50_TREND',side:'LONG',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
+  const result=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick:{exchangeTime:now/1000,receivedAt:now},setup,now});
+  assert.equal(result.status,'COMPLETE');
+  assert.ok(result.qualityScore>=85&&result.qualityScore<=100);
+  assert.equal(result.timeframes.daily,'BULLISH');
+  assert.equal(result.timeframes.fifteenMinute,'BULLISH');
+  assert.ok(result.evidence.some(line=>line.includes('Breakout candle volume: verified')));
+});
+test('multi-timeframe research refuses to invent a score when 15m history is incomplete', () => {
+  const now=1800000000000;
+  const make=(count,step)=>Array.from({length:count},(_,i)=>({time:1700000000+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
+  const result=analyzeSetupResearch({candles:make(60,300),dailyCandles:make(60,86400),fifteenMinuteCandles:make(12,900),tick:{exchangeTime:now/1000,receivedAt:now},setup:{side:'LONG',confirmedAt:1700017700},now});
+  assert.equal(result.status,'UNAVAILABLE');
+  assert.match(result.reason,/50 verified 15-minute/);
 });

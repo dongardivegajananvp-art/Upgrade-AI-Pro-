@@ -37,7 +37,7 @@ test('PWA supports standalone desktop/mobile layout and responsive breakpoints',
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
-  assert.match(app, /button\\.dataset\\.rank = String\\(index \\+ 1\\)/);
+  assert.ok(app.includes('button.dataset.rank = String(index + 1)'));
   for (const rank of ['1', '2', '3', '4', '5']) {
     assert.ok(css.includes('.mover-card[data-rank="' + rank + '"]'));
   }

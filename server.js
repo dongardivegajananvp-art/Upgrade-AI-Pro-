@@ -6,7 +6,8 @@ import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
-import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics } from './src/fyers-rest.js';
+import { evaluateNineStrategies } from './src/strategy-engine.js';
+import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -108,6 +109,24 @@ const server = http.createServer(async (req,res) => {
       return send(res,200,result);
     } catch (error) {
       return send(res,400,{status:'UNDERLYING_NOT_VERIFIED',reason:String(error.message || 'Underlying selection failed').slice(0,180)});
+    }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/evaluate-setup') {
+    try {
+      const body = await readJson(req);
+      const market = getMarketData();
+      const underlying = market.selectedUnderlying;
+      const option = market.selectedOption;
+      if (!underlying?.fresh || underlying.symbol !== body.underlying) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected underlying tick is not fresh'});
+      if (!option?.fresh || option.symbol !== body.contract) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected option tick is not fresh'});
+      const contract = getVerifiedOptionContract(body.contract);
+      const [underlyingHistory,optionHistory,dailyHistory] = await Promise.all([getFiveMinuteHistory(body.underlying),getFiveMinuteHistory(body.contract),getDailyHistory(body.underlying)]);
+      const isTopGainer = (market.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
+      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:underlying,optionCandles:optionHistory.candles,optionTick:option,contract,dailyCandles:dailyHistory.candles,isTopGainer,now:Date.now()});
+      return send(res,200,{...setup,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'});
+    } catch (error) {
+      const rateLimited=/429|cooldown/i.test(String(error.message));
+      return send(res,rateLimited?429:200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error.message||'Setup verification unavailable').slice(0,180)});
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/select-option') {

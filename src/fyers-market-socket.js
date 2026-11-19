@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice } from './rolling-fno-scanner.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -96,16 +96,13 @@ function accept(item) {
     }
   }
 }
-function nextSlice() {
-  if (!universe.length) return [];
-  const count = Math.min(MAX_UNDERLYING_SLOTS, universe.length);
-  const slice = [];
-  for (let i = 0; i < count; i++) slice.push(universe[(rotationIndex + i) % universe.length].symbol);
-  if (selectedUnderlyingSymbol && universe.some(item => item.symbol === selectedUnderlyingSymbol) && !slice.includes(selectedUnderlyingSymbol)) slice[slice.length - 1] = selectedUnderlyingSymbol;
-  return [...new Set(slice)];
+function nextSlice(startIndex = rotationIndex) {
+  return buildFnoRotationSlice(universe,startIndex,MAX_UNDERLYING_SLOTS,selectedUnderlyingSymbol);
 }
-function applyFnoRotation() {
-  const next = nextSlice();
+function applyFnoRotation(advance = false) {
+  const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
+    ? (rotationIndex+SCAN_PER_SLICE)%universe.length : rotationIndex;
+  const next=nextSlice(nextIndex);
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {
     const nextSet = new Set(next), activeSet = new Set(activeFnoSymbols);
@@ -125,7 +122,7 @@ function applyFnoRotation() {
     }
   }
   activeFnoSymbols = next;
-  rotationIndex = universe.length > MAX_UNDERLYING_SLOTS ? (rotationIndex + SCAN_PER_SLICE) % universe.length : 0;
+  rotationIndex = nextIndex;
 }
 export function setFnoUniverse(items) {
   const unique = new Map();
@@ -138,7 +135,7 @@ export function setFnoUniverse(items) {
   applyFnoRotation();
   if (rotationTimer) clearInterval(rotationTimer);
   if (universe.length > MAX_UNDERLYING_SLOTS) {
-    rotationTimer = setInterval(applyFnoRotation, ROTATION_INTERVAL_MS);
+    rotationTimer = setInterval(() => applyFnoRotation(true), ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
   return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };

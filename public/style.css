@@ -60,10 +60,12 @@ footer{color:#7890ae}
 
 
 /* Clear market direction and freshness on each of the five gainer cards */
-.mover-card[data-state="up"]{background:linear-gradient(145deg,#0d382c,#0b211e);border-color:#16865d;box-shadow:inset 3px 0 #16c784}
-.mover-card[data-state="down"]{background:linear-gradient(145deg,#421e27,#25151e);border-color:#a43b4b;box-shadow:inset 3px 0 #ea3943}
-.mover-card[data-state="flat"]{background:linear-gradient(145deg,#233044,#111e30);border-color:#62748d;box-shadow:inset 3px 0 #91a2ba}
-.mover-card[data-state="stale"]{background:linear-gradient(145deg,#403217,#261e10);border-color:#9a741c;box-shadow:inset 3px 0 #f0b90b}
+.mover-card[data-rank="1"]{background:linear-gradient(145deg,#493713,#241d10);border-color:#c49a35;box-shadow:inset 3px 0 #f5c84b}
+.mover-card[data-rank="2"]{background:linear-gradient(145deg,#344454,#1b2938);border-color:#9aaec2;box-shadow:inset 3px 0 #c5d2df}
+.mover-card[data-rank="3"]{background:linear-gradient(145deg,#4a3022,#291b16);border-color:#b9784b;box-shadow:inset 3px 0 #d88b58}
+.mover-card[data-rank="4"]{background:linear-gradient(145deg,#123b50,#102436);border-color:#249bc4;box-shadow:inset 3px 0 #38c5ed}
+.mover-card[data-rank="5"]{background:linear-gradient(145deg,#382653,#211832);border-color:#9366c9;box-shadow:inset 3px 0 #b58af0}
+.mover-card[data-state="stale"]{filter:saturate(.72);border-style:dashed}
 .mover-card[data-state="up"] strong,.mover-card[data-state="up"] span[data-state="up"]{color:#39e0a0}
 .mover-card[data-state="down"] strong,.mover-card[data-state="down"] span[data-state="down"]{color:#ff737c}
 .mover-card[data-state="flat"] strong{color:#d5dfed}

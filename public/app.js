@@ -51,6 +51,16 @@ async function refreshUniverseScan() {
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
+    const scanner=data.scanner||{};
+    const warmup=document.createElement('small');warmup.className='empty-inline';
+    warmup.textContent='RESEARCH WARMUP · '+(scanner.warmupStatus||'IDLE')+
+      ' · QUEUED '+(scanner.warmupQueueDepth||0)+
+      ' · DONE '+(scanner.warmupCompletedCount||0)+
+      ' · RETRIES '+(scanner.warmupRetryCount||0)+
+      ' · BLOCKED '+(scanner.warmupRejectedCount||0)+
+      (scanner.warmupLastRetryAt?' · NEXT RETRY '+scanner.warmupLastRetryAt:'')+
+      (scanner.warmupLastFailure?' · LAST FAILURE '+scanner.warmupLastFailure:'');
+    container.append(warmup);
     for(const item of data.top3||[]) {
       const card=document.createElement('button');card.type='button';card.className='research-card';
       const head=document.createElement('div');head.className='research-card-head';

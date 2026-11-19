@@ -71,8 +71,8 @@ test('retest cannot substitute its candle when original level cross is missing',
 
 test('multi-timeframe research returns an explainable score only with verified daily, 15m and 5m candles', () => {
   const now=1800000000000;
-  const make=(count,step)=>Array.from({length:count},(_,i)=>({time:1700000000+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
-  const five=make(60,300),daily=make(60,86400),fifteen=make(60,900);
+  const make=(count,step,base)=>Array.from({length:count},(_,i)=>({time:base+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
+  const five=make(60,300,now/1000-60*300),daily=make(60,86400,now/1000-60*86400),fifteen=make(60,900,now/1000-60*900);
   const setup={strategy:'EMA20_EMA50_TREND',side:'LONG',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
   const result=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick:{exchangeTime:now/1000,receivedAt:now},setup,now});
   assert.equal(result.status,'COMPLETE');

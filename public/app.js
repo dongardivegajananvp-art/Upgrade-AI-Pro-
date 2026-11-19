@@ -296,7 +296,7 @@ function renderLiveCandleSummary(tick) {
   const c = chartLiveCandle;
   const time = new Date((Number(c.time) + 19800) * 1000).toISOString().slice(11,16);
   const fields = [
-    ['TIME', time + '–' + new Date((Number(c.time) + 498) * 1000).toISOString().slice(11,16) + ' IST'],
+    ['TIME', time + '–' + new Date((Number(c.time) + 19800 + 300) * 1000).toISOString().slice(11,16) + ' IST'],
     ['LIVE PRICE', fresh ? '₹' + showNumber(tick.price) : '—'],
     ['OPEN', showNumber(c.open)],
     ['HIGH', showNumber(c.high)],

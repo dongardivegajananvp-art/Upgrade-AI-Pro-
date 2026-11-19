@@ -190,3 +190,13 @@ export function getRestDiagnostics(now = Date.now()) {
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null
   };
 }
+
+// Scanner cache accessors expose only FYERS history already fetched through the
+// shared 4-second REST scheduler; they never trigger extra upstream requests.
+export function getCachedResearchHistories() {
+  return {
+    fiveMinute: new Map([...fiveMinuteCache].map(([symbol, entry]) => [symbol, entry.value])),
+    daily: new Map([...dailyCache].map(([symbol, entry]) => [symbol, entry.value])),
+    fifteenMinute: new Map([...fifteenMinuteCache].map(([symbol, entry]) => [symbol, entry.value]))
+  };
+}

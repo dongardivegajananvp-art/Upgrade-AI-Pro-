@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: upgrade-ai-pro
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: false
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20

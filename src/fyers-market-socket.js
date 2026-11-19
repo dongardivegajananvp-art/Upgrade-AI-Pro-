@@ -14,6 +14,9 @@ let activeFnoSymbols = [];
 let rotationIndex = 0;
 let rotationTimer = null;
 let selectedOptionSymbol = null;
+let selectedUnderlyingSymbol = null;
+let selectedLiveCandle = null;
+let lastCumulativeVolume = null;
 const ticks = new Map();
 
 function decode(message) {
@@ -52,13 +55,33 @@ function accept(item) {
   const reportedPercent = item.chp ?? item.changePercent;
   const change = reportedChange !== undefined && reportedChange !== null && Number.isFinite(Number(reportedChange)) ? Number(reportedChange) : fallbackChange;
   const changePercent = reportedPercent !== undefined && reportedPercent !== null && Number.isFinite(Number(reportedPercent)) ? Number(reportedPercent) : fallbackPercent;
-  ticks.set(symbol, { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null });
+  const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
+  const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
+  ticks.set(symbol, tick);
+  if (symbol === selectedUnderlyingSymbol) {
+    const bucket = Math.floor(exchangeTime / 300) * 300;
+    const local = new Date((bucket + 19800) * 1000);
+    const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+    if (minute >= 555 && minute < 930) {
+      if (!selectedLiveCandle || selectedLiveCandle.time !== bucket) {
+        selectedLiveCandle = { time: bucket, open: price, high: price, low: price, close: price, volume: 0, completed: false, source: 'FYERS_LIVE_TICKS' };
+        lastCumulativeVolume = tick.cumulativeVolume;
+      } else {
+        selectedLiveCandle.high = Math.max(selectedLiveCandle.high, price);
+        selectedLiveCandle.low = Math.min(selectedLiveCandle.low, price);
+        selectedLiveCandle.close = price;
+        if (tick.cumulativeVolume !== null && lastCumulativeVolume !== null && tick.cumulativeVolume >= lastCumulativeVolume) selectedLiveCandle.volume += tick.cumulativeVolume - lastCumulativeVolume;
+        lastCumulativeVolume = tick.cumulativeVolume;
+      }
+    }
+  }
 }
 function nextSlice() {
   if (!universe.length) return [];
   const count = Math.min(MAX_UNDERLYING_SLOTS, universe.length);
   const slice = [];
   for (let i = 0; i < count; i++) slice.push(universe[(rotationIndex + i) % universe.length].symbol);
+  if (selectedUnderlyingSymbol && universe.some(item => item.symbol === selectedUnderlyingSymbol) && !slice.includes(selectedUnderlyingSymbol)) slice[slice.length - 1] = selectedUnderlyingSymbol;
   return [...new Set(slice)];
 }
 function applyFnoRotation() {
@@ -99,6 +122,15 @@ export function setFnoUniverse(items) {
     rotationTimer.unref?.();
   }
   return { universeCount: universe.length, activeCount: activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100 };
+}
+export function setSelectedUnderlyingSymbol(symbol) {
+  const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;
+  if (next === selectedUnderlyingSymbol) return { status: 'UNCHANGED', symbol: next };
+  selectedUnderlyingSymbol = next;
+  selectedLiveCandle = null;
+  lastCumulativeVolume = null;
+  applyFnoRotation();
+  return { status: next ? 'UNDERLYING_PINNED_TO_SOCKET_SLICE' : 'UNDERLYING_CLEARED', symbol: next };
 }
 export function setSelectedOptionSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+$/.test(symbol) ? symbol : null;
@@ -165,6 +197,7 @@ export function getMarketData(now = Date.now()) {
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
     socketStatus, lastError, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
+    selectedUnderlying: selectedUnderlyingSymbol && ticks.get(selectedUnderlyingSymbol) ? { ...ticks.get(selectedUnderlyingSymbol), fresh: isFresh(ticks.get(selectedUnderlyingSymbol), now), liveCandle: selectedLiveCandle ? { ...selectedLiveCandle } : null } : null,
     selectedOptionSymbol,
     subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
     symbolLimit: 100, indices,

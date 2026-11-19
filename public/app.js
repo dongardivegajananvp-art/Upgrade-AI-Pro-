@@ -107,6 +107,7 @@ function renderMovers(fno) {
   container.replaceChildren();
   const top = Array.isArray(fno.topGainers) ? fno.topGainers : [];
   if (fno.status !== 'ROTATING_LIVE_COVERAGE') {
+    document.querySelector('#movers-status').textContent = 'FEED / SYMBOL MASTER NOT READY';
     const note = document.createElement('div');
     note.className = 'empty-inline';
     note.textContent = fno.status === 'SYMBOL_MASTER_NOT_LOADED'
@@ -115,10 +116,7 @@ function renderMovers(fno) {
     container.append(note);
     return;
   }
-  const coverage = document.createElement('div');
-  coverage.className = 'coverage-note';
-  coverage.textContent = `ROTATING LIVE COVERAGE · ${fno.activeCount}/${fno.universeCount} UNDERLYINGS IN THIS SLICE · 20s ROTATION`;
-  container.append(coverage);
+  document.querySelector('#movers-status').textContent = `ROTATING · ${fno.activeCount}/${fno.universeCount} · 20s`;
   if (!top.length) {
     const note = document.createElement('div');
     note.className = 'empty-inline';

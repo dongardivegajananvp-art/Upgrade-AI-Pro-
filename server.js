@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData } from './src/fyers-market-socket.js';
+import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -19,9 +20,24 @@ function send(res, status, body, type='application/json; charset=utf-8') {
 const server = http.createServer(async (req,res) => {
   const url = new URL(req.url || '/', 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getMarketData());
+  if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
+    try {
+      if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteHistory(url.searchParams.get('symbol')));
+      if (url.pathname === '/api/quotes') {
+        const symbols = (url.searchParams.get('symbols') || '').split(',').filter(Boolean);
+        return send(res,200,await getFyersQuotes(symbols));
+      }
+      if (url.pathname === '/api/option-chain') return send(res,200,await getFyersOptionChain(url.searchParams.get('symbol'),url.searchParams.get('strikecount') || 10,url.searchParams.get('timestamp') || ''));
+      if (url.pathname === '/api/positions') return send(res,200,await getFyersPositions());
+      if (url.pathname === '/api/orderbook') return send(res,200,await getFyersOrderbook());
+    } catch (error) {
+      const rateLimited = /429|cooldown/i.test(String(error.message));
+      return send(res,rateLimited ? 429 : 503,{status:rateLimited ? 'RATE_LIMITED' : 'DATA_UNAVAILABLE',reason:String(error.message || 'FYERS read-only request failed').slice(0,180)});
+    }
+  }
   if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
   if (req.method === 'GET' && url.pathname === '/api/status') return send(res,200,{
-    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(), marketData:getMarketData(),
+    app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(null), auth:getAuthStatus(), marketData:getMarketData(), rest:getRestDiagnostics(),
     configuration:{
       appIdConfigured:Boolean(process.env.FYERS_APP_ID?.trim()),
       appIdHasNewFormat: Boolean(process.env.FYERS_APP_ID?.trim().endsWith('-200')),

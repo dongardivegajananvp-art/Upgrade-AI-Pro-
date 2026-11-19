@@ -103,6 +103,10 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'POST' && url.pathname === '/api/select-option') {
     try {
       const body = await readJson(req);
+      if (body.symbol === null) {
+        setSelectedOptionSymbol(null);
+        return send(res,200,{status:'OPTION_SUBSCRIPTION_CLEARED'});
+      }
       const contract = getVerifiedOptionContract(body.symbol);
       setSelectedOptionSymbol(contract.symbol);
       return send(res,200,{status:'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',contract});

@@ -53,14 +53,15 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     directionalPressure:pressure===(setup?.side==='LONG'?'BUYING':'SELLING')?10:0,
     breakoutVolume:Number.isFinite(volume)&&volume>0?10:0,
     liveTickFresh:5,
-    strategyEvidence:setup?.strategy?10:0
+    strategyEvidence:setup?.strategy?20:0
   };
   const qualityScore=Object.values(points).reduce((a,b)=>a+b,0);
+  const regime=dailyTrend===fifteenTrend&&dailyTrend!=='NEUTRAL'?'TRENDING_'+dailyTrend:(dailyTrend==='NEUTRAL'&&fifteenTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
   const evidence=['Daily trend: '+dailyTrend,'15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,
-    'Breakout candle pressure: '+pressure,'Breakout candle volume: '+(Number.isFinite(volume)&&volume>0?'verified':'missing'),'FYERS tick: fresh'];
+    'Market regime: '+regime,'Breakout candle pressure: '+pressure,'Breakout candle volume: '+(Number.isFinite(volume)&&volume>0?'verified':'missing'),'FYERS tick: fresh'];
   return {status:'COMPLETE',qualityScore,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
     direction:setup.side,timeframes:{daily:dailyTrend,fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},
-    points,evidence,marketRegime:marketRegime||'NOT_CLASSIFIED',
+    points,evidence,marketRegime:marketRegime||regime,
     invalidation:'A completed 5-minute close back through the confirmed breakout level invalidates this research setup',
     source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',asOfExchangeTime:Number(tick.exchangeTime)};
 }

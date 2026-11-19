@@ -89,19 +89,29 @@ export async function loadFnoEquityUniverse(now = Date.now()) {
   cachedFoRows = rowsOf(foMaster);
   return { ...result, cached: false };
 }
-export function getVerifiedOptionContract(symbol, now = Date.now()) {
-  if (!cachedFoRows) throw new Error('Official FYERS NSE F&O symbol master is not loaded');
-  const row = cachedFoRows.find(item => String(item?.symTicker || item?.__masterKey || '') === String(symbol || ''));
-  if (!row || !['CE', 'PE'].includes(String(row.optType || '').toUpperCase())) throw new Error('Option contract is not present in the official FYERS NSE F&O symbol master');
+export function verifyOptionContractRow(row, symbol, now = Date.now()) {
+  if (!row || String(row.symTicker || row.__masterKey || '') !== String(symbol || '') ||
+      !['CE', 'PE'].includes(String(row.optType || '').toUpperCase())) {
+    throw new Error('Option contract is not present in the official FYERS NSE F&O symbol master');
+  }
   if (row.tradeStatus !== undefined && Number(row.tradeStatus) !== 1) throw new Error('Option contract is inactive in the official FYERS master');
   const expiry = expiryEpoch(row.expiryDate);
   const expiryDate = expiryDay(row.expiryDate);
   const lotSize = Number(row.minLotSize);
   const tickSize = Number(row.tickSize);
   const strike = Number(row.strikePrice);
-  if (!(expiryDate >= dateKey(now)) || !(lotSize > 0) || !(tickSize > 0) || !(strike > 0) || !String(row.fyToken || '').trim()) throw new Error('Option contract expiry, lot size, strike or tick size is invalid');
+  const underlying = normaliseUnderlying(row.underSym);
+  const fyToken = String(row.fyToken || '').trim();
+  if (!(expiryDate >= dateKey(now)) || !(lotSize > 0) || !(tickSize > 0) || !(strike > 0) || !underlying || !fyToken) {
+    throw new Error('Option contract expiry, underlying, lot size, strike, FY token or tick size is invalid');
+  }
   return {
     symbol: String(row.symTicker || row.__masterKey), side: String(row.optType).toUpperCase(),
-    underlying: normaliseUnderlying(row.underSym), expiry, strike, lotSize, tickSize, fyToken: String(row.fyToken || '')
+    underlying, expiry, strike, lotSize, tickSize, fyToken
   };
+}
+export function getVerifiedOptionContract(symbol, now = Date.now()) {
+  if (!cachedFoRows) throw new Error('Official FYERS NSE F&O symbol master is not loaded');
+  const row = cachedFoRows.find(item => String(item?.symTicker || item?.__masterKey || '') === String(symbol || ''));
+  return verifyOptionContractRow(row, symbol, now);
 }

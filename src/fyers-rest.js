@@ -123,7 +123,7 @@ const fifteenMinuteCache = new Map();
 export async function getFifteenMinuteHistory(symbol, now = Date.now()) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
   const cached=fifteenMinuteCache.get(symbol);
-  if(cached&&now-cached.savedAt<60000)return cached.value;
+  if(cached&&now-cached.savedAt<30*60*1000)return cached.value;
   const to=istDate(now);
   const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
   const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to});
@@ -161,7 +161,7 @@ const dailyCache = new Map();
 export async function getDailyHistory(symbol, now = Date.now()) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
   const cached = dailyCache.get(symbol);
-  if (cached && now - cached.savedAt < 60000) return cached.value;
+  if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
   const to = istDate(now);
   const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
   const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to });

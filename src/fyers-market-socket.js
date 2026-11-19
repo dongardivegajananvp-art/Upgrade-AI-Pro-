@@ -141,7 +141,7 @@ export function setFnoUniverse(items) {
     rotationTimer = setInterval(applyFnoRotation, ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
-  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
+  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
 }
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;
@@ -271,7 +271,7 @@ export function getFnoUniverseSnapshot() {
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,
-    scanPerSlice: SCAN_PER_SLICE,
+    scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length,
     symbolCap: 100
   };
 }

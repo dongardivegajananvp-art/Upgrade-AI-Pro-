@@ -1,7 +1,58 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1220"><meta name="description" content="Upgrade AI Pro NSE live trading workstation"><link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css"><title>Upgrade AI Pro</title></head>
-<body><header><div class="brand">UPGRADE AI PRO <span>NSE LIVE WORKSTATION</span></div><div class="head-actions"><div id="feed" class="status">FYERS FEED · NOT CONNECTED</div><a class="connect" href="/api/fyers/login">CONNECT FYERS</a></div></header>
-<main><section class="indices"><article><small>NIFTY 50</small><strong id="nifty">—</strong><span>—</span></article><article><small>BANK NIFTY</small><strong id="bank">—</strong><span>—</span></article><article><small>SENSEX</small><strong id="sensex">—</strong><span>—</span></article></section>
-<section class="layout"><article class="panel movers"><h2>TOP F&O GAINERS</h2><div id="movers">Live FYERS data pending. No sample prices are displayed.</div></article><article class="panel chart"><h2>5-MINUTE CHART <span id="symbol">SELECT A SYMBOL</span></h2><div class="empty">Chart will appear only after verified FYERS candles arrive.</div><div class="levels"><span>ENTRY —</span><span>STOP LOSS —</span><span>TARGET —</span></div></article><article class="panel order"><h2>OPTION ORDER PANEL</h2><p>CE / PE · Contract verification pending</p><button disabled>ORDERS DISABLED</button><small>Initial verification mode · no broker orders</small></article></section>
-<section class="panel bottom"><h2>POSITIONS · P&amp;L · ORDER STATUS</h2><p>No positions loaded. Broker integration is not connected.</p></section></main>
-<footer>FAIL-CLOSED MODE · NSE ONLY · FYERS DATA REQUIRED</footer><script src="/app.js" type="module"></script></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1220"><meta name="description" content="Upgrade AI Pro NSE live trading workstation">
+<link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css">
+<title>Upgrade AI Pro · Live Workstation</title>
+</head>
+<body>
+<header>
+  <div class="brand">UPGRADE AI PRO <span>LIVE WORKSTATION · NSE ONLY</span></div>
+  <div class="head-actions"><div id="feed" class="status">FYERS FEED · NOT CONNECTED</div><a class="connect" href="/api/fyers/login">CONNECT FYERS</a></div>
+</header>
+<main>
+  <section class="indices" aria-label="Market indices">
+    <article><small>NIFTY 50</small><strong id="nifty">—</strong><span id="nifty-change">—</span></article>
+    <article><small>BANK NIFTY</small><strong id="bank">—</strong><span id="bank-change">—</span></article>
+    <article><small>SENSEX</small><strong id="sensex">—</strong><span id="sensex-change">—</span></article>
+  </section>
+
+  <section class="panel movers">
+    <div class="section-heading"><h2>TOP F&amp;O GAINERS</h2><small>LIVE VERIFIED · TOP 5</small></div>
+    <div id="movers" class="mover-strip"><div class="empty-inline">Live FYERS data pending. No sample prices are displayed.</div></div>
+  </section>
+
+  <section class="panel chart">
+    <div class="section-heading chart-heading">
+      <div><h2>5-MINUTE CHART</h2><span id="symbol">SELECT A SYMBOL</span></div>
+      <div class="chart-meta"><span>1 DAY</span><span>NSE SESSION · 09:15–15:30</span></div>
+    </div>
+    <div id="chart-area" class="chart-area">
+      <div class="chart-empty"><strong>FULL-DAY 5-MINUTE CHART</strong><span>Chart appears after verified FYERS historical candles are loaded.</span><span>No synthetic candles or stale prices.</span></div>
+    </div>
+    <div class="levels"><span>ENTRY <b>—</b></span><span>STOP LOSS <b>—</b></span><span>TARGET <b>—</b></span></div>
+  </section>
+
+  <section class="panel options">
+    <div class="section-heading"><h2>OPTIONS PANEL</h2><small>CONTRACT VERIFICATION PENDING</small></div>
+    <div class="option-row">
+      <div class="option-choice"><span class="option-pill">CE</span><span class="option-pill">PE</span></div>
+      <div class="option-field"><small>EXPIRY</small><strong>—</strong></div>
+      <div class="option-field"><small>STRIKE</small><strong>—</strong></div>
+      <div class="option-field"><small>QUANTITY</small><strong>—</strong></div>
+      <div class="option-field"><small>OPTION LTP</small><strong>—</strong></div>
+      <button disabled>ORDERS DISABLED</button>
+    </div>
+    <p class="safety-note">Initial verification mode · No broker orders · Fresh underlying + option data required</p>
+  </section>
+
+  <section class="panel bottom">
+    <div class="section-heading"><h2>POSITIONS · P&amp;L · ORDER STATUS</h2><small>BROKER FEED NOT CONNECTED</small></div>
+    <p>No positions loaded. Broker integration is not connected.</p>
+  </section>
+</main>
+<footer>FAIL-CLOSED MODE · NSE ONLY · FYERS DATA REQUIRED · ORDERS DISABLED</footer>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

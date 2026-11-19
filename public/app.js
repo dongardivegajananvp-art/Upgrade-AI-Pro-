@@ -579,8 +579,8 @@ function renderResearchResults(setup) {
       document.querySelector('#ce-select').classList.toggle('active',desiredSide==='CE');
       document.querySelector('#pe-select').classList.toggle('active',desiredSide==='PE');
     }
-    if((sideChanged || !selectedContractSymbol) && optionChainRows.length && selectedUnderlyingPrice>0) {
-      renderOptionStrikes(selectedUnderlyingPrice);
+    if((sideChanged || !selectedContractSymbol) && selectedSymbol && selectedUnderlyingPrice>0) {
+      autoSelectDirectionalOption(desiredSide);
     }
   }
   if(!ranking.length) {
@@ -641,6 +641,29 @@ async function evaluateSelectedSetup() {
     }
   } catch(error) { setupEvaluationDone=true; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
+}
+async function autoSelectDirectionalOption(optionSide) {
+  const status=document.querySelector('#option-status');
+  const expiry=document.querySelector('#expiry-select').value;
+  status.textContent='AUTO-SELECTING '+optionSide+' · VERIFYING FYERS MASTER';
+  try {
+    const response=await fetch('/api/auto-select-option',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({underlying:selectedSymbol,side:optionSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
+    const result=await response.json();
+    if(!response.ok||result.status!=='AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason||'Automatic option selection failed');
+    selectedContractSymbol=result.contract.symbol;
+    const strikeSelect=document.querySelector('#strike-select');
+    if(optionChainRows.some(row=>row.symbol===selectedContractSymbol)) strikeSelect.value=selectedContractSymbol;
+    document.querySelector('#option-quantity').textContent=showNumber(result.contract.lotSize,0);
+    document.querySelector('#option-ltp').textContent='WAITING FOR LIVE OPTION TICK';
+    status.textContent='AUTO '+result.contract.side+' · '+showNumber(result.contract.strike)+' · '+result.contract.expiry+' · MASTER VERIFIED · '+(result.subscription?.status||'SUBSCRIPTION PENDING');
+    setupEvaluationDone=false;
+    document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
+  } catch(error) {
+    selectedContractSymbol=null;
+    document.querySelector('#option-quantity').textContent='—';
+    status.textContent='AUTO OPTION NOT VERIFIED · '+String(error.message||'No action');
+  }
 }
 async function selectOptionContract(symbol) {
   if (!symbol) return;

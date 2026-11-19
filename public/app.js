@@ -40,6 +40,8 @@ async function refresh() {
     else if (!s.auth?.tokenStored) {
       document.querySelector('#positions-data').textContent = 'Connect FYERS to read current-day positions and P&L.';
       document.querySelector('#orders-data').textContent = 'Connect FYERS to read today’s order status.';
+      const accountStatus = document.querySelector('#account-feed-status');
+      if (accountStatus) accountStatus.textContent = 'FYERS ACCOUNT FEED · SESSION REQUIRED';
     }
     const md = s.marketData || {};
     renderMovers(md.fno || {});
@@ -122,6 +124,8 @@ async function refreshAccount() {
   lastAccountRefresh = Date.now();
   const positionsEl = document.querySelector('#positions-data');
   const ordersEl = document.querySelector('#orders-data');
+  const accountStatus = document.querySelector('#account-feed-status');
+  if (accountStatus) accountStatus.textContent = 'CHECKING FYERS ACCOUNT FEED';
   try {
     const [positionsResponse, ordersResponse] = await Promise.all([
       fetch('/api/positions', { cache: 'no-store' }),
@@ -132,6 +136,20 @@ async function refreshAccount() {
     ]);
     positionsEl.replaceChildren();
     ordersEl.replaceChildren();
+    if (accountStatus) {
+      if (positionsResponse.ok && ordersResponse.ok) {
+        accountStatus.textContent = 'FYERS ACCOUNT FEED · CONNECTED · READ-ONLY';
+        accountStatus.dataset.state = 'connected';
+      } else {
+        const failed = !positionsResponse.ok ? positionsResponse : ordersResponse;
+        accountStatus.textContent = failed.status === 429
+          ? 'FYERS ACCOUNT FEED · RATE LIMITED'
+          : failed.status === 401 || failed.status === 403
+            ? 'FYERS ACCOUNT FEED · AUTHORIZATION REQUIRED'
+            : 'FYERS ACCOUNT FEED · UNAVAILABLE · HTTP ' + failed.status;
+        accountStatus.dataset.state = 'stale';
+      }
+    }
     if (!positionsResponse.ok) appendLine(positionsEl, positions.reason || 'FYERS positions are unavailable.');
     else {
       const rows = positions.netPositions || positions.data?.netPositions || [];
@@ -156,6 +174,10 @@ async function refreshAccount() {
   } catch {
     positionsEl.textContent = 'Account snapshot unavailable; no data is assumed.';
     ordersEl.textContent = 'Order status unavailable; no data is assumed.';
+    if (accountStatus) {
+      accountStatus.textContent = 'FYERS ACCOUNT FEED · REQUEST FAILED';
+      accountStatus.dataset.state = 'stale';
+    }
   } finally {
     accountRefreshRunning = false;
   }
@@ -576,7 +598,8 @@ async function selectOptionContract(symbol) {
     setupEvaluationDone = false;
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
-    status.textContent = `${result.contract.side} · ${showNumber(result.contract.strike)} · MASTER VERIFIED · LIVE TICK PENDING`;
+    const subscriptionState = result.subscription?.status || 'SUBSCRIPTION_STATE_UNAVAILABLE';
+    status.textContent = `${result.contract.side} · `${showNumber(result.contract.strike)} · MASTER VERIFIED · `${subscriptionState} · LIVE TICK PENDING`;
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch (error) {
     selectedContractSymbol = null;

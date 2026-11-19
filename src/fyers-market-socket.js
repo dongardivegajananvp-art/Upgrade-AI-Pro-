@@ -160,8 +160,11 @@ export function getMarketData(now = Date.now()) {
   }
   const activeTicks = activeFnoSymbols.map(symbol => ticks.get(symbol)).filter(tick => isFresh(tick, now) && Number.isFinite(tick.changePercent));
   const topGainers = activeTicks.sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
+  const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
-    socketStatus, lastError, subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
+    socketStatus, lastError, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
+    selectedOptionSymbol,
+    subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
     symbolLimit: 100, indices,
     fno: {
       status: universe.length ? (socketStatus === 'CONNECTED' ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_SOCKET') : 'SYMBOL_MASTER_NOT_LOADED',

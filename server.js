@@ -6,6 +6,7 @@ import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
+import { chooseDirectionalOption } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, validateNseSymbol } from './src/fyers-rest.js';
 
@@ -214,6 +215,34 @@ const server = http.createServer(async (req,res) => {
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));
       return send(res,rateLimited?429:200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error.message||'Setup verification unavailable').slice(0,180)});
+    }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/auto-select-option') {
+    try {
+      const body = await readJson(req);
+      if (!validateNseSymbol(body.underlying) || !['LONG','SHORT'].includes(body.side)) {
+        return send(res,400,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Verified NSE underlying and confirmed LONG/SHORT direction are required'});
+      }
+      const chainPayload = await getFyersOptionChain(body.underlying,10,body.timestamp || '');
+      const chainData = chainPayload.data || chainPayload;
+      const selection = chooseDirectionalOption({
+        optionsChain:chainData.optionsChain,
+        underlyingPrice:Number(getMarketData().selectedUnderlying?.price),
+        side:body.side
+      });
+      if (selection.status !== 'CANDIDATE_SELECTED') return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:selection.reason});
+      const contract = getVerifiedOptionContract(selection.symbol);
+      if (contract.side !== selection.side || contract.strike !== selection.strike) {
+        return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate does not match the official active contract master'});
+      }
+      const subscription = setSelectedOptionSymbol(contract.symbol);
+      if (subscription?.status === 'SUBSCRIPTION_FAILED') {
+        return send(res,503,{status:'AUTO_OPTION_SUBSCRIPTION_FAILED',reason:subscription.reason || 'FYERS option subscription failed'});
+      }
+      return send(res,200,{status:'AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',selection,contract,subscription});
+    } catch(error) {
+      const rateLimited=/429|cooldown/i.test(String(error.message));
+      return send(res,rateLimited?429:503,{status:'AUTO_OPTION_UNAVAILABLE',reason:String(error.message||'Automatic option selection failed').slice(0,180)});
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/select-option') {

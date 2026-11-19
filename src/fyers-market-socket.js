@@ -10,7 +10,7 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 const MAX_UNDERLYING_SLOTS = 20;
 // Twelve fresh 5-minute history reads per 60-second slice fit the existing
 // FYERS REST 4-second scheduler. Eight symbols overlap the next socket slice.
-const SCAN_PER_SLICE = 12;
+const SCAN_PER_SLICE = 11;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
 let socketStatus = 'NOT_STARTED';
@@ -234,7 +234,7 @@ export function getMarketData(now = Date.now()) {
     const tick = ticks.get(symbol) || null;
     indices[symbol] = tick ? { ...tick, fresh: isFresh(tick, now) } : null;
   }
-  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: MAX_UNDERLYING_SLOTS, rotationIntervalMs: ROTATION_INTERVAL_MS });
+  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: SCAN_PER_SLICE, rotationIntervalMs: ROTATION_INTERVAL_MS });
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
@@ -256,7 +256,7 @@ export function getMarketData(now = Date.now()) {
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, coverageComplete: rolling.coverageComplete,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
-      rotationIntervalMs: ROTATION_INTERVAL_MS, currentSliceStart: universe.length ? rotationIndex : 0,
+      rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
       subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
       topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: tick.fresh, ageSeconds: tick.ageSeconds, actionable: false }))
     }

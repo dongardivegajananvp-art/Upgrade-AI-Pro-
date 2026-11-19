@@ -17,6 +17,8 @@ let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
 let setupLastBucket = null;
 let lastAccountRefresh = 0;
+let lastUniverseScanRefresh = 0;
+let universeScanRunning = false;
 document.querySelectorAll('.indices article[data-symbol]').forEach(card => {
   const open = () => selectIndexSymbol(card.dataset.symbol);
   card.addEventListener('click', open);
@@ -32,6 +34,66 @@ function tickStatusText(md, freshCount) {
 function showNumber(value, digits=2) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
 }
+function showExpiry(value) {
+  const stamp=Number(value);
+  return Number.isFinite(stamp)&&stamp>0?new Date((stamp+19800)*1000).toISOString().slice(0,10):'—';
+}
+async function refreshUniverseScan() {
+  if(universeScanRunning) return;
+  universeScanRunning=true;lastUniverseScanRefresh=Date.now();
+  const status=document.querySelector('#universe-scan-status');
+  const container=document.querySelector('#universe-scan-results');
+  try {
+    const response=await fetch('/api/research/universe',{cache:'no-store'});
+    const data=await response.json();
+    container.replaceChildren();
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice||11)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    const note=document.createElement('div');note.className='empty-inline';
+    note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
+    container.append(note);
+    for(const item of data.top3||[]) {
+      const card=document.createElement('button');card.type='button';card.className='research-card';
+      const head=document.createElement('div');head.className='research-card-head';
+      const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
+      const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
+      head.append(title,score);
+      const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
+      const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
+      const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
+      card.append(head,evidence,target,reason);
+      card.addEventListener('click',()=>selectSymbol(item.symbol));
+      container.append(card);
+    }
+    if(!(data.top3||[]).length) {
+      const blocked=document.createElement('small');
+      blocked.textContent='No verified Top 3 yet. Missing/stale data and unconfirmed patterns are not scored.';
+      container.append(blocked);
+    }
+    const activeSet=new Set(data.activeSymbols||[]);
+    const activeEvaluations=(data.evaluations||[]).filter(row=>activeSet.has(row.symbol));
+    const diagnostics=document.createElement('details');
+    const diagnosticsTitle=document.createElement('summary');
+    diagnosticsTitle.textContent='ACTIVE SLICE · PER-STOCK NINE-STRATEGY DIAGNOSTICS ('+activeEvaluations.length+')';
+    diagnostics.append(diagnosticsTitle);
+    for(const stock of activeEvaluations) {
+      const group=document.createElement('details');
+      const summary=document.createElement('summary');
+      summary.textContent=stock.symbol+' · '+stock.status+' · '+(stock.fresh?'FRESH TICK':'STALE / MISSING TICK');
+      group.append(summary);
+      for(const item of stock.strategyLedger||[]) {
+        const row=document.createElement('div');row.className='strategy-ledger-row';
+        const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+        const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+        row.append(label,reason);group.append(row);
+      }
+      diagnostics.append(group);
+    }
+    container.append(diagnostics);
+  } catch(error) {
+    status.textContent='UNIVERSE SCAN UNAVAILABLE';
+    container.textContent=String(error.message||'Cached FYERS universe evaluation unavailable');
+  } finally {universeScanRunning=false;}
+}
 async function refresh() {
   try {
     const r = await fetch('/api/status',{cache:'no-store'});
@@ -45,6 +107,7 @@ async function refresh() {
       if (accountStatus) accountStatus.textContent = 'FYERS ACCOUNT FEED · SESSION REQUIRED';
     }
     const md = s.marketData || {};
+    if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;
@@ -571,13 +634,25 @@ function renderResearchResults(setup) {
   const status=document.querySelector('#research-status'),container=document.querySelector('#research-results');
   container.replaceChildren();
   const ranking=Array.isArray(setup?.researchRanking)?setup.researchRanking:[];
+  if(ranking.length && ['LONG','SHORT'].includes(ranking[0]?.side)) {
+    const desiredSide=ranking[0].side==='LONG'?'CE':'PE';
+    const sideChanged=selectedOptionSide!==desiredSide;
+    if(sideChanged) {
+      selectedOptionSide=desiredSide;
+      document.querySelector('#ce-select').classList.toggle('active',desiredSide==='CE');
+      document.querySelector('#pe-select').classList.toggle('active',desiredSide==='PE');
+    }
+    if((sideChanged || !selectedContractSymbol) && selectedSymbol && selectedUnderlyingPrice>0) {
+      autoSelectDirectionalOption(desiredSide);
+    }
+  }
   if(!ranking.length) {
     status.textContent=setup?.research?.status==='UNAVAILABLE'?'RESEARCH DATA INCOMPLETE':'NO VERIFIED RESEARCH RANKING';
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
-    container.append(note);return;
+    container.append(note);
   }
-  status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length;
+  if(ranking.length) status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';
   for(const item of ranking) {
     const card=document.createElement('article');card.className='research-card';
     const head=document.createElement('div');head.className='research-card-head';
@@ -586,8 +661,19 @@ function renderResearchResults(setup) {
     head.append(name,score);
     const tf=document.createElement('p');tf.textContent='Daily '+item.timeframes.daily+' · 15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
     const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
+    const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
     const invalid=document.createElement('small');invalid.textContent='Invalidation: '+item.invalidation;
-    card.append(head,tf,evidence,invalid);container.append(card);
+    card.append(head,tf,evidence,target,invalid);container.append(card);
+  }
+  const ledger=Array.isArray(setup?.strategyLedger)?setup.strategyLedger:[];
+  if(ledger.length) {
+    const heading=document.createElement('strong');heading.textContent='NINE-STRATEGY DIAGNOSTIC LEDGER';container.append(heading);
+    for(const item of ledger) {
+      const row=document.createElement('div');row.className='strategy-ledger-row';
+      const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+      const reason=document.createElement('small');reason.textContent=item.reason||'No diagnostic reason returned';
+      row.append(label,reason);container.append(row);
+    }
   }
 }
 async function evaluateSelectedSetup() {
@@ -612,7 +698,7 @@ async function evaluateSelectedSetup() {
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
-    if (Array.isArray(setup.researchRanking) && setup.researchRanking.length) renderResearchResults(setup);
+    if (Array.isArray(setup.researchRanking) || Array.isArray(setup.strategyLedger)) renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
     if(setup.status==='SETUP_CONFIRMED') {
@@ -620,7 +706,7 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
       document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
-      state.textContent=setup.strategy+' · '+setup.optionSide+' · VERIFIED'; state.dataset.state='confirmed';
+      state.textContent=setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · EARLY ENTRY · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
       chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
       renderChartViewport();
     } else {
@@ -629,6 +715,29 @@ async function evaluateSelectedSetup() {
     }
   } catch(error) { setupEvaluationDone=true; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
+}
+async function autoSelectDirectionalOption(optionSide) {
+  const status=document.querySelector('#option-status');
+  const expiry=document.querySelector('#expiry-select').value;
+  status.textContent='AUTO-SELECTING '+optionSide+' · VERIFYING FYERS MASTER';
+  try {
+    const response=await fetch('/api/auto-select-option',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({underlying:selectedSymbol,side:optionSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
+    const result=await response.json();
+    if(!response.ok||result.status!=='AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason||'Automatic option selection failed');
+    selectedContractSymbol=result.contract.symbol;
+    const strikeSelect=document.querySelector('#strike-select');
+    if(optionChainRows.some(row=>row.symbol===selectedContractSymbol)) strikeSelect.value=selectedContractSymbol;
+    document.querySelector('#option-quantity').textContent=showNumber(result.contract.lotSize,0);
+    document.querySelector('#option-ltp').textContent='WAITING FOR LIVE OPTION TICK';
+    status.textContent='AUTO '+result.contract.side+' · STRIKE '+showNumber(result.contract.strike)+' · EXP '+showExpiry(result.contract.expiry)+' · LOT '+showNumber(result.contract.lotSize,0)+' · TICK '+showNumber(result.contract.tickSize,4)+' · MASTER VERIFIED · '+(result.subscription?.status||'SUBSCRIPTION PENDING');
+    setupEvaluationDone=false;
+    document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
+  } catch(error) {
+    selectedContractSymbol=null;
+    document.querySelector('#option-quantity').textContent='—';
+    status.textContent='AUTO OPTION NOT VERIFIED · '+String(error.message||'No action');
+  }
 }
 async function selectOptionContract(symbol) {
   if (!symbol) return;
@@ -646,7 +755,7 @@ async function selectOptionContract(symbol) {
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
     const subscriptionState = result.subscription?.status || 'SUBSCRIPTION_STATE_UNAVAILABLE';
-    status.textContent = result.contract.side + ' · ' + showNumber(result.contract.strike) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
+    status.textContent = result.contract.side + ' · STRIKE ' + showNumber(result.contract.strike) + ' · EXP ' + showExpiry(result.contract.expiry) + ' · LOT ' + showNumber(result.contract.lotSize,0) + ' · TICK ' + showNumber(result.contract.tickSize,4) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch (error) {
     selectedContractSymbol = null;

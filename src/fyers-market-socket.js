@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice } from './rolling-fno-scanner.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -8,6 +8,9 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
 // Three indices + twenty rotating equities + one selected option = at most 24.
 const MAX_UNDERLYING_SLOTS = 20;
+// Twelve fresh 5-minute history reads per 60-second slice fit the existing
+// FYERS REST 4-second scheduler. Eight symbols overlap the next socket slice.
+const SCAN_PER_SLICE = 11;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
 let socketStatus = 'NOT_STARTED';
@@ -93,16 +96,13 @@ function accept(item) {
     }
   }
 }
-function nextSlice() {
-  if (!universe.length) return [];
-  const count = Math.min(MAX_UNDERLYING_SLOTS, universe.length);
-  const slice = [];
-  for (let i = 0; i < count; i++) slice.push(universe[(rotationIndex + i) % universe.length].symbol);
-  if (selectedUnderlyingSymbol && universe.some(item => item.symbol === selectedUnderlyingSymbol) && !slice.includes(selectedUnderlyingSymbol)) slice[slice.length - 1] = selectedUnderlyingSymbol;
-  return [...new Set(slice)];
+function nextSlice(startIndex = rotationIndex) {
+  return buildFnoRotationSlice(universe,startIndex,MAX_UNDERLYING_SLOTS,selectedUnderlyingSymbol);
 }
-function applyFnoRotation() {
-  const next = nextSlice();
+function applyFnoRotation(advance = false) {
+  const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
+    ? (rotationIndex+SCAN_PER_SLICE)%universe.length : rotationIndex;
+  const next=nextSlice(nextIndex);
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {
     const nextSet = new Set(next), activeSet = new Set(activeFnoSymbols);
@@ -122,7 +122,7 @@ function applyFnoRotation() {
     }
   }
   activeFnoSymbols = next;
-  rotationIndex = universe.length > MAX_UNDERLYING_SLOTS ? (rotationIndex + MAX_UNDERLYING_SLOTS) % universe.length : 0;
+  rotationIndex = nextIndex;
 }
 export function setFnoUniverse(items) {
   const unique = new Map();
@@ -135,10 +135,10 @@ export function setFnoUniverse(items) {
   applyFnoRotation();
   if (rotationTimer) clearInterval(rotationTimer);
   if (universe.length > MAX_UNDERLYING_SLOTS) {
-    rotationTimer = setInterval(applyFnoRotation, ROTATION_INTERVAL_MS);
+    rotationTimer = setInterval(() => applyFnoRotation(true), ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
-  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
+  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
 }
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;
@@ -231,7 +231,7 @@ export function getMarketData(now = Date.now()) {
     const tick = ticks.get(symbol) || null;
     indices[symbol] = tick ? { ...tick, fresh: isFresh(tick, now) } : null;
   }
-  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: MAX_UNDERLYING_SLOTS, rotationIntervalMs: ROTATION_INTERVAL_MS });
+  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: SCAN_PER_SLICE, rotationIntervalMs: ROTATION_INTERVAL_MS });
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
@@ -253,9 +253,22 @@ export function getMarketData(now = Date.now()) {
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, coverageComplete: rolling.coverageComplete,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
-      rotationIntervalMs: ROTATION_INTERVAL_MS, currentSliceStart: universe.length ? rotationIndex : 0,
+      rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
       subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
       topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: tick.fresh, ageSeconds: tick.ageSeconds, actionable: false }))
     }
+  };
+}
+
+// Read-only snapshot for the rolling strategy engine; never treats old ticks as fresh.
+export function getFnoUniverseSnapshot() {
+  return {
+    universe: universe.map(item => ({ ...item })),
+    ticks: new Map(universe.map(item => [item.symbol, ticks.get(item.symbol)]).filter(([, tick]) => Boolean(tick))),
+    activeSymbols: [...activeFnoSymbols],
+    rotationIndex,
+    rotationIntervalMs: ROTATION_INTERVAL_MS,
+    scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length,
+    symbolCap: 100
   };
 }

@@ -4,10 +4,12 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
-import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
+import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
+import { chooseDirectionalOption } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
-import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, validateNseSymbol } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
+import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -35,12 +37,86 @@ function parseCookies(header='') {
 }
 const consumedOAuthStates = new Set();
 let fnoUniverseLoadPromise = null;
+let fnoStrategyScanTimer = null;
+let fnoStrategyScanBusy = false;
+let fnoStrategyScanCursor = 0;
+let fnoStrategyScanRotation = null;
+let fnoResearchWarmupUsed = false;
+let fnoResearchWarmupQueue = [];
+const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE' };
+function startFnoStrategyScanner() {
+  if (fnoStrategyScanTimer) return;
+  fnoStrategyScanStats.status='RUNNING';
+  fnoStrategyScanTimer=setInterval(async () => {
+    if (fnoStrategyScanBusy) return;
+    const snapshot=getFnoUniverseSnapshot();
+    const active=snapshot.activeSymbols || [];
+    if (!active.length) { fnoStrategyScanStats.status='WAITING_FOR_ACTIVE_FNO_SLICE'; return; }
+    if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
+      fnoStrategyScanRotation=snapshot.rotationIndex;
+      fnoStrategyScanCursor=0;
+      fnoStrategyScanStats.sliceScannedCount=0;
+      fnoResearchWarmupUsed=false;
+      fnoResearchWarmupQueue=[];
+    }
+    const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
+    if (fnoStrategyScanCursor>=scanLimit) {
+      const warmupSymbol=fnoResearchWarmupQueue.shift();
+      if (!warmupSymbol) return;
+      fnoStrategyScanBusy=true;
+      fnoStrategyScanStats.warmupSymbol=warmupSymbol;
+      fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
+      try {
+        await getDailyHistory(warmupSymbol);
+        await getFifteenMinuteHistory(warmupSymbol);
+        fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
+      } catch(error) {
+        fnoStrategyScanStats.warmupStatus='BLOCKED';
+        fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180);
+      } finally { fnoStrategyScanBusy=false; }
+      return;
+    }
+    const symbol=active[fnoStrategyScanCursor++];
+    fnoStrategyScanStats.sliceScannedCount++;
+    fnoStrategyScanBusy=true;
+    try {
+      const history=await getFiveMinuteHistory(symbol);
+      const latest=getFnoUniverseSnapshot();
+      const tick=latest.ticks.get(symbol);
+      const market=getMarketData();
+      const research=detectNineStrategySetup({
+        underlyingCandles:history.candles,underlyingTick:tick,
+        isTopGainer:(market.fno?.topGainers||[]).some(item=>item.symbol===symbol),
+        researchEnabled:false,now:Date.now()
+      });
+      fnoStrategyScanStats.scannedCount++;
+      fnoStrategyScanStats.lastSymbol=symbol;
+      fnoStrategyScanStats.lastStatus=research.status;
+      fnoStrategyScanStats.lastReason=research.reason||null;
+      fnoStrategyScanStats.lastScanAt=new Date().toISOString();
+      if(research.status==='UNDERLYING_SETUP_CONFIRMED'&&!fnoResearchWarmupUsed) {
+        fnoResearchWarmupUsed=true;
+        fnoResearchWarmupQueue.push(symbol);
+        fnoStrategyScanStats.warmupSymbol=symbol;
+        fnoStrategyScanStats.warmupStatus='QUEUED_AFTER_SLICE_SCAN';
+      }
+    } catch(error) {
+      fnoStrategyScanStats.lastSymbol=symbol;
+      fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';
+      fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);
+      fnoStrategyScanStats.lastScanAt=new Date().toISOString();
+    } finally { fnoStrategyScanBusy=false; }
+  },4500);
+  fnoStrategyScanTimer.unref?.();
+}
+
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
   if (!fnoUniverseLoadPromise) {
     fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
       const coverage = setFnoUniverse(universe);
-      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount);
+      startFnoStrategyScanner();
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12);
       return true;
     }).catch(error => {
       fnoUniverseLoadPromise = null;
@@ -67,6 +143,19 @@ const server = http.createServer(async (req,res) => {
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
         const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol),getFifteenMinuteHistory(symbol)]);
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
+      }
+      if (url.pathname === '/api/research/universe') {
+        const snapshot=getFnoUniverseSnapshot();
+        const histories=getCachedResearchHistories();
+        const market=getMarketData();
+        const result=evaluateRollingFnoUniverse({
+          universe:snapshot.universe,ticks:snapshot.ticks,
+          fiveMinute:histories.fiveMinute,daily:histories.daily,fifteenMinute:histories.fifteenMinute,
+          topGainers:market.fno?.topGainers||[],now:Date.now()
+        });
+        return send(res,200,{...result,activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
+          rotationIntervalMs:snapshot.rotationIntervalMs,scanPerSlice:snapshot.scanPerSlice,symbolCap:snapshot.symbolCap,scanner:fnoStrategyScanStats,
+          note:'Only cached FYERS histories and exchange-timestamped ticks are evaluated. Missing/stale inputs are BLOCKED; this endpoint does not fetch synthetic data or place orders.'});
       }
       if (url.pathname === '/api/research') {
         const symbol = url.searchParams.get('symbol');
@@ -95,6 +184,7 @@ const server = http.createServer(async (req,res) => {
           researchRanking:research.researchRanking || [],
           reason:research.reason || (research.status === 'NO_TRADE' ? 'No strategy passed the verified setup filters' : ''),
           research:research.research || null,
+          strategyLedger:research.strategyLedger || [],
           underlying:symbol,
           source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',
           asOfExchangeTime:latestUnderlying.exchangeTime
@@ -124,7 +214,7 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    fnoCoverage:market.fno, scanner:'ROLLING_FNO_OBSERVATION_COVERAGE · 20 SYMBOLS PER 60S SLICE · NON-SIMULTANEOUS · NOT ACTIONABLE', strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · SELECTED SYMBOL ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:60000,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
@@ -216,6 +306,49 @@ const server = http.createServer(async (req,res) => {
       return send(res,rateLimited?429:200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error.message||'Setup verification unavailable').slice(0,180)});
     }
   }
+  if (req.method === 'POST' && url.pathname === '/api/auto-select-option') {
+    try {
+      const body = await readJson(req);
+      if (!validateNseSymbol(body.underlying) || !['LONG','SHORT'].includes(body.side)) {
+        return send(res,400,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Verified NSE underlying and confirmed LONG/SHORT direction are required'});
+      }
+      const beforeChain = getMarketData();
+      if (!beforeChain.selectedUnderlying?.fresh || beforeChain.selectedUnderlying.symbol !== body.underlying) {
+        return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Fresh selected-underlying FYERS tick is required before strike selection'});
+      }
+      const chainPayload = await getFyersOptionChain(body.underlying,10,body.timestamp || '');
+      const chainData = chainPayload.data || chainPayload;
+      const latestUnderlying = getMarketData().selectedUnderlying;
+      if (!latestUnderlying?.fresh || latestUnderlying.symbol !== body.underlying) {
+        return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Underlying tick became stale while the FYERS option chain was loading'});
+      }
+      const selection = chooseDirectionalOption({
+        optionsChain:chainData.optionsChain,
+        underlyingPrice:Number(latestUnderlying.price),
+        side:body.side
+      });
+      if (selection.status !== 'CANDIDATE_SELECTED') return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:selection.reason});
+      const contract = getVerifiedOptionContract(selection.symbol);
+      const requestedExpiry = Number(body.timestamp);
+      const requestedExpirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
+        ? (requestedExpiry > 1e12 ? requestedExpiry / 1000 : requestedExpiry) : null;
+      const expiryDay = value => new Date((Number(value) + 19800) * 1000).toISOString().slice(0,10);
+      const expectedUnderlying=body.underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
+      if (contract.side !== selection.side || contract.strike !== selection.strike ||
+          contract.underlying !== expectedUnderlying ||
+          (requestedExpirySeconds && expiryDay(contract.expiry) !== expiryDay(requestedExpirySeconds))) {
+        return send(res,409,{status:'AUTO_OPTION_MASTER_MISMATCH',reason:'FYERS chain candidate underlying, side, strike or expiry does not match the official active contract master'});
+      }
+      const subscription = setSelectedOptionSymbol(contract.symbol);
+      if (subscription?.status === 'SUBSCRIPTION_FAILED') {
+        return send(res,503,{status:'AUTO_OPTION_SUBSCRIPTION_FAILED',reason:subscription.reason || 'FYERS option subscription failed'});
+      }
+      return send(res,200,{status:'AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',selection,contract,subscription});
+    } catch(error) {
+      const rateLimited=/429|cooldown/i.test(String(error.message));
+      return send(res,rateLimited?429:503,{status:'AUTO_OPTION_UNAVAILABLE',reason:String(error.message||'Automatic option selection failed').slice(0,180)});
+    }
+  }
   if (req.method === 'POST' && url.pathname === '/api/select-option') {
     try {
       const body = await readJson(req);
@@ -224,6 +357,11 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'OPTION_SUBSCRIPTION_CLEARED'});
       }
       const contract = getVerifiedOptionContract(body.symbol);
+      const selectedUnderlying=getMarketData().selectedUnderlying;
+      const expectedUnderlying=String(selectedUnderlying?.symbol||'').replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
+      if(!expectedUnderlying||contract.underlying!==expectedUnderlying) {
+        return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:'Option contract underlying does not match the currently selected FYERS NSE underlying'});
+      }
       const subscription = setSelectedOptionSymbol(contract.symbol);
       if (subscription?.status === 'SUBSCRIPTION_FAILED') {
         return send(res,503,{status:'OPTION_SUBSCRIPTION_FAILED',reason:subscription.reason || 'FYERS option subscription failed',subscription});

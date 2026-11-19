@@ -8,20 +8,37 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
   const today = istDayKey(now / 1000);
   const maxObservationAgeSeconds = Math.ceil(symbols.length / Math.max(1, slotCount)) * (rotationIntervalMs / 1000) + 60;
   const observed = [];
+  const freshObserved = [];
   for (const symbol of symbols) {
     const tick = ticks.get(symbol);
     if (!tick || !Number.isFinite(Number(tick.changePercent)) || !Number.isFinite(Number(tick.receivedAt)) ||
         !Number.isFinite(Number(tick.exchangeTime)) || istDayKey(tick.exchangeTime) !== today) continue;
     const ageSeconds = Math.max(0, Math.floor((now - Number(tick.receivedAt)) / 1000));
     if (ageSeconds > maxObservationAgeSeconds) continue;
-    observed.push({ ...tick, fresh: ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3, ageSeconds });
+    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3;
+    const row = { ...tick, fresh, ageSeconds };
+    observed.push(row);
+    if (fresh) freshObserved.push(row);
   }
   observed.sort((a, b) => Number(b.changePercent) - Number(a.changePercent));
+  freshObserved.sort((a, b) => Number(b.changePercent) - Number(a.changePercent));
   return {
     observedCount: observed.length,
+    freshCount: freshObserved.length,
     universeCount: symbols.length,
     coverageComplete: symbols.length > 0 && observed.length === symbols.length,
     maxObservationAgeSeconds,
-    topGainers: observed.slice(0, Math.max(1, limit))
+    topGainers: freshObserved.slice(0, Math.max(1, limit))
   };
+}
+
+export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount = 20, selectedSymbol = null) {
+  const symbols=[...new Set(universe.map(item=>item?.symbol).filter(Boolean))];
+  if(!symbols.length)return [];
+  const count=Math.min(Math.max(1,Math.floor(Number(slotCount)||20)),symbols.length);
+  const start=((Math.floor(Number(startIndex)||0)%symbols.length)+symbols.length)%symbols.length;
+  const slice=[];
+  for(let i=0;i<count;i++)slice.push(symbols[(start+i)%symbols.length]);
+  if(selectedSymbol&&symbols.includes(selectedSymbol)&&!slice.includes(selectedSymbol))slice[slice.length-1]=selectedSymbol;
+  return [...new Set(slice)];
 }

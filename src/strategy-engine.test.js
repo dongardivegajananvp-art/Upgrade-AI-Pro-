@@ -18,6 +18,13 @@ test('fixed premium plan enforces breakout, chase block and exact 1:2', () => {
   const plan = buildFixedPremiumPlan({ breakoutLevel: 100, tickSize: 0.05, livePremium: 100.05, swingLow: 99 });
   assert.equal(plan.status, 'SETUP_CONFIRMED');
   assert.equal(plan.rr, 2);
+  assert.equal(plan.entry,100.05);
+  assert.equal(plan.stopLoss,98.95);
+  assert.equal(plan.target,102.25);
+  const aiTarget=buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99,targetR:2.5});
+  assert.equal(aiTarget.target,102.8);
+  assert.equal(aiTarget.rr,2.5);
+  assert.equal(buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99,targetR:1.5}).status,'NO_TRADE');
   assert.equal(buildFixedPremiumPlan({ breakoutLevel:100,tickSize:0.05,livePremium:102,swingLow:99 }).status, 'NO_TRADE');
 });
 test('duplicate active underlying or option contract is rejected', () => {
@@ -80,6 +87,8 @@ test('multi-timeframe research returns an explainable score only with verified d
   assert.equal(result.timeframes.daily,'BULLISH');
   assert.equal(result.timeframes.fifteenMinute,'BULLISH');
   assert.ok(result.evidence.some(line=>line.includes('Breakout candle volume: verified')));
+  assert.equal(result.targetR,2.5);
+  assert.equal(result.targetMethod,'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE');
 });
 test('multi-timeframe research refuses to invent a score when 15m history is incomplete', () => {
   const now=1800000000000;
@@ -87,4 +96,42 @@ test('multi-timeframe research refuses to invent a score when 15m history is inc
   const result=analyzeSetupResearch({candles:make(60,300),dailyCandles:make(60,86400),fifteenMinuteCandles:make(12,900),tick:{exchangeTime:now/1000,receivedAt:now},setup:{side:'LONG',confirmedAt:1700017700},now});
   assert.equal(result.status,'UNAVAILABLE');
   assert.match(result.reason,/50 verified 15-minute/);
+});
+
+
+test('diagnostic ledger reports all nine strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
+  const now=1800000000000;
+  const result=detectNineStrategySetup({underlyingCandles:[],underlyingTick:null,now});
+  assert.equal(result.strategyLedger.length,9);
+  assert.ok(result.strategyLedger.every(row=>row.status==='BLOCKED'&&row.reason));
+  assert.deepEqual(result.strategyLedger.map(row=>row.strategy),STRATEGIES);
+});
+
+test('direction-aware option selection is not actionable until independent live gates pass', async () => {
+  const { chooseDirectionalOption } = await import('./option-selection.js');
+  const rows=[
+    {symbol:'NSE:ABC100CE',option_type:'CE',strike_price:100},
+    {symbol:'NSE:ABC105CE',option_type:'CE',strike_price:105},
+    {symbol:'NSE:ABC100PE',option_type:'PE',strike_price:100}
+  ];
+  const call=chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'LONG'});
+  const put=chooseDirectionalOption({optionsChain:rows,underlyingPrice:101,side:'SHORT'});
+  assert.equal(call.side,'CE');
+  assert.equal(call.strike,105);
+  assert.equal(put.side,'PE');
+  assert.equal(put.strike,100);
+  assert.equal(call.actionable,false);
+  assert.equal(chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'FLAT'}).status,'UNAVAILABLE');
+});
+
+
+test('diagnostic ledger uses strategy-specific rejection reasons when verified windows are available', () => {
+  const now=Date.parse('2026-11-19T05:00:00Z');
+  const start=Math.floor(now/1000)-60*300;
+  const candles=Array.from({length:60},(_,i)=>({time:start+i*300,open:100,high:100.5,low:99.5,close:100,volume:100}));
+  const result=detectNineStrategySetup({underlyingCandles:candles,underlyingTick:{price:100,exchangeTime:now/1000,receivedAt:now},now});
+  assert.equal(result.strategyLedger.length,9);
+  assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED'].includes(row.status)&&row.reason));
+  assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
+  assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('daily candles')));
 });

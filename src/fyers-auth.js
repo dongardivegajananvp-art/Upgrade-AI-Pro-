@@ -1,8 +1,7 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const AUTH_URL = 'https://api-t1.fyers.in/api/v3/generate-authcode';
 const TOKEN_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode';
-const pendingStates = new Map();
 let accessToken = null;
 let tokenReceivedAt = null;
 let lastAuthError = null;
@@ -10,20 +9,22 @@ let lastAuthError = null;
 export function createLoginUrl({ appId, redirectUri, now = Date.now() }) {
   if (!appId || !redirectUri) throw new Error('FYERS_APP_ID and FYERS_REDIRECT_URI are required');
   const state = randomBytes(24).toString('hex');
-  pendingStates.set(state, now + 10 * 60 * 1000);
   const url = new URL(AUTH_URL);
   url.searchParams.set('client_id', appId);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('state', state);
-  return url.toString();
+  return { url: url.toString(), state, expiresAt: now + 10 * 60 * 1000 };
 }
 
-export function consumeLoginState(state, now = Date.now()) {
-  if (typeof state !== 'string' || !state) return false;
-  const expiry = pendingStates.get(state);
-  pendingStates.delete(state);
-  return Number.isFinite(expiry) && expiry >= now;
+// Bind the random OAuth state to a short-lived HttpOnly cookie. This avoids
+// process-local storage, which is unreliable across restarts/instances.
+export function verifyLoginState(state, cookieState) {
+  if (typeof state !== 'string' || typeof cookieState !== 'string') return false;
+  if (!/^[a-f0-9]{48}$/.test(state) || !/^[a-f0-9]{48}$/.test(cookieState)) return false;
+  const a = Buffer.from(state, 'hex');
+  const b = Buffer.from(cookieState, 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export async function exchangeAuthCode({ appId, appSecret, authCode }) {

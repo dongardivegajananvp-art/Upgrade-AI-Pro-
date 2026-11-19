@@ -38,6 +38,11 @@ async function refresh() {
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;
+    // Restore the backend's selected chart symbol after a page reload; otherwise
+    // the server can build a live candle while the client never renders it.
+    if (!selectedSymbol && underlyingTick?.symbol && underlyingTick.fresh) {
+      selectSymbol(underlyingTick.symbol, underlyingTick.price);
+    }
     if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh && underlyingTick.liveCandle) {
       chartLiveCandle = underlyingTick.liveCandle;
       renderChartViewport();
@@ -195,7 +200,6 @@ async function selectSymbol(symbol, livePrice = null) {
   selectedSymbol = symbol;
   setupEvaluationDone = false;
   chartLiveCandle = null;
-  fetch('/api/select-underlying',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol})}).catch(()=>{});
   const title = document.querySelector('#symbol');
   const area = document.querySelector('#chart-area');
   title.textContent = symbol + ' · LOADING VERIFIED FYERS HISTORY';
@@ -205,6 +209,9 @@ async function selectSymbol(symbol, livePrice = null) {
   loading.textContent = 'Loading completed FYERS 5-minute candles. No synthetic candles are used.';
   area.append(loading);
   try {
+    const selectionResponse = await fetch('/api/select-underlying',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol})});
+    const selection = await selectionResponse.json();
+    if (!selectionResponse.ok || !['UNDERLYING_PINNED_TO_SOCKET_SLICE','UNCHANGED'].includes(selection.status)) throw new Error(selection.reason || 'Underlying socket subscription was not confirmed');
     const response = await fetch('/api/history?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
     const data = await response.json();
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');

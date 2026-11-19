@@ -47,7 +47,7 @@ async function refreshUniverseScan() {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
     container.replaceChildren();
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.scannedCount||0)+' HISTORY SCANS · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice||11)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
     container.append(note);

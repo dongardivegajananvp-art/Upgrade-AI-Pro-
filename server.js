@@ -44,7 +44,7 @@ let fnoStrategyScanCursor = 0;
 let fnoScannerNextTask = 'SCAN';
 let fnoStrategyScanRotation = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
-const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0 };
+const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0 };
 function startFnoStrategyScanner() {
   if (fnoStrategyScanTimer) return;
   fnoStrategyScanStats.status='RUNNING';
@@ -75,11 +75,13 @@ function startFnoStrategyScanner() {
         fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
         fnoStrategyScanStats.warmupCompletedCount++;
       } catch(error) {
-        fnoStrategyScanStats.warmupStatus='BLOCKED';
-        fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180);
-        fnoStrategyScanStats.warmupRejectedCount++;
+        const retry=fnoResearchWarmupQueue.fail(warmupSymbol);
+        fnoStrategyScanStats.warmupStatus=retry.retry?'RETRY_QUEUED':'BLOCKED';
+        fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180)+
+          (retry.retry?(' · retry '+retry.attempt+'/'+retry.maxAttempts):' · retry limit exhausted; candidate remains unqualified');
+        if(retry.retry) fnoStrategyScanStats.warmupRetryCount++;
+        else fnoStrategyScanStats.warmupRejectedCount++;
       } finally {
-        fnoResearchWarmupQueue.complete(warmupSymbol);
         fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
         fnoScannerNextTask='SCAN';
         fnoStrategyScanBusy=false;

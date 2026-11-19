@@ -162,8 +162,16 @@ const server = http.createServer(async (req,res) => {
       if (!option?.fresh || option.symbol !== body.contract) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected option tick is not fresh'});
       const contract = getVerifiedOptionContract(body.contract);
       const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([getFiveMinuteHistory(body.underlying),getFiveMinuteHistory(body.contract),getDailyHistory(body.underlying),getFifteenMinuteHistory(body.underlying)]);
-      const isTopGainer = (market.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
-      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:underlying,optionCandles:optionHistory.candles,optionTick:option,contract,dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,isTopGainer,researchEnabled:true,now:Date.now()});
+      // REST history requests are serialized to respect FYERS pacing. Re-read the
+      // WebSocket snapshot afterwards so the 10-second freshness gate uses current ticks.
+      const latestMarket=getMarketData();
+      const latestUnderlying=latestMarket.selectedUnderlying,latestOption=latestMarket.selectedOption;
+      if(!latestUnderlying?.fresh||latestUnderlying.symbol!==body.underlying)
+        return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Underlying tick became stale while verified research history was loading'});
+      if(!latestOption?.fresh||latestOption.symbol!==body.contract)
+        return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Option tick became stale while verified research history was loading'});
+      const isTopGainer = (latestMarket.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
+      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,optionCandles:optionHistory.candles,optionTick:latestOption,contract,dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,isTopGainer,researchEnabled:true,now:Date.now()});
       return send(res,200,{...setup,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'});
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));

@@ -60,3 +60,18 @@ test('only an in-flight symbol can complete or fail', () => {
   assert.deepEqual(queue.fail('NSE:A-EQ'), { retry: false, attempt: 0, maxAttempts: 3 });
   assert.equal(queue.size, 1);
 });
+
+test('warmup retry uses exponential backoff without blocking other ready candidates', () => {
+  const queue = createResearchWarmupQueue({ retryBaseMs: 1000, retryMaxMs: 5000 });
+  queue.enqueue('NSE:A-EQ');
+  queue.enqueue('NSE:B-EQ');
+  assert.equal(queue.take(10000), 'NSE:A-EQ');
+  assert.deepEqual(queue.fail('NSE:A-EQ', 10000), { retry: true, attempt: 1, maxAttempts: 3, retryAfterMs: 1000 });
+  assert.equal(queue.take(10000), 'NSE:B-EQ', 'a delayed retry must not block ready FIFO work');
+  queue.complete('NSE:B-EQ');
+  assert.equal(queue.take(10999), null);
+  assert.equal(queue.take(11000), 'NSE:A-EQ');
+  assert.deepEqual(queue.fail('NSE:A-EQ', 11000), { retry: true, attempt: 2, maxAttempts: 3, retryAfterMs: 2000 });
+  assert.equal(queue.take(12999), null);
+  assert.equal(queue.take(13000), 'NSE:A-EQ');
+});

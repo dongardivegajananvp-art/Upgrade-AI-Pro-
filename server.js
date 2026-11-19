@@ -63,7 +63,7 @@ function startFnoStrategyScanner() {
       // discovered in the previous slice must not be discarded.
     }
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
-    const shouldWarmup=fnoResearchWarmupQueue.size>0 && (fnoScannerNextTask==='WARMUP' || fnoStrategyScanCursor>=scanLimit);
+    const shouldWarmup=fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && (fnoScannerNextTask==='WARMUP' || fnoStrategyScanCursor>=scanLimit);
     if (shouldWarmup) {
       const warmupSymbol=fnoResearchWarmupQueue.take();
       fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;

@@ -325,6 +325,28 @@ function renderChartViewport() {
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', 'FYERS completed five-minute candlestick chart with supply and demand structure zones');
   svg.setAttribute('preserveAspectRatio', 'none');
+  const chartSymbolLabel = (selectedSymbol || 'SELECT SYMBOL')
+    .replace(/^(NSE|BSE):/, '')
+    .replace(/-EQ$/, '')
+    .replace('-INDEX', '')
+    .replace('NIFTY50', 'NIFTY 50')
+    .replace('NIFTYBANK', 'BANK NIFTY');
+  svg.setAttribute('aria-label', chartSymbolLabel + ' FYERS five-minute candlestick chart with supply and demand structure zones');
+  // A low-opacity SVG watermark keeps the selected instrument identifiable
+  // behind candles without obscuring price action or changing chart data.
+  const watermark = document.createElementNS(ns, 'text');
+  watermark.setAttribute('x', '592');
+  watermark.setAttribute('y', '315');
+  watermark.setAttribute('text-anchor', 'middle');
+  watermark.setAttribute('dominant-baseline', 'middle');
+  watermark.setAttribute('fill', '#9bb0ca');
+  watermark.setAttribute('fill-opacity', '0.13');
+  watermark.setAttribute('font-size', '68');
+  watermark.setAttribute('font-weight', '800');
+  watermark.setAttribute('letter-spacing', '5');
+  watermark.setAttribute('pointer-events', 'none');
+  watermark.textContent = chartSymbolLabel;
+  svg.append(watermark);
   const left=76,right=92,top=28,bottom=100,plotW=1200-left-right,plotH=620-top-bottom;
   const highs=visible.map(c=>Number(c.high)), lows=visible.map(c=>Number(c.low));
   const max=Math.max(...highs),min=Math.min(...lows),range=Math.max(max-min,0.000001);

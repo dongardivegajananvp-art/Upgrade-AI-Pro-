@@ -17,6 +17,8 @@ let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
 let setupLastBucket = null;
 let lastAccountRefresh = 0;
+let lastUniverseScanRefresh = 0;
+let universeScanRunning = false;
 document.querySelectorAll('.indices article[data-symbol]').forEach(card => {
   const open = () => selectIndexSymbol(card.dataset.symbol);
   card.addEventListener('click', open);
@@ -32,6 +34,39 @@ function tickStatusText(md, freshCount) {
 function showNumber(value, digits=2) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
 }
+async function refreshUniverseScan() {
+  if(universeScanRunning) return;
+  universeScanRunning=true;lastUniverseScanRefresh=Date.now();
+  const status=document.querySelector('#universe-scan-status');
+  const container=document.querySelector('#universe-scan-results');
+  try {
+    const response=await fetch('/api/research/universe',{cache:'no-store'});
+    const data=await response.json();
+    container.replaceChildren();
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    const note=document.createElement('div');note.className='empty-inline';
+    note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
+    container.append(note);
+    for(const item of data.top3||[]) {
+      const card=document.createElement('article');card.className='research-card';
+      const head=document.createElement('div');head.className='research-card-head';
+      const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
+      const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
+      head.append(title,score);
+      const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
+      const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
+      card.append(head,evidence,reason);container.append(card);
+    }
+    if(!(data.top3||[]).length) {
+      const blocked=document.createElement('small');
+      blocked.textContent='No verified Top 3 yet. Per-stock BLOCKED/REJECTED reasons remain available from each stock’s strategy ledger; no scores are fabricated.';
+      container.append(blocked);
+    }
+  } catch(error) {
+    status.textContent='UNIVERSE SCAN UNAVAILABLE';
+    container.textContent=String(error.message||'Cached FYERS universe evaluation unavailable');
+  } finally {universeScanRunning=false;}
+}
 async function refresh() {
   try {
     const r = await fetch('/api/status',{cache:'no-store'});
@@ -45,6 +80,7 @@ async function refresh() {
       if (accountStatus) accountStatus.textContent = 'FYERS ACCOUNT FEED · SESSION REQUIRED';
     }
     const md = s.marketData || {};
+    if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;

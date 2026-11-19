@@ -21,7 +21,49 @@ function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, co
 }
 
 function analyzeEarlyWatch(){ return { status:'NO_WATCH' }; }
-function analyzeSetupResearch(){ return { status:'UNAVAILABLE', reason:'Research enrichment is not configured in this clean NSE-only release' }; }
+
+// Deterministic, explainable multi-timeframe research from verified FYERS OHLCV.
+// This is not a claim of an external generative-AI model or paid AI service.
+export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
+  const valid = rows => Array.isArray(rows) && rows.length && rows.every(c =>
+    c && ['time','open','high','low','close','volume'].every(k => Number.isFinite(Number(c[k]))) &&
+    Number(c.time)>0 && Number(c.open)>0 && Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low)) &&
+    Number(c.low)<=Math.min(Number(c.open),Number(c.close)) && Number(c.volume)>=0);
+  if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
+  if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
+  if (!valid(fifteenMinuteCandles) || fifteenMinuteCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified 15-minute candles are required for multi-timeframe research'};
+  if (!tick || !Number.isFinite(Number(tick.exchangeTime)) || !Number.isFinite(Number(tick.receivedAt)) ||
+      now-Number(tick.receivedAt)<0 || now-Number(tick.receivedAt)>10000 ||
+      now/1000-Number(tick.exchangeTime)<-3 || now/1000-Number(tick.exchangeTime)>10)
+    return {status:'UNAVAILABLE',reason:'Fresh exchange-timestamped FYERS tick is required for research'};
+  const trend = rows => {
+    const closes=rows.map(c=>Number(c.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);
+    if(!Number.isFinite(e20)||!Number.isFinite(e50))return 'NEUTRAL';
+    return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';
+  };
+  const expected=setup?.side==='LONG'?'BULLISH':'BEARISH';
+  const dailyTrend=trend(dailyCandles),fifteenTrend=trend(fifteenMinuteCandles),fiveTrend=trend(candles);
+  const pressure=setup?.breakoutConfirmation?.pressure || (setup?.side==='LONG'?'BUYING':'SELLING');
+  const volume=Number(candles.find(c=>Number(c.time)===Number(setup?.confirmedAt))?.volume);
+  const aligned=t=>t===expected;
+  const points={
+    dailyTrend:aligned(dailyTrend)?20:dailyTrend==='NEUTRAL'?8:0,
+    fifteenMinuteTrend:aligned(fifteenTrend)?20:fifteenTrend==='NEUTRAL'?8:0,
+    fiveMinuteTrend:aligned(fiveTrend)?15:fiveTrend==='NEUTRAL'?6:0,
+    directionalPressure:pressure===(setup?.side==='LONG'?'BUYING':'SELLING')?10:0,
+    breakoutVolume:Number.isFinite(volume)&&volume>0?10:0,
+    liveTickFresh:5,
+    strategyEvidence:setup?.strategy?10:0
+  };
+  const qualityScore=Object.values(points).reduce((a,b)=>a+b,0);
+  const evidence=['Daily trend: '+dailyTrend,'15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,
+    'Breakout candle pressure: '+pressure,'Breakout candle volume: '+(Number.isFinite(volume)&&volume>0?'verified':'missing'),'FYERS tick: fresh'];
+  return {status:'COMPLETE',qualityScore,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
+    direction:setup.side,timeframes:{daily:dailyTrend,fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},
+    points,evidence,marketRegime:marketRegime||'NOT_CLASSIFIED',
+    invalidation:'A completed 5-minute close back through the confirmed breakout level invalidates this research setup',
+    source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',asOfExchangeTime:Number(tick.exchangeTime)};
+}
 
 
 const INTERVAL_SECONDS = 300;
@@ -311,7 +353,7 @@ export function detectDailyTrendPullback(rows, dailyCandles=[]) {
   return null;
 }
 
-export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
+export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   if(!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
@@ -360,7 +402,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
   }
   if(researchEnabled){
-    for(const item of candidates)item.research=analyzeSetupResearch({candles:rows,dailyCandles,tick:underlyingTick,setup:item,marketRegime,now});
+    for(const item of candidates)item.research=analyzeSetupResearch({candles:rows,dailyCandles,fifteenMinuteCandles,tick:underlyingTick,setup:item,marketRegime,now});
     const researchReady=candidates.filter(item=>item.research?.status==='COMPLETE'&&finite(item.research.qualityScore));
     if(!researchReady.length){
       const pending=candidates[0]?.research||null;
@@ -369,13 +411,18 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     candidates.splice(0,candidates.length,...researchReady);
     candidates.sort((a,b)=>Number(b.research.qualityScore)-Number(a.research.qualityScore)||a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   }else candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
-  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
+  const researchRanking=researchEnabled?candidates.slice(0,3).map((item,index)=>({
+    rank:index+1,strategy:item.strategy,side:item.side,qualityScore:item.research.qualityScore,
+    grade:item.research.grade,evidence:item.research.evidence,timeframes:item.research.timeframes,
+    invalidation:item.research.invalidation
+  })):[];
+  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 
-export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
+export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
-  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
+  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
   if(!tickFresh(optionTick))return fail('Fresh FYERS option premium tick is required');
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
@@ -397,7 +444,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const swingLow=Math.min(number(prior.low),number(reference.low));
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'EXACT_2R',confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',contract:contract.symbol,research:chosen.research||null};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'EXACT_2R',confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[]};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};

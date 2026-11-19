@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, buildFyersUrl } from './fyers-rest.js';
+import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
@@ -48,4 +48,17 @@ test('15-minute index and equity history normalization excludes incomplete, malf
   const candles=normalizeFifteenMinuteCandles(rows,now);
   assert.deepEqual(candles.map(c=>c.time),[first,first+900]);
   assert.ok(candles.every(c=>c.completed&&c.source==='FYERS_HISTORY_15M'));
+});
+
+test('daily research excludes the current incomplete IST session candle', () => {
+  const now = Date.UTC(2027, 0, 4, 5, 0); // 10:00 IST on 4 Jan 2027
+  const yesterday = Date.UTC(2027, 0, 2, 18, 30) / 1000; // 00:00 IST on 3 Jan
+  const today = Date.UTC(2027, 0, 3, 18, 30) / 1000; // 00:00 IST on 4 Jan
+  const rows = [
+    [yesterday, 100, 103, 99, 102, 1000],
+    [today, 102, 108, 101, 107, 1500]
+  ];
+  const candles = normalizeDailyCandles(rows, now);
+  assert.deepEqual(candles.map(c => c.time), [yesterday]);
+  assert.ok(candles.every(c => c.completed && c.source === 'FYERS_DAILY_HISTORY'));
 });

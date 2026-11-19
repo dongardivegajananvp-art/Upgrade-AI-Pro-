@@ -13,9 +13,9 @@
 </header>
 <main>
   <section class="indices" aria-label="Market indices">
-    <article><small>NIFTY 50</small><strong id="nifty">—</strong><span id="nifty-change">—</span></article>
-    <article><small>BANK NIFTY</small><strong id="bank">—</strong><span id="bank-change">—</span></article>
-    <article><small>SENSEX</small><strong id="sensex">—</strong><span id="sensex-change">—</span></article>
+    <article data-symbol="NSE:NIFTY50-INDEX" tabindex="0" role="button" aria-label="Open NIFTY 50 five-minute chart"><small>NIFTY 50</small><strong id="nifty">—</strong><span id="nifty-change">—</span></article>
+    <article data-symbol="NSE:NIFTYBANK-INDEX" tabindex="0" role="button" aria-label="Open BANK NIFTY five-minute chart"><small>BANK NIFTY</small><strong id="bank">—</strong><span id="bank-change">—</span></article>
+    <article data-symbol="BSE:SENSEX-INDEX" tabindex="0" role="button" aria-label="Open SENSEX five-minute chart"><small>SENSEX</small><strong id="sensex">—</strong><span id="sensex-change">—</span></article>
   </section>
 
   <section class="panel movers">
@@ -34,6 +34,11 @@
       <div class="chart-empty"><strong>FULL-DAY 5-MINUTE CHART</strong><span>Chart appears after verified FYERS historical candles are loaded.</span><span>No synthetic candles or stale prices.</span></div>
     </div>
     <div class="levels" id="setup-ledger"><span>ENTRY <b id="setup-entry">—</b></span><span>STOP LOSS <b id="setup-sl">—</b></span><span>TARGET <b id="setup-target">—</b></span><span>RR <b id="setup-rr">—</b></span><span id="setup-state">NO SETUP VERIFIED</span></div>
+  </section>
+
+  <section class="panel research">
+    <div class="section-heading"><h2>AI RESEARCH · MULTI-TIMEFRAME</h2><small id="research-status">WAITING FOR VERIFIED SETUP</small></div>
+    <div id="research-results" class="research-results"><div class="empty-inline">Research runs only after fresh underlying and option verification.</div></div>
   </section>
 
   <section class="panel options">

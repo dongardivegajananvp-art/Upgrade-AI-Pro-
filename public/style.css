@@ -46,3 +46,14 @@ footer{color:#7890ae}
 .live-candle-metric small{color:#8fa9c7;font-size:9px;letter-spacing:.1em}
 .live-candle-metric b{color:#f2f7ff;font-size:13px;font-variant-numeric:tabular-nums}
 @media(max-width:700px){.live-candle-summary{gap:5px;padding:8px}.live-candle-summary>strong{width:100%;border-right:0;border-bottom:1px solid #31506b;padding:0 0 7px}.live-candle-state{padding:3px 0;width:100%}.live-candle-metric{min-width:calc(25% - 5px);padding:4px 3px}.live-candle-metric b{font-size:12px}}
+
+.indices article[data-symbol]{cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s}
+.indices article[data-symbol]:hover,.indices article[data-symbol]:focus-visible{outline:none;border-color:#4c9aff;transform:translateY(-2px);box-shadow:0 10px 28px #0006,0 0 0 1px #4c9aff55}
+.research-results{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.research-card{min-width:0;padding:12px;border:1px solid #29415f;border-radius:9px;background:linear-gradient(145deg,#12243a,#0a1728);display:grid;gap:8px}
+.research-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.research-card-head strong{font-size:11px;overflow-wrap:anywhere;color:#dceaff}
+.research-card-head b{white-space:nowrap;font-size:12px;color:#43dda0;font-variant-numeric:tabular-nums}
+.research-card p{margin:0;color:#a9bdd7;font-size:11px}
+.research-card small{color:#8fa5c1;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
+@media(max-width:700px){.research-results{grid-template-columns:1fr}.research-card{padding:10px}}

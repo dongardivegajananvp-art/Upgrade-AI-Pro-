@@ -7,7 +7,7 @@ import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, crea
 import { startMarketSocket, getMarketData, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
 import { evaluateNineStrategies } from './src/strategy-engine.js';
-import { getFiveMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory } from './src/fyers-rest.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -86,7 +86,7 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    fnoCoverage:market.fno, scanner:'ROTATING_FNO_COVERAGE_ONLY · NOT FULL-UNIVERSE SCAN', strategyEngine:'NINE_STRATEGY_SELECTED_SYMBOL_EVALUATION · LIVE SCANNER NOT YET FULLY PROVEN', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:market.fno, scanner:'ROTATING_FNO_COVERAGE_ONLY · 20 OF 218 SYMBOLS PER SLICE · NOT FULL-UNIVERSE SCAN', strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · SELECTED SYMBOL ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
@@ -161,9 +161,17 @@ const server = http.createServer(async (req,res) => {
       if (!underlying?.fresh || underlying.symbol !== body.underlying) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected underlying tick is not fresh'});
       if (!option?.fresh || option.symbol !== body.contract) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected option tick is not fresh'});
       const contract = getVerifiedOptionContract(body.contract);
-      const [underlyingHistory,optionHistory,dailyHistory] = await Promise.all([getFiveMinuteHistory(body.underlying),getFiveMinuteHistory(body.contract),getDailyHistory(body.underlying)]);
-      const isTopGainer = (market.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
-      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:underlying,optionCandles:optionHistory.candles,optionTick:option,contract,dailyCandles:dailyHistory.candles,isTopGainer,now:Date.now()});
+      const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([getFiveMinuteHistory(body.underlying),getFiveMinuteHistory(body.contract),getDailyHistory(body.underlying),getFifteenMinuteHistory(body.underlying)]);
+      // REST history requests are serialized to respect FYERS pacing. Re-read the
+      // WebSocket snapshot afterwards so the 10-second freshness gate uses current ticks.
+      const latestMarket=getMarketData();
+      const latestUnderlying=latestMarket.selectedUnderlying,latestOption=latestMarket.selectedOption;
+      if(!latestUnderlying?.fresh||latestUnderlying.symbol!==body.underlying)
+        return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Underlying tick became stale while verified research history was loading'});
+      if(!latestOption?.fresh||latestOption.symbol!==body.contract)
+        return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Option tick became stale while verified research history was loading'});
+      const isTopGainer = (latestMarket.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
+      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,optionCandles:optionHistory.candles,optionTick:latestOption,contract,dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,isTopGainer,researchEnabled:true,now:Date.now()});
       return send(res,200,{...setup,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'});
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));

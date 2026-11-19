@@ -59,12 +59,19 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     strategyEvidence:setup?.strategy?20:0
   };
   const qualityScore=Object.values(points).reduce((a,b)=>a+b,0);
+  // In-app AI research chooses a risk multiple from verified multi-timeframe
+  // alignment. Price levels remain deterministic and independently validated.
+  const alignedFrames=[dailyTrend,fifteenTrend,fiveTrend].filter(value=>value===expected).length;
+  const targetR=qualityScore>=85&&alignedFrames===3?2.5:qualityScore>=70&&alignedFrames>=2?2.25:2;
+  const targetRationale=targetR===2.5?'A-grade research: all three timeframes align; 2.5R objective':
+    targetR===2.25?'B-grade research: at least two timeframes align; 2.25R objective':
+    'Conservative research objective: minimum 2R';
   const regime=dailyTrend===fifteenTrend&&dailyTrend!=='NEUTRAL'?'TRENDING_'+dailyTrend:(dailyTrend==='NEUTRAL'&&fifteenTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
   const evidence=['Daily trend: '+dailyTrend,'15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,
     'Market regime: '+regime,'Breakout candle pressure: '+pressure,'Breakout candle volume: '+(Number.isFinite(volume)&&volume>0?'verified':'missing'),'FYERS tick: fresh'];
   return {status:'COMPLETE',qualityScore,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
     direction:setup.side,timeframes:{daily:dailyTrend,fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},
-    points,evidence,marketRegime:marketRegime||regime,
+    points,evidence,marketRegime:marketRegime||regime,targetR,targetRationale,targetMethod:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',
     invalidation:'A completed 5-minute close back through the confirmed breakout level invalidates this research setup',
     source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',asOfExchangeTime:Number(tick.exchangeTime)};
 }
@@ -308,9 +315,10 @@ export function detectDayHighLowRetest(rows) {
   }
   return null;
 }
-export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow }) {
+export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow, targetR = 2 }) {
   const values=[breakoutLevel,tickSize,livePremium,swingLow];
   if(!values.every(finite)||values.some(v=>number(v)<=0))return{status:'NO_TRADE',reason:'Breakout, tick size, live premium and confirmed-candle swing low must be positive'};
+  if(!finite(targetR)||number(targetR)<2||number(targetR)>3)return{status:'NO_TRADE',reason:'AI-researched target multiple must remain between minimum 2R and maximum 3R'};
   const step=number(tickSize);
   const entry=Number((Math.ceil((number(breakoutLevel)+step-1e-9)/step)*step).toFixed(8));
   // One completed post-breakout confirmation/retest candle defines the swing low.
@@ -320,10 +328,10 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   if(!(risk>=step))return{status:'NO_TRADE',reason:'Single-candle confirmation swing low does not leave positive option-premium risk'};
   if(number(livePremium)+step*1e-7<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
   if(number(livePremium)>entry+0.5*risk+step*1e-7)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
-  const target=Number((entry+2*risk).toFixed(8));
+  const target=Number((entry+risk*number(targetR)).toFixed(8));
   const plannedRr=(target-entry)/risk;
   if(!(Number.isFinite(plannedRr)&&plannedRr>=2-1e-9))return{status:'NO_TRADE',reason:'Fixed Entry/SL/Target do not preserve the required 1:2 reward/risk'};
-  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk};
+  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk,targetR:number(targetR)};
 }
 
 export function detectEmaTrend(rows) {
@@ -469,9 +477,9 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   // Structural risk uses the last two completed option candles; the live quote is
   // the trigger. This removes the redundant extra 5-minute confirmation delay.
   const swingLow=Math.min(number(prior.low),number(reference.low));
-  const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
+  const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow,targetR:chosen.research?.targetR||2});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:plan.reason}:row)};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',entryTiming:'EARLY_VERIFIED_LIVE_PREMIUM_BREAK',entryBasis:'LATEST_COMPLETED_OPTION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'AI_RESEARCH_VALIDATED_MINIMUM_1_TO_2_RISK_MULTIPLE',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',entryTiming:'EARLY_VERIFIED_LIVE_PREMIUM_BREAK',entryBasis:'LATEST_COMPLETED_OPTION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',targetR:plan.targetR,targetRationale:chosen.research?.targetRationale||'Minimum 2R research objective',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};

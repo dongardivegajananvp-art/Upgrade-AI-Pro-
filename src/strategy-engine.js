@@ -365,7 +365,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   if(u.error)return fail(u.error);
   const rows=u.rows,last=u.last;
   const candidates=[], evaluated=[], blocked=[], strategyLedger=[];
-  const consider=(name,eligible,detect,blockedReason)=>{
+  const consider=(name,eligible,detect,blockedReason,rejectedReason='Latest completed candle does not meet this strategy pattern/trigger conditions')=>{
     if(!eligible){
       blocked.push(name);
       strategyLedger.push({strategy:name,status:'BLOCKED',reason:blockedReason});
@@ -377,7 +377,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
       candidates.push(result);
       strategyLedger.push({strategy:name,status:'DETECTED',reason:'Strategy pattern and trigger conditions detected; common confirmation/research gates still apply',side:result.side,confirmedAt:result.confirmedAt});
     } else {
-      strategyLedger.push({strategy:name,status:'REJECTED',reason:'Required candle window is valid, but this strategy pattern/trigger conditions are not present on the latest completed data'});
+      strategyLedger.push({strategy:name,status:'REJECTED',reason:rejectedReason});
     }
   };
   // Each strategy validates only the candle history it actually consumes.
@@ -387,17 +387,17 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
   const dailyValid=Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50;
-  consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous');
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles');
-  consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed daily candles from FYERS');
+  consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles','Latest completed 5-minute close did not break the previous completed candle high');
+  consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed daily candles from FYERS','Daily and 5-minute EMA20/EMA50 alignment, EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
-  consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous');
-  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles');
-  consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles');
-  consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles');
-  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles');
-  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous');
+  consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No current-session day-high/day-low break followed by a retest and close reclaim/rejection was confirmed');
+  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles','No two comparable swing highs/lows, neckline break, and subsequent neckline retest were all confirmed');
+  consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
+  consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
+  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','Flag volume did not contract below 75% of impulse volume or breakout volume did not reach 1.5x flag average');
+  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','Fresh live price or completed 5-minute close did not break and retest the first-candle/15-minute opening range');
   // Apply one identical pressure+volume gate to every strategy signal.
   const rejectedForConfirmation = [];
   const confirmedCandidates = candidates.filter(item => {
@@ -442,17 +442,22 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
 }
 
 export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
+  let setup=null;
+  const blockDetected=(reason)=>({
+    status:'DATA_UNAVAILABLE_NO_TRADE',reason,
+    strategyLedger:(setup?.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Underlying strategy detected; '+reason}:row)
+  });
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
-  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
+  setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
-  if(!tickFresh(optionTick))return {...fail('Fresh FYERS option premium tick is required'),strategyLedger:setup.strategyLedger||[]};
-  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return {...fail('Verified active CE/PE contract and tick size are required'),strategyLedger:setup.strategyLedger||[]};
+  if(!tickFresh(optionTick))return blockDetected('Fresh FYERS option premium tick is required');
+  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return blockDetected('Verified active CE/PE contract and tick size are required');
   const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds);
-  if(o.error)return {...fail(o.error),strategyLedger:setup.strategyLedger||[]};
-  if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return {...fail('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle'),strategyLedger:setup.strategyLedger||[]};
+  if(o.error)return blockDetected(o.error);
+  if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
   const chosen=setup;
-  if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy,strategyLedger:setup.strategyLedger||[]};
+  if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return blockDetected('Selected option side does not match the confirmed underlying direction');
   const premiumRows=o.rows,tickSize=number(contract.tickSize);
   const prior=premiumRows.at(-2),reference=premiumRows.at(-1);
   // The underlying strategy already confirmed on a completed 5-minute candle.
@@ -460,12 +465,12 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   // option premium crossing the latest completed option candle high + one tick.
   const premiumLevel=number(reference.high);
   const entry=Number((Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize).toFixed(8));
-  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Underlying setup is confirmed; waiting for live option premium to break the latest completed 5-minute candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,strategyLedger:setup.strategyLedger||[]};
+  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Underlying setup is confirmed; waiting for live option premium to break the latest completed 5-minute candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Waiting for verified live option premium to cross the breakout level'}:row)};
   // Structural risk uses the last two completed option candles; the live quote is
   // the trigger. This removes the redundant extra 5-minute confirmation delay.
   const swingLow=Math.min(number(prior.low),number(reference.low));
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
-  if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,strategyLedger:setup.strategyLedger||[]};
+  if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:plan.reason}:row)};
   return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',entryTiming:'EARLY_VERIFIED_LIVE_PREMIUM_BREAK',entryBasis:'LATEST_COMPLETED_OPTION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'AI_RESEARCH_VALIDATED_MINIMUM_1_TO_2_RISK_MULTIPLE',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {

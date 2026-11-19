@@ -4,5 +4,6 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
-  "scripts": { "start": "node server.js", "test": "node --test" }
+  "scripts": { "start": "node server.js", "test": "node --test" },
+  "dependencies": { "fyers-api-v3": "2.4.1" }
 }

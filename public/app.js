@@ -261,11 +261,12 @@ async function selectSymbol(symbol, livePrice = null) {
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');
     drawHistoryChart(data.candles);
     selectedUnderlyingPrice = Number(livePrice) > 0 ? Number(livePrice) : (Number(data.candles.at(-1)?.close) || null);
-    // Warm the selected symbol's verified daily and 15-minute research context
-    // while the option chain/subscription is loading, not after the 10-second tick gate starts.
-    fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' }).catch(() => {});
     await clearSelectedOption();
+    // Load the selected option chain before background research warmup. The FYERS
+    // REST scheduler is shared and paced; background daily/15m history must not
+    // sit ahead of the user's option-chain request in that queue.
     await loadOptionChain(symbol, selectedUnderlyingPrice);
+    fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' }).catch(() => {});
     title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;
   } catch (error) {
     area.replaceChildren();
@@ -296,7 +297,7 @@ function renderLiveCandleSummary(tick) {
   const c = chartLiveCandle;
   const time = new Date((Number(c.time) + 19800) * 1000).toISOString().slice(11,16);
   const fields = [
-    ['TIME', time + '–' + new Date((Number(c.time) + 498) * 1000).toISOString().slice(11,16) + ' IST'],
+    ['TIME', time + '–' + new Date((Number(c.time) + 19800 + 300) * 1000).toISOString().slice(11,16) + ' IST'],
     ['LIVE PRICE', fresh ? '₹' + showNumber(tick.price) : '—'],
     ['OPEN', showNumber(c.open)],
     ['HIGH', showNumber(c.high)],

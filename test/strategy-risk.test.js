@@ -58,7 +58,7 @@ test('research targets adapt to aligned trend versus range regime without reduci
   const fifteen=risingCandles(50,100,.2,900,exchangeTime-900);
   const setup={side:'LONG',strategy:'EMA20_EMA50_TREND',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
   const aligned=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick,setup,now});
-  assert.equal(aligned.status,'COMPLETE');
+  assert.equal(aligned.status,'COMPLETE',aligned.reason);
   assert.equal(aligned.targetR,2.5);
   assert.equal(aligned.marketRegime,'TRENDING_BULLISH');
   assert.equal(aligned.confidenceCalibration.status,'PENDING_REALIZED_OUTCOME_SAMPLE');

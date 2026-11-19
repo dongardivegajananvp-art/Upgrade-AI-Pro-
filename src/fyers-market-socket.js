@@ -4,7 +4,7 @@ import { getAccessTokenForServer } from './fyers-auth.js';
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
 const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
-const MAX_UNDERLYING_SLOTS = 96;
+const MAX_UNDERLYING_SLOTS = 20;
 const ROTATION_INTERVAL_MS = 20_000;
 let socket = null;
 let socketStatus = 'NOT_STARTED';
@@ -19,6 +19,11 @@ let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
 const ticks = new Map();
 
+function safeError(error) {
+  if (error instanceof Error) return error.message.slice(0, 240);
+  if (typeof error === 'string') return error.slice(0, 240);
+  try { return JSON.stringify(error).slice(0, 240); } catch { return String(error).slice(0, 240); }
+}
 function decode(message) {
   if (Buffer.isBuffer(message) || message instanceof ArrayBuffer) {
     try { return JSON.parse(Buffer.from(message).toString('utf8')); } catch { return null; }
@@ -98,7 +103,7 @@ function applyFnoRotation() {
       }
       if (added.length) socket.subscribe(added);
     } catch (error) {
-      lastError = String(error?.message || error).slice(0, 180);
+      lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
       console.error('[FYERS_DATA] F&O rotation update failed:', lastError);
       return;
@@ -140,7 +145,7 @@ export function setSelectedOptionSymbol(symbol) {
       if (selectedOptionSymbol && typeof socket.unsubscribe === 'function') socket.unsubscribe([selectedOptionSymbol]);
       if (next && !activeFnoSymbols.includes(next) && !INDEX_SYMBOLS.includes(next)) socket.subscribe([next]);
     } catch (error) {
-      lastError = String(error?.message || error).slice(0, 180);
+      lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
       return;
     }
@@ -169,7 +174,7 @@ export function startMarketSocket() {
     });
     socket.on('message', message => accept(decode(message)));
     socket.on('error', error => {
-      lastError = String(error?.message || error || 'FYERS data socket error').slice(0, 180);
+      lastError = safeError(error || 'FYERS data socket error');
       socketStatus = 'ERROR';
       console.error('[FYERS_DATA] socket error:', lastError);
     });
@@ -181,7 +186,7 @@ export function startMarketSocket() {
     return { status: socketStatus };
   } catch (error) {
     socketStatus = 'ERROR';
-    lastError = String(error?.message || error).slice(0, 180);
+    lastError = safeError(error);
     console.error('[FYERS_DATA] socket start failed:', lastError);
     return { status: socketStatus, reason: lastError };
   }
@@ -202,9 +207,10 @@ export function getMarketData(now = Date.now()) {
     subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
     symbolLimit: 100, indices,
     fno: {
-      status: universe.length ? (socketStatus === 'CONNECTED' ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_SOCKET') : 'SYMBOL_MASTER_NOT_LOADED',
-      universeCount: universe.length, activeCount: activeFnoSymbols.length,
+      status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
+      lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       rotationIntervalMs: ROTATION_INTERVAL_MS, currentSliceStart: universe.length ? rotationIndex : 0,
+      subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
       topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: true }))
     }
   };

@@ -41,8 +41,8 @@ let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
 let fnoStrategyScanRotation = null;
-let fnoResearchWarmupRotation = null;
 let fnoResearchWarmupUsed = false;
+let fnoResearchWarmupQueue = [];
 const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE' };
 function startFnoStrategyScanner() {
   if (fnoStrategyScanTimer) return;
@@ -55,11 +55,26 @@ function startFnoStrategyScanner() {
     if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
       fnoStrategyScanRotation=snapshot.rotationIndex;
       fnoStrategyScanCursor=0;
-      fnoResearchWarmupRotation=snapshot.rotationIndex;
       fnoResearchWarmupUsed=false;
+      fnoResearchWarmupQueue=[];
     }
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
-    if (fnoStrategyScanCursor>=scanLimit) return;
+    if (fnoStrategyScanCursor>=scanLimit) {
+      const warmupSymbol=fnoResearchWarmupQueue.shift();
+      if (!warmupSymbol) return;
+      fnoStrategyScanBusy=true;
+      fnoStrategyScanStats.warmupSymbol=warmupSymbol;
+      fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
+      try {
+        await getDailyHistory(warmupSymbol);
+        await getFifteenMinuteHistory(warmupSymbol);
+        fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
+      } catch(error) {
+        fnoStrategyScanStats.warmupStatus='BLOCKED';
+        fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180);
+      } finally { fnoStrategyScanBusy=false; }
+      return;
+    }
     const symbol=active[fnoStrategyScanCursor++];
     fnoStrategyScanBusy=true;
     try {
@@ -79,16 +94,9 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.lastScanAt=new Date().toISOString();
       if(research.status==='UNDERLYING_SETUP_CONFIRMED'&&!fnoResearchWarmupUsed) {
         fnoResearchWarmupUsed=true;
+        fnoResearchWarmupQueue.push(symbol);
         fnoStrategyScanStats.warmupSymbol=symbol;
-        fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
-        try {
-          await getDailyHistory(symbol);
-          await getFifteenMinuteHistory(symbol);
-          fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
-        } catch(error) {
-          fnoStrategyScanStats.warmupStatus='BLOCKED';
-          fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180);
-        }
+        fnoStrategyScanStats.warmupStatus='QUEUED_AFTER_SLICE_SCAN';
       }
     } catch(error) {
       fnoStrategyScanStats.lastSymbol=symbol;

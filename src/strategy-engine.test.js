@@ -21,6 +21,10 @@ test('fixed premium plan enforces breakout, chase block and exact 1:2', () => {
   assert.equal(plan.entry,100.05);
   assert.equal(plan.stopLoss,98.95);
   assert.equal(plan.target,102.25);
+  const aiTarget=buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99,targetR:2.5});
+  assert.equal(aiTarget.target,102.8);
+  assert.equal(aiTarget.rr,2.5);
+  assert.equal(buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99,targetR:1.5}).status,'NO_TRADE');
   assert.equal(buildFixedPremiumPlan({ breakoutLevel:100,tickSize:0.05,livePremium:102,swingLow:99 }).status, 'NO_TRADE');
 });
 test('duplicate active underlying or option contract is rejected', () => {
@@ -83,6 +87,8 @@ test('multi-timeframe research returns an explainable score only with verified d
   assert.equal(result.timeframes.daily,'BULLISH');
   assert.equal(result.timeframes.fifteenMinute,'BULLISH');
   assert.ok(result.evidence.some(line=>line.includes('Breakout candle volume: verified')));
+  assert.equal(result.targetR,2.5);
+  assert.equal(result.targetMethod,'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE');
 });
 test('multi-timeframe research refuses to invent a score when 15m history is incomplete', () => {
   const now=1800000000000;

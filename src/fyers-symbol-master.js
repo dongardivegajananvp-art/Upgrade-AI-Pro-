@@ -99,9 +99,9 @@ export function getVerifiedOptionContract(symbol, now = Date.now()) {
   const lotSize = Number(row.minLotSize);
   const tickSize = Number(row.tickSize);
   const strike = Number(row.strikePrice);
-  if (!(expiryDate >= dateKey(now)) || !(lotSize > 0) || !(tickSize > 0) || !(strike >= 0)) throw new Error('Option contract expiry, lot size, strike or tick size is invalid');
+  if (!(expiryDate >= dateKey(now)) || !(lotSize > 0) || !(tickSize > 0) || !(strike > 0) || !String(row.fyToken || '').trim()) throw new Error('Option contract expiry, lot size, strike or tick size is invalid');
   return {
     symbol: String(row.symTicker || row.__masterKey), side: String(row.optType).toUpperCase(),
-    expiry, strike, lotSize, tickSize, fyToken: String(row.fyToken || '')
+    underlying: normaliseUnderlying(row.underSym), expiry, strike, lotSize, tickSize, fyToken: String(row.fyToken || '')
   };
 }

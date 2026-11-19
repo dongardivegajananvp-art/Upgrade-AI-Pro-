@@ -3,6 +3,7 @@ const labels = [
   ['NSE:NIFTYBANK-INDEX','bank','bank-change'],
   ['BSE:SENSEX-INDEX','sensex','sensex-change']
 ];
+let selectedSymbol = null;
 let accountRefreshRunning = false;
 let lastAccountRefresh = 0;
 function showNumber(value, digits=2) {
@@ -19,6 +20,7 @@ async function refresh() {
       document.querySelector('#orders-data').textContent = 'Connect FYERS to read today’s order status.';
     }
     const md = s.marketData || {};
+    renderMovers(md.fno || {});
     const indices = md.indices || {};
     let freshCount = 0;
     for (const [symbol, priceId, changeId] of labels) {
@@ -98,4 +100,123 @@ async function refreshAccount() {
   } finally {
     accountRefreshRunning = false;
   }
+}
+
+function renderMovers(fno) {
+  const container = document.querySelector('#movers');
+  container.replaceChildren();
+  const top = Array.isArray(fno.topGainers) ? fno.topGainers : [];
+  if (fno.status !== 'ROTATING_LIVE_COVERAGE') {
+    const note = document.createElement('div');
+    note.className = 'empty-inline';
+    note.textContent = fno.status === 'SYMBOL_MASTER_NOT_LOADED'
+      ? 'Official FYERS NSE F&O symbol master is not loaded. No sample gainers are shown.'
+      : 'Waiting for verified FYERS F&O WebSocket feed.';
+    container.append(note);
+    return;
+  }
+  const coverage = document.createElement('div');
+  coverage.className = 'coverage-note';
+  coverage.textContent = `ROTATING LIVE COVERAGE · ${fno.activeCount}/${fno.universeCount} UNDERLYINGS IN THIS SLICE · 20s ROTATION`;
+  container.append(coverage);
+  if (!top.length) {
+    const note = document.createElement('div');
+    note.className = 'empty-inline';
+    note.textContent = 'Waiting for fresh exchange-timestamped F&O underlying ticks in this slice.';
+    container.append(note);
+    return;
+  }
+  for (const item of top) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mover-card';
+    button.addEventListener('click', () => selectSymbol(item.symbol));
+    const name = document.createElement('strong');
+    name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
+    const price = document.createElement('span');
+    price.textContent = `₹${showNumber(item.price)}`;
+    const change = document.createElement('span');
+    const pct = Number(item.changePercent);
+    change.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% · LIVE`;
+    change.dataset.state = pct >= 0 ? 'up' : 'down';
+    button.append(name, price, change);
+    container.append(button);
+  }
+}
+async function selectSymbol(symbol) {
+  if (!symbol || symbol === selectedSymbol) return;
+  selectedSymbol = symbol;
+  const title = document.querySelector('#symbol');
+  const area = document.querySelector('#chart-area');
+  title.textContent = symbol + ' · LOADING VERIFIED FYERS HISTORY';
+  area.replaceChildren();
+  const loading = document.createElement('div');
+  loading.className = 'chart-empty';
+  loading.textContent = 'Loading completed FYERS 5-minute candles. No synthetic candles are used.';
+  area.append(loading);
+  try {
+    const response = await fetch('/api/history?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');
+    drawHistoryChart(data.candles);
+    title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;
+  } catch (error) {
+    area.replaceChildren();
+    const note = document.createElement('div');
+    note.className = 'chart-empty';
+    note.textContent = String(error.message || 'History unavailable') + ' · NO TRADE';
+    area.append(note);
+    title.textContent = symbol + ' · HISTORY UNAVAILABLE';
+  }
+}
+function drawHistoryChart(candles) {
+  const area = document.querySelector('#chart-area');
+  area.replaceChildren();
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 1200 560');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Verified FYERS completed five-minute candlestick chart');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const max = Math.max(...candles.map(c => Number(c.high)));
+  const min = Math.min(...candles.map(c => Number(c.low)));
+  const range = Math.max(max - min, 0.000001);
+  const left = 34, right = 24, top = 24, bottom = 92;
+  const plotW = 1200 - left - right, plotH = 560 - top - bottom;
+  const xStep = plotW / candles.length;
+  const y = price => top + (max - price) / range * plotH;
+  for (let i = 0; i <= 4; i++) {
+    const gy = top + plotH * i / 4;
+    const grid = document.createElementNS(ns, 'line');
+    grid.setAttribute('x1', left); grid.setAttribute('x2', 1200 - right);
+    grid.setAttribute('y1', gy); grid.setAttribute('y2', gy);
+    grid.setAttribute('stroke', '#26364d'); grid.setAttribute('stroke-width', '1');
+    svg.append(grid);
+  }
+  candles.forEach((candle, index) => {
+    const x = left + xStep * (index + 0.5);
+    const up = Number(candle.close) >= Number(candle.open);
+    const stroke = up ? '#32c48d' : '#ef6b73';
+    const wick = document.createElementNS(ns, 'line');
+    wick.setAttribute('x1', x); wick.setAttribute('x2', x);
+    wick.setAttribute('y1', y(Number(candle.high))); wick.setAttribute('y2', y(Number(candle.low)));
+    wick.setAttribute('stroke', stroke); wick.setAttribute('stroke-width', '2');
+    const body = document.createElementNS(ns, 'rect');
+    const bodyTop = y(Math.max(Number(candle.open), Number(candle.close)));
+    const bodyBottom = y(Math.min(Number(candle.open), Number(candle.close)));
+    body.setAttribute('x', x - Math.max(1.5, xStep * 0.3));
+    body.setAttribute('y', bodyTop);
+    body.setAttribute('width', Math.max(3, xStep * 0.6));
+    body.setAttribute('height', Math.max(1.5, bodyBottom - bodyTop));
+    body.setAttribute('fill', stroke);
+    svg.append(wick, body);
+  });
+  const first = document.createElementNS(ns, 'text');
+  first.setAttribute('x', left); first.setAttribute('y', 535); first.setAttribute('fill', '#91a2ba'); first.setAttribute('font-size', '15');
+  first.textContent = new Date((candles[0].time + 19800) * 1000).toISOString().slice(11,16) + ' IST';
+  const last = document.createElementNS(ns, 'text');
+  last.setAttribute('x', 1200 - right); last.setAttribute('y', 535); last.setAttribute('text-anchor', 'end'); last.setAttribute('fill', '#91a2ba'); last.setAttribute('font-size', '15');
+  last.textContent = new Date((candles.at(-1).time + 19800) * 1000).toISOString().slice(11,16) + ' IST';
+  svg.append(first, last);
+  area.append(svg);
 }

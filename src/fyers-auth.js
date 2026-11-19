@@ -5,7 +5,6 @@ const TOKEN_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode';
 let accessToken = null;
 let tokenReceivedAt = null;
 let lastAuthError = null;
-let authRetryAfter = 0;
 let authInFlight = false;
 
 export function createLoginUrl({ appId, redirectUri, now = Date.now() }) {
@@ -32,39 +31,47 @@ export function verifyLoginState(state, cookieState) {
 export async function exchangeAuthCode({ appId, appSecret, authCode, now = Date.now() }) {
   if (!appId || !appSecret || !authCode) throw new Error('FYERS OAuth configuration or authorization code is missing');
   if (authInFlight) throw new Error('FYERS token exchange is already in progress; wait for its result');
-  if (now < authRetryAfter) {
-    const seconds = Math.ceil((authRetryAfter - now) / 1000);
-    throw new Error(`FYERS_AUTH_RATE_LIMIT_COOLDOWN: wait ${seconds}s before retrying token exchange`);
-  }
   authInFlight = true;
   const appIdHash = createHash('sha256').update(`${appId}:${appSecret}`).digest('hex');
-  let response;
+  const startedAt = Date.now();
   try {
-  response = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ grant_type: 'authorization_code', appIdHash, code: authCode }),
-    signal: AbortSignal.timeout(15000)
-  });
+    const response = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ grant_type: 'authorization_code', appIdHash, code: authCode }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const rawBody = await response.text().catch(() => '');
+    let body = {};
+    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+    const diagnostics = {
+      status: response.status,
+      elapsedMs: Date.now() - startedAt,
+      retryAfter: response.headers.get('retry-after'),
+      cfRay: response.headers.get('cf-ray'),
+      server: response.headers.get('server'),
+      contentType: response.headers.get('content-type'),
+      responseMessage: String(body.message || body.error || rawBody.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim()).slice(0, 240)
+    };
+    if (!response.ok || body.s !== 'ok' || !body.access_token) {
+      const message = response.status === 429
+        ? `FYERS_UPSTREAM_HTTP_429: ${diagnostics.responseMessage || 'Upstream rate limit response'}; retry-after=${diagnostics.retryAfter || 'not-provided'}; cf-ray=${diagnostics.cfRay || 'not-provided'}; server=${diagnostics.server || 'not-provided'}; content-type=${diagnostics.contentType || 'not-provided'}`
+        : String(body.message || body.error || `FYERS token exchange failed (HTTP ${response.status})`).slice(0, 240);
+      lastAuthError = message;
+      const error = new Error(message);
+      error.fyersDiagnostics = diagnostics;
+      throw error;
+    }
+    accessToken = body.access_token;
+    tokenReceivedAt = Date.now();
+    lastAuthError = null;
+    return { connected: true, receivedAt: tokenReceivedAt };
   } catch (error) {
-    authInFlight = false;
-    lastAuthError = String(error?.message || error).slice(0, 240);
+    lastAuthError = String(error?.message || error).slice(0, 480);
     throw error;
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.s !== 'ok' || !body.access_token) {
-    const message = String(body.message || body.error || `FYERS token exchange failed (HTTP ${response.status})`).slice(0, 240);
-    lastAuthError = message;
-    if (response.status === 429 || /1015|rate.?limit/i.test(message)) authRetryAfter = Date.now() + 15 * 60 * 1000;
+  } finally {
     authInFlight = false;
-    throw new Error(response.status === 429 ? `FYERS_AUTH_RATE_LIMIT_COOLDOWN: ${message}` : message);
   }
-  accessToken = body.access_token;
-  tokenReceivedAt = Date.now();
-  lastAuthError = null;
-  authRetryAfter = 0;
-  authInFlight = false;
-  return { connected: true, receivedAt: tokenReceivedAt };
 }
 
 export function getAuthStatus(now = Date.now()) {
@@ -80,7 +87,7 @@ export function getAuthStatus(now = Date.now()) {
       tokenReceivedAt = null;
     }
   }
-  return { status: accessToken ? 'AUTHENTICATED_FEED_NOT_CONNECTED' : now < authRetryAfter ? 'AUTH_RATE_LIMIT_COOLDOWN' : 'NOT_AUTHENTICATED', tokenStored: Boolean(accessToken), tokenReceivedAt, authRetryAfter: authRetryAfter || null, authInFlight, lastError: lastAuthError };
+  return { status: accessToken ? 'AUTHENTICATED_FEED_NOT_CONNECTED' : 'NOT_AUTHENTICATED', tokenStored: Boolean(accessToken), tokenReceivedAt, authInFlight, lastError: lastAuthError };
 }
 
 export function getAccessTokenForServer() { return accessToken; }

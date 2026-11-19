@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
+import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus } from './src/fyers-auth.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -22,14 +22,17 @@ const server = http.createServer(async (req,res) => {
   });
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {
     try {
-      const loginUrl = createLoginUrl({ appId:process.env.FYERS_APP_ID, redirectUri:process.env.FYERS_REDIRECT_URI });
-      res.writeHead(302,{location:loginUrl,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+      const login = createLoginUrl({ appId:process.env.FYERS_APP_ID, redirectUri:process.env.FYERS_REDIRECT_URI });
+      res.writeHead(302,{location:login.url,'set-cookie':`fyers_oauth_state=${login.state}; Max-Age=600; Path=/api/fyers; HttpOnly; Secure; SameSite=Lax`,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
     } catch (error) { return send(res,503,{status:'NOT_CONFIGURED',reason:error.message}); }
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/auth/callback') {
     const state = url.searchParams.get('state');
     const authCode = url.searchParams.get('auth_code');
-    if (!consumeLoginState(state)) return send(res,400,{status:'REJECTED',reason:'OAuth state is missing, expired, or already used'});
+    const cookies = Object.fromEntries((req.headers.cookie || '').split(';').map(part=>part.trim()).filter(Boolean).map(part=>{const i=part.indexOf('=');return [part.slice(0,i),part.slice(i+1)];}));
+    const clearStateCookie = 'fyers_oauth_state=; Max-Age=0; Path=/api/fyers; HttpOnly; Secure; SameSite=Lax';
+    if (!verifyLoginState(state,cookies.fyers_oauth_state)) { res.setHeader('set-cookie',clearStateCookie); return send(res,400,{status:'REJECTED',reason:'OAuth state cookie is missing or does not match. Start Connect again.'}); }
+    res.setHeader('set-cookie',clearStateCookie);
     if (!authCode) return send(res,400,{status:'FAILED',reason:'FYERS authorization code was not returned'});
     try {
       await exchangeAuthCode({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY,authCode});

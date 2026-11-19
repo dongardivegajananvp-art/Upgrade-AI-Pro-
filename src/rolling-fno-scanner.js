@@ -31,3 +31,14 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
     topGainers: freshObserved.slice(0, Math.max(1, limit))
   };
 }
+
+export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount = 20, selectedSymbol = null) {
+  const symbols=[...new Set(universe.map(item=>item?.symbol).filter(Boolean))];
+  if(!symbols.length)return [];
+  const count=Math.min(Math.max(1,Math.floor(Number(slotCount)||20)),symbols.length);
+  const start=((Math.floor(Number(startIndex)||0)%symbols.length)+symbols.length)%symbols.length;
+  const slice=[];
+  for(let i=0;i<count;i++)slice.push(symbols[(start+i)%symbols.length]);
+  if(selectedSymbol&&symbols.includes(selectedSymbol)&&!slice.includes(selectedSymbol))slice[slice.length-1]=selectedSymbol;
+  return [...new Set(slice)];
+}

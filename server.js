@@ -37,12 +37,76 @@ function parseCookies(header='') {
 }
 const consumedOAuthStates = new Set();
 let fnoUniverseLoadPromise = null;
+let fnoStrategyScanTimer = null;
+let fnoStrategyScanBusy = false;
+let fnoStrategyScanCursor = 0;
+let fnoStrategyScanRotation = null;
+let fnoResearchWarmupRotation = null;
+let fnoResearchWarmupUsed = false;
+const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE' };
+function startFnoStrategyScanner() {
+  if (fnoStrategyScanTimer) return;
+  fnoStrategyScanStats.status='RUNNING';
+  fnoStrategyScanTimer=setInterval(async () => {
+    if (fnoStrategyScanBusy) return;
+    const snapshot=getFnoUniverseSnapshot();
+    const active=snapshot.activeSymbols || [];
+    if (!active.length) { fnoStrategyScanStats.status='WAITING_FOR_ACTIVE_FNO_SLICE'; return; }
+    if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
+      fnoStrategyScanRotation=snapshot.rotationIndex;
+      fnoStrategyScanCursor=0;
+      fnoResearchWarmupRotation=snapshot.rotationIndex;
+      fnoResearchWarmupUsed=false;
+    }
+    const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
+    if (fnoStrategyScanCursor>=scanLimit) return;
+    const symbol=active[fnoStrategyScanCursor++];
+    fnoStrategyScanBusy=true;
+    try {
+      const history=await getFiveMinuteHistory(symbol);
+      const latest=getFnoUniverseSnapshot();
+      const tick=latest.ticks.get(symbol);
+      const market=getMarketData();
+      const research=detectNineStrategySetup({
+        underlyingCandles:history.candles,underlyingTick:tick,
+        isTopGainer:(market.fno?.topGainers||[]).some(item=>item.symbol===symbol),
+        researchEnabled:false,now:Date.now()
+      });
+      fnoStrategyScanStats.scannedCount++;
+      fnoStrategyScanStats.lastSymbol=symbol;
+      fnoStrategyScanStats.lastStatus=research.status;
+      fnoStrategyScanStats.lastReason=research.reason||null;
+      fnoStrategyScanStats.lastScanAt=new Date().toISOString();
+      if(research.status==='UNDERLYING_SETUP_CONFIRMED'&&!fnoResearchWarmupUsed) {
+        fnoResearchWarmupUsed=true;
+        fnoStrategyScanStats.warmupSymbol=symbol;
+        fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
+        try {
+          await getDailyHistory(symbol);
+          await getFifteenMinuteHistory(symbol);
+          fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
+        } catch(error) {
+          fnoStrategyScanStats.warmupStatus='BLOCKED';
+          fnoStrategyScanStats.lastReason=String(error.message||'Research history warmup failed').slice(0,180);
+        }
+      }
+    } catch(error) {
+      fnoStrategyScanStats.lastSymbol=symbol;
+      fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';
+      fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);
+      fnoStrategyScanStats.lastScanAt=new Date().toISOString();
+    } finally { fnoStrategyScanBusy=false; }
+  },4500);
+  fnoStrategyScanTimer.unref?.();
+}
+
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
   if (!fnoUniverseLoadPromise) {
     fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
       const coverage = setFnoUniverse(universe);
-      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount);
+      startFnoStrategyScanner();
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12);
       return true;
     }).catch(error => {
       fnoUniverseLoadPromise = null;
@@ -80,7 +144,7 @@ const server = http.createServer(async (req,res) => {
           topGainers:market.fno?.topGainers||[],now:Date.now()
         });
         return send(res,200,{...result,activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
-          rotationIntervalMs:snapshot.rotationIntervalMs,symbolCap:snapshot.symbolCap,
+          rotationIntervalMs:snapshot.rotationIntervalMs,scanPerSlice:snapshot.scanPerSlice,symbolCap:snapshot.symbolCap,scanner:fnoStrategyScanStats,
           note:'Only cached FYERS histories and exchange-timestamped ticks are evaluated. Missing/stale inputs are BLOCKED; this endpoint does not fetch synthetic data or place orders.'});
       }
       if (url.pathname === '/api/research') {
@@ -140,7 +204,7 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    fnoCoverage:market.fno, scanner:'ROLLING_FNO_OBSERVATION_COVERAGE · 20 SYMBOLS PER 60S SLICE · NON-SIMULTANEOUS · NOT ACTIONABLE', strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanPerSlice:12,rotationIntervalMs:60000,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {

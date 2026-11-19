@@ -11,6 +11,7 @@ let selectedContractSymbol = null;
 let accountRefreshRunning = false;
 let chartCandles = [];
 let chartLiveCandle = null;
+let chartSetupLevels = null;
 let chartZoom = 1;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
@@ -213,23 +214,26 @@ function renderMovers(fno) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'mover-card';
-    button.title = item.fresh ? 'Fresh FYERS tick; chart selection still requires a fresh selected-symbol tick' : 'Rolling observation only; not a fresh live tick. Selection will wait for a fresh tick';
+    const pct = Number(item.changePercent);
+    const direction = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+    const cardState = item.fresh ? direction : 'stale';
+    button.dataset.state = cardState;
+    button.title = item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : 'STALE ROLLING OBSERVATION · ' + Math.floor((item.ageSeconds || 0) / 60) + 'm old · not actionable';
     button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
     name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
     const price = document.createElement('span');
     price.textContent = `₹${showNumber(item.price)}`;
     const change = document.createElement('span');
-    const pct = Number(item.changePercent);
-    change.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% · ${item.fresh ? 'FRESH' : 'SEEN ' + Math.floor((item.ageSeconds || 0) / 60) + 'm AGO'}`;
-    change.dataset.state = pct >= 0 ? 'up' : 'down';
+    change.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '% · ' + (item.fresh ? 'FRESH' : 'SEEN ' + Math.floor((item.ageSeconds || 0) / 60) + 'm AGO');
+    change.dataset.state = item.fresh ? direction : 'stale';
     button.append(name, price, change);
     container.append(button);
   }
 }
 async function selectIndexSymbol(symbol) {
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
-  selectedSymbol = symbol; selectedUnderlyingPrice = null; selectedContractSymbol = null;
+  selectedSymbol = symbol; selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
   title.textContent=symbol+' · LOADING VERIFIED FYERS INDEX HISTORY';
@@ -264,6 +268,7 @@ async function selectIndexSymbol(symbol) {
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol || symbol === selectedSymbol) return;
   selectedSymbol = symbol;
+  chartSetupLevels = null;
   setupEvaluationDone = false;
   chartLiveCandle = null;
   const title = document.querySelector('#symbol');
@@ -367,7 +372,7 @@ function renderChartViewport() {
     .replace('NIFTY50', 'NIFTY 50')
     .replace('NIFTYBANK', 'BANK NIFTY');
   svg.setAttribute('aria-label', chartSymbolLabel + ' FYERS five-minute candlestick chart with supply and demand structure zones');
-  const left=76,right=92,top=28,bottom=100,plotW=1200-left-right,plotH=620-top-bottom;
+  const left=76,right=92,top=chartSetupLevels?118:28,bottom=100,plotW=1200-left-right,plotH=620-top-bottom;
   const highs=visible.map(c=>Number(c.high)), lows=visible.map(c=>Number(c.low));
   const max=Math.max(...highs),min=Math.min(...lows),range=Math.max(max-min,0.000001);
   const pad=range*.08, ceiling=max+pad, floor=min-pad, span=ceiling-floor;
@@ -423,6 +428,39 @@ function renderChartViewport() {
       const tag=document.createElementNS(ns,'text');tag.setAttribute('x',x);tag.setAttribute('y',top+18);tag.setAttribute('text-anchor','middle');tag.setAttribute('font-size','15');tag.setAttribute('font-weight','900');tag.setAttribute('fill','#7bd8ff');tag.textContent='LIVE';svg.append(tag);
     }
   });
+  // These levels are option-premium prices, not underlying-share prices.
+  // Show a dedicated arrow lane above the underlying chart to avoid mixing scales.
+  if (chartSetupLevels) {
+    const markers = [
+      { label: 'OPTION ENTRY', value: chartSetupLevels.entry, color: '#4c9aff' },
+      { label: 'OPTION STOP LOSS', value: chartSetupLevels.stopLoss, color: '#ea3943' },
+      { label: 'OPTION TARGET', value: chartSetupLevels.target, color: '#16c784' }
+    ];
+    markers.forEach((item, index) => {
+      const yy = 36 + index * 28;
+      const line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', left + 4); line.setAttribute('x2', left + plotW - 5);
+      line.setAttribute('y1', yy); line.setAttribute('y2', yy);
+      line.setAttribute('stroke', item.color); line.setAttribute('stroke-width', '2.5');
+      line.setAttribute('stroke-dasharray', index === 0 ? 'none' : '8 5');
+      line.setAttribute('opacity', '.95'); svg.append(line);
+      const arrow = document.createElementNS(ns, 'path');
+      arrow.setAttribute('d', 'M ' + (left + plotW - 15) + ' ' + (yy - 8) + ' L ' + (left + plotW - 4) + ' ' + yy + ' L ' + (left + plotW - 15) + ' ' + (yy + 8));
+      arrow.setAttribute('fill', 'none'); arrow.setAttribute('stroke', item.color);
+      arrow.setAttribute('stroke-width', '3'); arrow.setAttribute('stroke-linecap', 'round');
+      arrow.setAttribute('stroke-linejoin', 'round'); svg.append(arrow);
+      const bg = document.createElementNS(ns, 'rect');
+      bg.setAttribute('x', left + 12); bg.setAttribute('y', yy - 11);
+      bg.setAttribute('width', 210); bg.setAttribute('height', 22);
+      bg.setAttribute('rx', 5); bg.setAttribute('fill', '#091522');
+      bg.setAttribute('stroke', item.color); bg.setAttribute('stroke-width', '1'); svg.append(bg);
+      const label = document.createElementNS(ns, 'text');
+      label.setAttribute('x', left + 20); label.setAttribute('y', yy + 4);
+      label.setAttribute('fill', item.color); label.setAttribute('font-size', '12');
+      label.setAttribute('font-weight', '900');
+      label.textContent = item.label + '  ₹' + showNumber(item.value); svg.append(label);
+    });
+  }
   for(let i=0;i<=4;i++){
     const index=Math.min(visible.length-1,Math.round((visible.length-1)*i/4)),c=visible[index];
     const label=document.createElementNS(ns,'text');label.setAttribute('x',xAt(index));label.setAttribute('y',550);label.setAttribute('text-anchor',i===0?'start':i===4?'end':'middle');label.setAttribute('fill','#9bb0ca');label.setAttribute('font-size','14');
@@ -566,6 +604,8 @@ async function evaluateSelectedSetup() {
   researchNote.textContent='Checking verified FYERS daily, 15-minute and completed 5-minute candles for the selected stock.';
   researchResults.append(researchNote);
   for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
+  chartSetupLevels = null;
+  renderChartViewport();
   try {
     const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol})});
     const setup=await response.json();
@@ -580,8 +620,13 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
       state.textContent=setup.strategy+' · '+setup.optionSide+' · VERIFIED'; state.dataset.state='confirmed';
-    } else { state.textContent=(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked'; }
-  } catch(error) { setupEvaluationDone=true; state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
+      chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
+      renderChartViewport();
+    } else {
+      chartSetupLevels = null; renderChartViewport();
+      state.textContent=(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
+    }
+  } catch(error) { setupEvaluationDone=true; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
 async function selectOptionContract(symbol) {
@@ -595,6 +640,7 @@ async function selectOptionContract(symbol) {
     const result = await response.json();
     if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
     selectedContractSymbol = result.contract.symbol;
+    chartSetupLevels = null; renderChartViewport();
     setupEvaluationDone = false;
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);
     document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';

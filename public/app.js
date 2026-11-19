@@ -64,7 +64,7 @@ async function refresh() {
     if (md.socketStatus === 'CONNECTED' && freshCount === 3) {
       feed.textContent = 'FYERS CONNECTED · 3/3 INDEX TICKS FRESH · NSE ONLY';
       feed.dataset.state = 'connected';
-    } else if (md.socketStatus === 'CONNECTED' || freshCount > 0 || s.auth?.tokenStored) {
+    } else if (md.socketStatus === 'CONNECTED' || md.socketStatus === 'CONNECTING' || freshCount > 0 || (s.auth?.tokenStored && !['ERROR','DISCONNECTED','SUBSCRIPTION_LIMIT_BLOCKED'].includes(md.socketStatus))) {
       feed.textContent = tickStatusText(md, freshCount);
       feed.dataset.state = 'stale';
     } else {
@@ -73,6 +73,7 @@ async function refresh() {
     }
   } catch {
     document.querySelector('#feed').textContent = 'BACKEND DISCONNECTED';
+    document.querySelector('#feed').dataset.state = 'disconnected';
   }
 }
 refresh();

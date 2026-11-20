@@ -166,3 +166,13 @@ test('invalid configured cost assumptions fail closed instead of fabricating cos
   assert.equal(result.status, 'NO_TRADE');
   assert.match(result.reason, /non-negative values/);
 });
+
+test('partial cost assumptions are rejected rather than silently ignored', () => {
+  const result = calculatePositionSize({
+    riskBudget: 1000, entry: 100, stopLoss: 90, target: 120,
+    lotSize: 25, contractVerified: true,
+    estimatedRoundTripCosts: 20, slippagePerUnit: 0.1
+  });
+  assert.equal(result.status, 'NO_TRADE');
+  assert.match(result.reason, /configure round-trip costs, slippage and gap-stress assumptions together/i);
+});

@@ -95,8 +95,9 @@ function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
       pendingSubscriptionSymbols.push(symbol);
       pendingSubscriptionSet.add(symbol);
     }
-    scheduleSubscriptionFlush();
   }
+  // Resume any batches paused by a disconnect, even when the desired set did not change.
+  scheduleSubscriptionFlush();
 }
 
 function safeError(error) {
@@ -270,7 +271,7 @@ export function startMarketSocket() {
         optionSubscriptionError = null;
       }
       socket.autoreconnect(10);
-      console.info('[FYERS_DATA] connected; subscription reconciliation complete:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
+      console.info('[FYERS_DATA] connected; subscription reconciliation queued:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
     });
     socket.on('message', message => accept(decode(message)));
     socket.on('error', error => {

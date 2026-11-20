@@ -9,6 +9,20 @@ function rowsOf(master) {
   if (master && typeof master === 'object') return Object.entries(master).map(([key, value]) => ({ ...value, __masterKey: key }));
   return [];
 }
+export function compactOptionMasterRows(master) {
+  return rowsOf(master).filter(row => row && typeof row === 'object').map(row => ({
+    ...(row.symTicker ? { symTicker: row.symTicker } : {}),
+    ...(row.__masterKey ? { __masterKey: row.__masterKey } : {}),
+    optType: row.optType,
+    tradeStatus: row.tradeStatus,
+    expiryDate: row.expiryDate,
+    minLotSize: row.minLotSize,
+    tickSize: row.tickSize,
+    strikePrice: row.strikePrice,
+    underSym: row.underSym,
+    fyToken: row.fyToken
+  }));
+}
 function dateKey(now) {
   return new Date(now + 19800000).toISOString().slice(0, 10);
 }
@@ -89,7 +103,7 @@ export async function loadFnoEquityUniverse(now = Date.now()) {
   const result = buildFnoEquityUniverse(foMaster, cmMaster, now);
   cachedDate = today;
   cachedUniverse = result.universe;
-  cachedFoRows = rowsOf(foMaster);
+  cachedFoRows = compactOptionMasterRows(foMaster);
   return { ...result, cached: false };
 }
 export function verifyOptionContractRow(row, symbol, now = Date.now()) {

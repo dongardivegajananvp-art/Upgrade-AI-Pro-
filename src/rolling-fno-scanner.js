@@ -44,6 +44,16 @@ export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount =
   return [...new Set(slice)];
 }
 
+export function getFnoScanBatchSize(universeCount, startIndex = 0, scanPerSlice = FNO_SCAN_PER_SLICE) {
+  const total = Math.max(0, Math.floor(Number(universeCount) || 0));
+  if (!total) return 0;
+  const start = ((Math.floor(Number(startIndex) || 0) % total) + total) % total;
+  const limit = Math.max(1, Math.floor(Number(scanPerSlice) || FNO_SCAN_PER_SLICE));
+  // The last batch can be shorter than the configured cadence. Stop at the
+  // universe boundary so a completed pass never rescans wrapped symbols.
+  return Math.min(limit, total - start);
+}
+
 export function getFnoSliceScanSymbols(activeSymbols, scanPerSlice = FNO_SCAN_PER_SLICE) {
   if (!Array.isArray(activeSymbols) || !activeSymbols.length) return [];
   const count = Math.max(1, Math.min(activeSymbols.length, Math.floor(Number(scanPerSlice) || FNO_SCAN_PER_SLICE)));

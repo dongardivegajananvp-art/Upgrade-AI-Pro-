@@ -29,6 +29,32 @@ let selectedUnderlyingSymbol = null;
 let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
 const ticks = new Map();
+let socketHasConnected = false;
+const socketSubscribedSymbols = new Set();
+
+export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols = []) {
+  const current = [...new Set((Array.isArray(currentSymbols) ? currentSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
+  const desired = [...new Set((Array.isArray(desiredSymbols) ? desiredSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
+  const currentSet = new Set(current);
+  const desiredSet = new Set(desired);
+  return {
+    removed: current.filter(symbol => !desiredSet.has(symbol)),
+    added: desired.filter(symbol => !currentSet.has(symbol))
+  };
+}
+
+function syncSocketSubscriptions(desiredSymbols) {
+  const { removed, added } = getSocketSubscriptionDelta([...socketSubscribedSymbols], desiredSymbols);
+  if (removed.length) {
+    if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
+    socket.unsubscribe(removed);
+    for (const symbol of removed) socketSubscribedSymbols.delete(symbol);
+  }
+  if (added.length) {
+    socket.subscribe(added);
+    for (const symbol of added) socketSubscribedSymbols.add(symbol);
+  }
+}
 
 function safeError(error) {
   if (error instanceof Error) return error.message.slice(0, 240);
@@ -106,15 +132,8 @@ function applyFnoRotation(advance = false) {
   const next=nextSlice(nextIndex);
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {
-    const nextSet = new Set(next), activeSet = new Set(activeFnoSymbols);
-    const removed = activeFnoSymbols.filter(symbol => !nextSet.has(symbol));
-    const added = next.filter(symbol => !activeSet.has(symbol));
     try {
-      if (removed.length) {
-        if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK does not expose unsubscribe; rotation stopped to protect the 100-symbol cap');
-        socket.unsubscribe(removed);
-      }
-      if (added.length) socket.subscribe(added);
+      syncSocketSubscriptions([...INDEX_SYMBOLS, ...next, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])]);
     } catch (error) {
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
@@ -157,15 +176,7 @@ export function setSelectedOptionSymbol(symbol) {
   }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      if (selectedOptionSymbol) {
-        if (typeof socket.unsubscribe !== 'function') {
-          optionSubscriptionStatus = 'SUBSCRIPTION_FAILED';
-          optionSubscriptionError = 'FYERS SDK unsubscribe is unavailable; previous option subscription retained to protect the symbol cap';
-          return { status: optionSubscriptionStatus, symbol: selectedOptionSymbol, reason: optionSubscriptionError };
-        }
-        socket.unsubscribe([selectedOptionSymbol]);
-      }
-      if (next && !activeFnoSymbols.includes(next) && !INDEX_SYMBOLS.includes(next)) socket.subscribe([next]);
+      syncSocketSubscriptions([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(next ? [next] : [])]);
     } catch (error) {
       lastError = safeError(error);
       optionSubscriptionStatus = 'SUBSCRIPTION_FAILED';
@@ -199,13 +210,23 @@ export function startMarketSocket() {
         lastError = 'Subscription count exceeded the Standard plan 100-symbol limit';
         return;
       }
-      socket.subscribe(subscriptions);
+      try {
+        // FYERS auto-reconnect restores the existing subscriptions itself.
+        // Reconcile only symbols changed while disconnected; do not resend the full list.
+        syncSocketSubscriptions(subscriptions);
+        socketHasConnected = true;
+      } catch (error) {
+        lastError = safeError(error);
+        socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+        console.error('[FYERS_DATA] subscription reconciliation failed:', lastError);
+        return;
+      }
       if (selectedOptionSymbol) {
         optionSubscriptionStatus = 'SUBSCRIPTION_SENT';
         optionSubscriptionError = null;
       }
       socket.autoreconnect(10);
-      console.info('[FYERS_DATA] connected; subscribed symbols:', subscriptions.length, 'indices:', INDEX_SYMBOLS.length, 'F&O underlyings:', activeFnoSymbols.length);
+      console.info('[FYERS_DATA] connected; subscription reconciliation complete:', subscriptions.length, 'symbols; initial connection:', !socketHasConnected);
     });
     socket.on('message', message => accept(decode(message)));
     socket.on('error', error => {

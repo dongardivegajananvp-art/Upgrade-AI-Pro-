@@ -125,7 +125,7 @@ test('position sizing fails closed without verified contract or explicit afforda
   const base = { riskBudget: 500, entry: 100, stopLoss: 90, target: 120, lotSize: 25 };
   assert.equal(calculatePositionSize(base).status, 'NO_TRADE');
   assert.match(calculatePositionSize(base).reason, /contract and lot size must be verified/);
-  const tooSmall = calculatePositionSize({ ...base, contractVerified: true });
+  const tooSmall = calculatePositionSize({ ...base, riskBudget: 200, contractVerified: true });
   assert.equal(tooSmall.status, 'NO_TRADE');
   assert.match(tooSmall.reason, /below the risk of one official lot/);
 });

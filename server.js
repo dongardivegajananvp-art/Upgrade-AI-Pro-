@@ -11,6 +11,7 @@ import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
+import { buildHealthStatus } from './src/health-status.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -278,7 +279,13 @@ const server = http.createServer(async (req,res) => {
       return send(res,rateLimited ? 429 : 503,{status:rateLimited ? 'RATE_LIMITED' : 'DATA_UNAVAILABLE',reason:String(error.message || 'FYERS read-only request failed').slice(0,180)});
     }
   }
-  if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
+  if (req.method === 'GET' && url.pathname === '/health') {
+    const market = getSessionMarketData();
+    return send(res,200,buildHealthStatus({
+      market, masterCurrent:isFnoMasterCurrent(), sessionDate:getNseSessionDate(),
+      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled()
+    }));
+  }
   if (req.method === 'GET' && url.pathname === '/api/status') {
     const market = getSessionMarketData();
     return send(res,200,{

@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout and responsive breakpoints',
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v9/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v9/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {

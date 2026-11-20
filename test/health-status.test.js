@@ -18,7 +18,7 @@ test('health endpoint reports actual connected feed and fresh index count', () =
   assert.equal(status.marketData, 'CONNECTED');
   assert.deepEqual(status.indexFeed, { freshCount: 2, totalCount: 3 });
   assert.equal(status.fnoMaster.status, 'CURRENT');
-  assert.equal(status.fno, 'ROTATING_LIVE_COVERAGE');
+  assert.equal(status.fno.status, 'ROTATING_LIVE_COVERAGE');
   assert.equal(status.orders, 'DISABLED');
 });
 
@@ -34,7 +34,7 @@ test('health endpoint does not misreport disconnected or missing feed as connect
 test('health endpoint reports not-started state when no market socket exists', () => {
   const status = buildHealthStatus();
   assert.equal(status.marketData, 'NOT_STARTED');
-  assert.equal(status.fno, 'UNKNOWN');
+  assert.equal(status.fno.status, 'UNKNOWN');
 });
 
 test('health endpoint exposes scanner progress, F&O coverage, REST cooldown and memory without enabling orders', () => {

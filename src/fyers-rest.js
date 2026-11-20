@@ -10,6 +10,8 @@ let queue = Promise.resolve();
 let lastRestStatus = 'IDLE';
 let lastRestError = null;
 let lastRestMeta = { retryAfter: null, cfRay: null, server: null, contentType: null };
+let lastRequestPath = null;
+let lastRateLimitAt = null;
 
 export function validateNseSymbol(symbol) {
   return typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]{1,48}$/.test(symbol);
@@ -37,6 +39,7 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function scheduledFetch(url, options) {
   const run = queue.then(async () => {
+    lastRequestPath = url.pathname;
     const now = Date.now();
     const delay = Math.max(0, nextRequestAt - now, cooldownUntil - now);
     if (delay) await wait(delay);
@@ -55,7 +58,17 @@ async function scheduledFetch(url, options) {
       cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
       lastRestStatus = 'RATE_LIMITED';
       const markers = [lastRestMeta.retryAfter ? 'Retry-After=' + lastRestMeta.retryAfter : null, lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null, lastRestMeta.server ? 'Server=' + lastRestMeta.server : null].filter(Boolean).join(' · ');
+      lastRateLimitAt = new Date().toISOString();
       lastRestError = 'FYERS HTTP 429; one-hour REST safety cooldown active' + (markers ? ' · ' + markers : '');
+      console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
+        path: lastRequestPath,
+        status: response.status,
+        at: lastRateLimitAt,
+        retryAfter: lastRestMeta.retryAfter,
+        cfRay: lastRestMeta.cfRay,
+        server: lastRestMeta.server,
+        contentType: lastRestMeta.contentType
+      }));
       throw new Error(lastRestError);
     }
     if (!response.ok || body.s === 'error' || (Number(body.code) < 0)) {
@@ -197,6 +210,8 @@ export function getRestDiagnostics(now = Date.now()) {
     status: lastRestStatus,
     lastError: lastRestError,
     upstream: { ...lastRestMeta },
+    lastRequestPath,
+    lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
     cooldownActive: now < cooldownUntil,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null

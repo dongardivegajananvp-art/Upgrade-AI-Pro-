@@ -32,16 +32,8 @@ const ticks = new Map();
 let socketHasConnected = false;
 const socketSubscribedSymbols = new Set();
 
-export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols = []) {
-  const current = [...new Set((Array.isArray(currentSymbols) ? currentSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
-  const desired = [...new Set((Array.isArray(desiredSymbols) ? desiredSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
-  const currentSet = new Set(current);
-  const desiredSet = new Set(desired);
-  return {
-    removed: current.filter(symbol => !desiredSet.has(symbol)),
-    added: desired.filter(symbol => !currentSet.has(symbol))
-  };
-}
+export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 function syncSocketSubscriptions(desiredSymbols) {
   const { removed, added } = getSocketSubscriptionDelta([...socketSubscribedSymbols], desiredSymbols);

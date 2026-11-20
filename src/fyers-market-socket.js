@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE } from './rolling-fno-scanner.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -8,9 +8,9 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
 // Three indices + twenty rotating equities + one selected option = at most 24.
 const MAX_UNDERLYING_SLOTS = 20;
-// Twelve fresh 5-minute history reads per 60-second slice fit the existing
-// FYERS REST 4-second scheduler. Eight symbols overlap the next socket slice.
-const SCAN_PER_SLICE = 11;
+// Eleven fresh history reads per 60-second slice preserve the designed 20-minute
+// rolling pass. Nine symbols overlap the next socket slice for repeated live-tick windows.
+const SCAN_PER_SLICE = FNO_SCAN_PER_SLICE;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
 let socketStatus = 'NOT_STARTED';

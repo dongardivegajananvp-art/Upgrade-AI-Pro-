@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -134,4 +134,28 @@ test('diagnostic ledger uses strategy-specific rejection reasons when verified w
   assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED'].includes(row.status)&&row.reason));
   assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
   assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('daily candles')));
+});
+
+test('early option entry exposes exact tick-aligned trigger while waiting inside the same 5-minute candle', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+.8;
+    return {time:start+i*300,open,high:close+.4,low:open-.4,close,volume:1000+i,completed:true};
+  });
+  const optionCandles=Array.from({length:3},(_,i)=>({
+    time:start+(47+i)*300,open:103+i,high:104+i,low:102+i,close:103.5+i,volume:500+i,completed:true
+  }));
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const optionTick={symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({
+    underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,optionTick,contract,dailyCandles:[],fifteenMinuteCandles:[],
+    isTopGainer:false,researchEnabled:false,now
+  });
+  assert.equal(result.status,'WAITING_FOR_OPTION_BREAKOUT');
+  assert.equal(result.entryTriggerPrice,106.05);
+  assert.equal(result.optionTickSize,.05);
+  assert.equal(result.contract,contract.symbol);
+  assert.equal(result.optionSide,'CE');
 });

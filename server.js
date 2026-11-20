@@ -13,6 +13,7 @@ import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
+import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -46,7 +47,6 @@ let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
-let fnoScannerNextTask = 'SCAN';
 let fnoStrategyScanRotation = null;
 let fnoStrategyScanLoggedRotation = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
@@ -69,7 +69,9 @@ function startFnoStrategyScanner() {
       // discovered in the previous slice must not be discarded.
     }
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
-    const shouldWarmup=fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && (fnoScannerNextTask==='WARMUP' || fnoStrategyScanCursor>=scanLimit);
+    // Complete the new-symbol scan batch first; use the remaining slice time for
+    // Daily/15m warmups so research preparation cannot starve F&O coverage.
+    const shouldWarmup=fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
     if (shouldWarmup) {
       const warmupSymbol=fnoResearchWarmupQueue.take();
       fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
@@ -99,13 +101,13 @@ function startFnoStrategyScanner() {
         else fnoStrategyScanStats.warmupRejectedCount++;
       } finally {
         fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
-        fnoScannerNextTask='SCAN';
         fnoStrategyScanBusy=false;
       }
       return;
     }
     if (fnoStrategyScanCursor>=scanLimit) return;
-    const symbol=active[fnoStrategyScanCursor++];
+    const scanSymbols=getFnoSliceScanSymbols(active,scanLimit);
+    const symbol=scanSymbols[fnoStrategyScanCursor++];
     const scanStartedAt=Date.now();
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
@@ -135,7 +137,6 @@ function startFnoStrategyScanner() {
           fnoStrategyScanStats.lastReason='Research warmup queue is at capacity; candidate remains un-warmed and cannot qualify for Top 3';
         }
       }
-      fnoScannerNextTask=fnoResearchWarmupQueue.size>0?'WARMUP':'SCAN';
     } catch(error) {
       fnoStrategyScanStats.lastSymbol=symbol;
       fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';

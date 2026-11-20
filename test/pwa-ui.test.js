@@ -53,3 +53,10 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(css, /touch-action:none/);
   assert.match(serviceWorker, /upgrade-ai-pro-shell-v9/);
 });
+
+test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
+  assert.match(app, /setupOptionTrigger/);
+  assert.match(app, /entryTriggerPrice/);
+  assert.match(app, /setupRetryAfter = Date\.now\(\) \+ 5000/);
+  assert.match(app, /Number\(optionTick\.price\).*entryTriggerPrice/);
+});

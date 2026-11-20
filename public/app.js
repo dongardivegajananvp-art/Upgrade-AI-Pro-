@@ -20,6 +20,8 @@ let chartLastTouchTap = 0;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
 let setupLastBucket = null;
+let setupOptionTrigger = null;
+let setupRetryAfter = 0;
 let lastAccountRefresh = 0;
 let lastUniverseScanRefresh = 0;
 let universeScanRunning = false;
@@ -148,7 +150,16 @@ async function refresh() {
       }
       const selectedTick = md.selectedUnderlying;
       const bucket = selectedTick?.exchangeTime ? Math.floor(Number(selectedTick.exchangeTime)/300)*300 : null;
-      if (bucket && setupLastBucket !== null && bucket !== setupLastBucket) setupEvaluationDone = false;
+      if (bucket && setupLastBucket !== null && bucket !== setupLastBucket) {
+        setupEvaluationDone = false; setupOptionTrigger = null; setupRetryAfter = 0;
+      }
+      if (setupRetryAfter && Date.now() >= setupRetryAfter) { setupEvaluationDone = false; setupRetryAfter = 0; }
+      // A WAITING_FOR_OPTION_BREAKOUT result is a live trigger, not a final verdict.
+      // Re-evaluate only when a fresh option tick crosses the exact official-tick entry.
+      if (setupOptionTrigger && setupOptionTrigger.bucket === bucket && optionTick?.fresh &&
+          Number(optionTick.price) + setupOptionTrigger.tickSize * 1e-7 >= setupOptionTrigger.entryTriggerPrice) {
+        setupOptionTrigger = null; setupEvaluationDone = false;
+      }
       if (!setupEvaluationDone && !setupEvaluationRunning && selectedTick?.fresh && selectedTick.symbol === selectedSymbol) evaluateSelectedSetup();
     }
     else if (selectedContractSymbol) {
@@ -331,7 +342,7 @@ function renderMovers(fno) {
 }
 async function selectIndexSymbol(symbol) {
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
-  selectedSymbol = symbol; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null;
+  selectedSymbol = symbol; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
   title.textContent=symbol+' · LOADING VERIFIED FYERS INDEX HISTORY';
@@ -367,6 +378,7 @@ async function selectSymbol(symbol, livePrice = null) {
   if (!symbol || symbol === selectedSymbol) return;
   selectedSymbol = symbol;
   resetChartViewport();
+  setupOptionTrigger = null; setupRetryAfter = 0;
   chartSetupLevels = null;
   setupEvaluationDone = false;
   chartLiveCandle = null;
@@ -705,6 +717,7 @@ function renderChartViewport() {
 
 async function clearSelectedOption() {
   selectedContractSymbol = null;
+  setupOptionTrigger = null; setupRetryAfter = 0;
   document.querySelector('#option-quantity').textContent = '—';
   document.querySelector('#option-ltp').textContent = '—';
   try {
@@ -832,9 +845,15 @@ async function evaluateSelectedSetup() {
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
+    setupOptionTrigger = null; setupRetryAfter = 0;
     if (Array.isArray(setup.researchRanking) || Array.isArray(setup.strategyLedger)) renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
+    if (setup.status === 'WAITING_FOR_OPTION_BREAKOUT' && Number.isFinite(Number(setup.entryTriggerPrice)) && Number.isFinite(Number(setup.optionTickSize)) && Number(setup.optionTickSize) > 0) {
+      setupOptionTrigger = { entryTriggerPrice:Number(setup.entryTriggerPrice), tickSize:Number(setup.optionTickSize), bucket:setupLastBucket };
+    } else if (setup.status === 'DATA_UNAVAILABLE_NO_TRADE' && /tick (?:became stale|is not fresh)|Fresh FYERS .* tick is required/i.test(String(setup.reason||''))) {
+      setupRetryAfter = Date.now() + 5000;
+    }
     if(setup.status==='SETUP_CONFIRMED') {
       document.querySelector('#setup-entry').textContent='₹'+showNumber(setup.entry);
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
@@ -845,7 +864,7 @@ async function evaluateSelectedSetup() {
       renderChartViewport();
     } else {
       chartSetupLevels = null; renderChartViewport();
-      state.textContent=(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
+      state.textContent=setup.status==='WAITING_FOR_OPTION_BREAKOUT'&&Number.isFinite(Number(setup.entryTriggerPrice))?'WAITING FOR OPTION BREAKOUT · TRIGGER ₹'+showNumber(setup.entryTriggerPrice)+' · LIVE TICK WATCH':(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
     }
   } catch(error) { setupEvaluationDone=true; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
@@ -884,6 +903,7 @@ async function selectOptionContract(symbol) {
     const result = await response.json();
     if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
     selectedContractSymbol = result.contract.symbol;
+    setupOptionTrigger = null; setupRetryAfter = 0;
     chartSetupLevels = null; renderChartViewport();
     setupEvaluationDone = false;
     document.querySelector('#option-quantity').textContent = showNumber(result.contract.lotSize,0);

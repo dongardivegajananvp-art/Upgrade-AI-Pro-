@@ -1,5 +1,5 @@
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -67,11 +67,11 @@ async function scheduledFetch(url, options) {
     let body = {};
     try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
     if (response.status === 429) {
-      cooldownUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+      cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, RATE_LIMIT_COOLDOWN_MS);
       lastRestStatus = 'RATE_LIMITED';
       const markers = [lastRestMeta.retryAfter ? 'Retry-After=' + lastRestMeta.retryAfter : null, lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null, lastRestMeta.server ? 'Server=' + lastRestMeta.server : null].filter(Boolean).join(' · ');
       lastRateLimitAt = new Date().toISOString();
-      lastRestError = 'FYERS HTTP 429; one-hour REST safety cooldown active' + (markers ? ' · ' + markers : '');
+      lastRestError = 'FYERS HTTP 429; REST cooldown active until ' + new Date(cooldownUntil).toISOString() + ' (process-local; restart persistence requires durable storage)' + (markers ? ' · ' + markers : '');
       console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
         path: lastRequestPath,
         status: response.status,
@@ -264,7 +264,9 @@ export function getRestDiagnostics(now = Date.now()) {
     lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
     cooldownActive: now < cooldownUntil,
-    cooldownUntil: cooldownUntil > now ? cooldownUntil : null
+    cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
+    cooldownPersistence: 'PROCESS_LOCAL_ONLY',
+    restartSafe: false
   };
 }
 

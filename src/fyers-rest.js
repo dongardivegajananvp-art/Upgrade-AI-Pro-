@@ -32,7 +32,7 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
     if (time <= 0 || open <= 0 || high < Math.max(open, close, low) || low > Math.min(open, close) || close <= 0 || volume < 0) return null;
     const ist = new Date((time + 19800) * 1000);
     const minute = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-    if (minute < 555 || minute >= 930 || time >= currentBucket || seen.has(time)) return null;
+    if (minute < 555 || minute >= 930 || ((minute - 555) % 5) !== 0 || time >= currentBucket || seen.has(time)) return null;
     seen.add(time);
     return { time, open, high, low, close, volume, completed: true, source: 'FYERS_HISTORY' };
   }).filter(Boolean).sort((a, b) => a.time - b.time);

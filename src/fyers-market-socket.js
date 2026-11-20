@@ -33,16 +33,26 @@ let lastCumulativeVolume = null;
 const ticks = new Map();
 let socketHasConnected = false;
 const socketSubscribedSymbols = new Set();
+let subscriptionOperationSequence = 0;
 
 
-function syncSocketSubscriptions(desiredSymbols) {
+function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
   const { removed, added } = getSocketSubscriptionDelta([...socketSubscribedSymbols], desiredSymbols);
+  const operationId = ++subscriptionOperationSequence;
+  console.info('[FYERS_DATA] subscription delta:', JSON.stringify({
+    operationId, reason, at: new Date().toISOString(),
+    socketStatus, currentCount: socketSubscribedSymbols.size,
+    desiredCount: desiredSymbols.length, addedCount: added.length,
+    removedCount: removed.length
+  }));
   if (removed.length) {
     if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
+    console.info('[FYERS_DATA] unsubscribe request:', JSON.stringify({ operationId, count: removed.length }));
     socket.unsubscribe(removed);
     for (const symbol of removed) socketSubscribedSymbols.delete(symbol);
   }
   if (added.length) {
+    console.info('[FYERS_DATA] subscribe request:', JSON.stringify({ operationId, count: added.length }));
     socket.subscribe(added);
     for (const symbol of added) socketSubscribedSymbols.add(symbol);
   }
@@ -125,7 +135,7 @@ function applyFnoRotation(advance = false) {
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      syncSocketSubscriptions([...INDEX_SYMBOLS, ...next, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])]);
+      syncSocketSubscriptions([...INDEX_SYMBOLS, ...next, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])], advance ? 'fno-rotation' : 'fno-slice-selection');
     } catch (error) {
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
@@ -168,7 +178,7 @@ export function setSelectedOptionSymbol(symbol) {
   }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      syncSocketSubscriptions([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(next ? [next] : [])]);
+      syncSocketSubscriptions([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(next ? [next] : [])], 'selected-option-change');
     } catch (error) {
       lastError = safeError(error);
       optionSubscriptionStatus = 'SUBSCRIPTION_FAILED';
@@ -206,7 +216,7 @@ export function startMarketSocket() {
       try {
         // FYERS auto-reconnect restores the existing subscriptions itself.
         // Reconcile only symbols changed while disconnected; do not resend the full list.
-        syncSocketSubscriptions(subscriptions);
+        syncSocketSubscriptions(subscriptions, isFirstConnection ? 'initial-connect' : 'auto-reconnect-reconcile');
         socketHasConnected = true;
       } catch (error) {
         lastError = safeError(error);

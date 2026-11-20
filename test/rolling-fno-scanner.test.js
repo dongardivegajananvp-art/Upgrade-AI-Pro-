@@ -66,7 +66,7 @@ test('selected underlying is pinned without duplicates or changing the rotation 
 });
 
 test('overlapping F&O slices scan only the newly added head symbols and cover the whole universe fairly', () => {
-  assert.equal(FNO_SCAN_PER_SLICE,4);
+  assert.equal(FNO_SCAN_PER_SLICE,11);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const batches=[];
   for(let start=0;start<universe.length;start+=FNO_SCAN_PER_SLICE){
@@ -74,6 +74,7 @@ test('overlapping F&O slices scan only the newly added head symbols and cover th
     batches.push(...getFnoSliceScanSymbols(active));
   }
   assert.equal(new Set(batches).size,218);
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20)).length,11);
   assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20))[0],'NSE:STOCK0-EQ');
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,4,20))[0],'NSE:STOCK4-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,11,20))[0],'NSE:STOCK11-EQ');
 });

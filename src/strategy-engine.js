@@ -25,9 +25,13 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandl
     Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&
     now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&
     now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
+  const validDaily=Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50;
+  const validFifteen=Array.isArray(fifteenMinuteCandles)&&fifteenMinuteCandles.filter(validOhlcv).length>=50;
+  const latest15m=Number(fifteenMinuteCandles?.at(-1)?.time);
+  const fifteenFresh=Number.isFinite(latest15m)&&now/1000-latest15m>=-3&&now/1000-latest15m<=1800;
   if(!fresh||!Array.isArray(candles)||candles.length<50||!contiguousWindow(candles,50)||
-     !Array.isArray(dailyCandles)||dailyCandles.length<50||
-     !Array.isArray(fifteenMinuteCandles)||fifteenMinuteCandles.length<50) return {status:'NO_WATCH',reason:'Fresh tick and contiguous 5m plus verified 50-candle daily/15m context are required'};
+     !validDaily||!validFifteen||!contiguousFifteenMinuteWindow(fifteenMinuteCandles,50)||!fifteenFresh)
+    return {status:'NO_WATCH',reason:'Fresh tick, contiguous 50-candle 5m/15m windows, and 50 verified daily candles are required'};
   const trend=rows=>{
     const closes=rows.map(row=>Number(row.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);
     if(!Number.isFinite(e20)||!Number.isFinite(e50))return 'NEUTRAL';

@@ -46,7 +46,11 @@ export function calculatePositionSize({
     return { status: 'NO_TRADE', reason: 'Official integer contract lot size is required' };
   }
   const costInputs = [estimatedRoundTripCosts, slippagePerUnit, gapStressPerUnit];
+  const anyCostInputProvided = costInputs.some(value => value !== undefined && value !== null && value !== '');
   const costModelConfigured = costInputs.every(value => value !== undefined && value !== null && value !== '');
+  if (anyCostInputProvided && !costModelConfigured) {
+    return { status: 'NO_TRADE', reason: 'Configure round-trip costs, slippage and gap-stress assumptions together, or omit all three' };
+  }
   const costs = costModelConfigured ? costInputs.map(Number) : null;
   if (costModelConfigured && (!costs.every(Number.isFinite) || costs.some(value => value < 0))) {
     return { status: 'NO_TRADE', reason: 'Cost, slippage and gap-stress assumptions must be finite non-negative values' };

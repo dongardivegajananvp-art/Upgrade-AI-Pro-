@@ -117,7 +117,7 @@ test('position sizing uses only explicit risk budget and whole verified lots', (
   assert.equal(sized.status, 'POSITION_SIZE_VALID');
   assert.equal(sized.lots, 2);
   assert.equal(sized.quantity, 50);
-  assert.equal(sized.estimatedMaxLoss, 500);
+  assert.equal(sized.estimatedPriceRisk, 500);
   assert.equal(sized.actionable, false);
 });
 

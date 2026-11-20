@@ -428,7 +428,13 @@ const server = http.createServer(async (req,res) => {
       return send(res,200,{...setup,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'});
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));
-      return send(res,rateLimited?429:200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error.message||'Setup verification unavailable').slice(0,180)});
+      const rest=getRestDiagnostics();
+      return send(res,rateLimited?429:200,{
+        status:'DATA_UNAVAILABLE_NO_TRADE',
+        reason:String(error.message||'Setup verification unavailable').slice(0,180),
+        restStatus:rest.status,
+        retryAt:rateLimited&&rest.cooldownUntil?rest.cooldownUntil:null
+      });
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/auto-select-option') {

@@ -107,3 +107,20 @@ test('research targets adapt to aligned trend versus range regime without reduci
   assert.ok(range.targetR>=2);
 });
 
+
+test('multi-timeframe research rejects stale completed daily context', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z'), exchangeTime=now/1000;
+  const tick={price:110,exchangeTime,receivedAt:now};
+  const five=risingCandles(50,100,.1,300,exchangeTime-300);
+  const recentDaily=risingCandles(50,100,.5,86400,exchangeTime-86400);
+  const staleDaily=recentDaily.map(c=>({...c,time:c.time-10*86400}));
+  const fifteen=[
+    ...sessionRisingFifteen('2026-11-17',25,100,.2),
+    ...sessionRisingFifteen('2026-11-18',25,105,.2),
+    ...sessionRisingFifteen('2026-11-19',17,110,.2)
+  ];
+  const setup={side:'LONG',strategy:'EMA20_EMA50_TREND',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
+  const result=analyzeSetupResearch({candles:five,dailyCandles:staleDaily,fifteenMinuteCandles:fifteen,tick,setup,now});
+  assert.equal(result.status,'UNAVAILABLE');
+  assert.match(result.reason,/daily candle is stale/i);
+});

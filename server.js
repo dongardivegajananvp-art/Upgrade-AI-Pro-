@@ -14,6 +14,7 @@ import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
 import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
+import { requiresFyersSession } from './src/api-access.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -234,10 +235,15 @@ function ensureFyersMarketStarted() {
 const server = http.createServer(async (req,res) => {
   const url = new URL(req.url || '/', 'http://localhost');
   const requestCookies = parseCookies(req.headers.cookie || '');
-  if (requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session, {
+  const hasFyersSession = Boolean(requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session, {
     appId:process.env.FYERS_APP_ID, appSecret:process.env.FYERS_SECRET_KEY
-  })) {
-    ensureFyersMarketStarted();
+  }));
+  if (hasFyersSession) ensureFyersMarketStarted();
+  // Public endpoints are limited to non-account market/status views and OAuth
+  // entry/callback. All broker-backed data and workstation controls require the
+  // caller's own cryptographically valid FYERS session cookie.
+  if (requiresFyersSession(url.pathname) && !hasFyersSession) {
+    return send(res,401,{status:'AUTHENTICATION_REQUIRED',reason:'A valid Upgrade AI Pro FYERS session is required for this endpoint'});
   }
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
@@ -323,6 +329,22 @@ const server = http.createServer(async (req,res) => {
     }));
   }
   if (req.method === 'GET' && url.pathname === '/api/status') {
+    if (!hasFyersSession) {
+      // Do not expose a logged-in user's selected symbols, live ticks, scanner
+      // diagnostics, or broker-session state to anonymous visitors.
+      return send(res,200,{
+        app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS',
+        feed:{status:'MISSING',fresh:false,actionable:false,reason:'A valid FYERS session is required'},
+        auth:{status:'NOT_AUTHENTICATED',tokenStored:false},
+        marketData:{
+          socketStatus:'NOT_AUTHENTICATED',indices:{},selectedUnderlying:null,
+          selectedOption:null,selectedOptionSymbol:null,
+          optionSubscription:{status:'SESSION_REQUIRED'},
+          fno:{status:'SESSION_REQUIRED',topGainers:[]}
+        },
+        orderPlacementEnabled:false, marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+      });
+    }
     const market = getSessionMarketData();
     return send(res,200,{
     app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(market.selectedUnderlying), auth:getAuthStatus(), marketData:market, rest:getRestDiagnostics(),
@@ -341,7 +363,7 @@ const server = http.createServer(async (req,res) => {
     console.info('[FYERS_OAUTH] login route reached');
     try {
       const auth = getAuthStatus();
-      if (auth.tokenStored) {
+      if (auth.tokenStored && hasFyersSession) {
         ensureFyersMarketStarted();
         const session = createSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
         const sessionCookie = `fyers_session=${session.value}; Max-Age=${session.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`;

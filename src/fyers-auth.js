@@ -57,8 +57,11 @@ export function createSessionCookie({ appId, appSecret, now = Date.now() } = {})
 }
 
 export function restoreSessionCookie(value, { appId, appSecret, now = Date.now() } = {}) {
-  if (accessToken && tokenReceivedAt && now < tokenExpiryAt(tokenReceivedAt)) return true;
   if (typeof value !== 'string' || value.length < 40 || value.length > 3800) return false;
+  if (accessToken && tokenReceivedAt && now >= tokenExpiryAt(tokenReceivedAt)) {
+    accessToken = null;
+    tokenReceivedAt = null;
+  }
   try {
     const packed = Buffer.from(value, 'base64url');
     if (packed.length < 29) return false;
@@ -70,6 +73,12 @@ export function restoreSessionCookie(value, { appId, appSecret, now = Date.now()
     const payload = JSON.parse(Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8'));
     if (payload.v !== SESSION_COOKIE_VERSION || typeof payload.token !== 'string' || !payload.token || !Number.isFinite(payload.issuedAt) || !Number.isFinite(payload.expiresAt)) return false;
     if (now >= payload.expiresAt || payload.expiresAt !== tokenExpiryAt(payload.issuedAt) || payload.issuedAt > now + 60000) return false;
+    // An active in-memory session must match the authenticated cookie exactly.
+    // Never treat an arbitrary cookie as valid merely because another request
+    // has already populated this process with a broker token.
+    if (accessToken && tokenReceivedAt) {
+      return payload.token === accessToken && payload.issuedAt === tokenReceivedAt;
+    }
     accessToken = payload.token;
     tokenReceivedAt = payload.issuedAt;
     lastAuthError = null;

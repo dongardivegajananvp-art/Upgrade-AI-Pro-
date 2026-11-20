@@ -92,8 +92,9 @@ test('multi-timeframe research returns an explainable score only with verified d
 });
 test('multi-timeframe research refuses to invent a score when 15m history is incomplete', () => {
   const now=1800000000000;
-  const make=(count,step)=>Array.from({length:count},(_,i)=>({time:1700000000+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
-  const result=analyzeSetupResearch({candles:make(60,300),dailyCandles:make(60,86400),fifteenMinuteCandles:make(12,900),tick:{exchangeTime:now/1000,receivedAt:now},setup:{side:'LONG',confirmedAt:1700017700},now});
+  const make=(count,step,base=1700000000)=>Array.from({length:count},(_,i)=>({time:base+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
+  const recentDaily=make(60,86400,now/1000-60*86400);
+  const result=analyzeSetupResearch({candles:make(60,300),dailyCandles:recentDaily,fifteenMinuteCandles:make(12,900),tick:{exchangeTime:now/1000,receivedAt:now},setup:{side:'LONG',confirmedAt:1700017700},now});
   assert.equal(result.status,'UNAVAILABLE');
   assert.match(result.reason,/50 verified 15-minute/);
 });

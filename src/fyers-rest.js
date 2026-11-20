@@ -42,10 +42,15 @@ async function scheduledFetch(url, options) {
   const run = queue.then(async () => {
     lastRequestPath = url.pathname;
     const now = Date.now();
-    const delay = getRestWaitMs(now, nextRequestAt, cooldownUntil);
+    // A prior queued request may have received 429. Reject immediately rather
+    // than sleeping until cooldown expiry and accidentally sending stale work.
+    if (isRestCooldownActive(now, cooldownUntil)) {
+      lastRestStatus = 'RATE_LIMITED';
+      throw new Error('FYERS REST cooldown active; queued request was not sent upstream');
+    }
+    const delay = getRestWaitMs(now, nextRequestAt);
     if (delay) await wait(delay);
-    // Re-check after waiting: a previous queued request may have received 429
-    // while this request was sleeping. Never let queued work escape cooldown.
+    // Re-check after pacing wait in case a cooldown was activated meanwhile.
     if (isRestCooldownActive(Date.now(), cooldownUntil)) {
       lastRestStatus = 'RATE_LIMITED';
       throw new Error('FYERS REST cooldown active; queued request was not sent upstream');

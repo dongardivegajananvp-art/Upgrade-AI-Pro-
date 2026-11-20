@@ -159,3 +159,38 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
   assert.equal(result.contract,contract.symbol);
   assert.equal(result.optionSide,'CE');
 });
+
+test('non-retest strategies validate pressure on the trigger candle, not an older level cross', () => {
+  const rows = [
+    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
+    { time: 1800000300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 200 },
+    { time: 1800000600, open: 103, high: 103.5, low: 102, close: 102.5, volume: 150 }
+  ];
+  const nonRetest = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[2].time, false);
+  assert.equal(nonRetest.ok, false);
+  assert.match(nonRetest.reason, /Buying pressure is absent/);
+
+  const retest = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[2].time, true);
+  assert.equal(retest.ok, true);
+  assert.equal(retest.candleTime, rows[1].time);
+});
+
+
+test('top-gainer breakout can be evaluated with its own two-candle window without waiting for unrelated EMA/daily history', () => {
+  const now=1800000601000;
+  const underlyingCandles=[
+    {time:1800000000,open:99.5,high:101,low:99,close:100,volume:100},
+    {time:1800000300,open:100,high:103,low:99.8,close:102,volume:250}
+  ];
+  const result=detectNineStrategySetup({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
+    isTopGainer:true,researchEnabled:false,now
+  });
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(topGainer.status,'DETECTED');
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='BLOCKED'));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
+});

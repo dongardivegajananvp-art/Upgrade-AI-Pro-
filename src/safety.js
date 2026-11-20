@@ -23,3 +23,4 @@ export function canAdvanceSetup({underlyingTick,optionTick,contractVerified,cand
  if(!contractVerified||!candlesComplete||!strategyConfirmed||riskPlan?.status!=='RISK_PLAN_VALID'||riskPlan.rr<MIN_REWARD_RISK)return{status:'NO_TRADE',reason:'Contract, completed candles, strategy, and 1:2 risk plan must all verify'};
  return{status:'SETUP_ELIGIBLE_ORDER_DISABLED',reason:'All data gates passed; broker order placement remains disabled'};
 }
+

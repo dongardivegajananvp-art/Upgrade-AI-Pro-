@@ -210,7 +210,10 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
   const signalIndex = signalTime == null ? rows.length - 1 : rows.findIndex(c => number(c.time) === number(signalTime));
   if (signalIndex < 0) return { ok: false, reason: 'The strategy trigger candle is missing from verified history' };
   let breakoutIndex = signalIndex, levelCrossFound = false;
-  if (finite(breakoutLevel)) {
+  // Only retest strategies must trace the original level-crossing candle.
+  // Trend, momentum and pullback setups validate their own trigger candle;
+  // an older crossing of the same numeric level is not valid confirmation.
+  if (requireLevelCross && finite(breakoutLevel)) {
     for (let i = signalIndex; i >= 1; i--) {
       const crossed = side === 'LONG'
         ? number(rows[i].close) > number(breakoutLevel) && number(rows[i-1].close) <= number(breakoutLevel)
@@ -376,7 +379,12 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   if(!(risk>=step))return{status:'NO_TRADE',reason:'Single-candle confirmation swing low does not leave positive option-premium risk'};
   if(number(livePremium)+step*1e-7<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
   if(number(livePremium)>entry+0.5*risk+step*1e-7)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
-  const target=Number((entry+risk*number(targetR)).toFixed(8));
+  // Option targets must also be valid exchange prices. Round the research
+  // objective UP to the next official tick so tick rounding can never reduce
+  // the requested reward/risk multiple.
+  const rawTarget=entry+risk*number(targetR);
+  const targetTicks=Math.ceil(rawTarget/step-1e-9);
+  const target=Number((targetTicks*step).toFixed(8));
   const plannedRr=(target-entry)/risk;
   if(!(Number.isFinite(plannedRr)&&plannedRr>=2-1e-9))return{status:'NO_TRADE',reason:'Fixed Entry/SL/Target do not preserve the required 1:2 reward/risk'};
   return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk,targetR:number(targetR)};

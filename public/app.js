@@ -993,7 +993,7 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
       document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
-      state.textContent=setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · EARLY ENTRY · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
+      state.textContent='SIGNAL VERIFIED · '+setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
       chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
       renderChartViewport();
     } else {

@@ -11,6 +11,7 @@ import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
+import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
@@ -105,6 +106,7 @@ function startFnoStrategyScanner() {
     }
     if (fnoStrategyScanCursor>=scanLimit) return;
     const symbol=active[fnoStrategyScanCursor++];
+    const scanStartedAt=Date.now();
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     try {
@@ -139,7 +141,18 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';
       fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);
       fnoStrategyScanStats.lastScanAt=new Date().toISOString();
-    } finally { fnoStrategyScanBusy=false; }
+    } finally {
+      fnoStrategyScanBusy=false;
+      const memory=process.memoryUsage();
+      console.info('[FYERS_SCANNER] symbol scan completed:',JSON.stringify({
+        symbol,
+        status:fnoStrategyScanStats.lastStatus,
+        durationMs:Date.now()-scanStartedAt,
+        restCooldownActive:getRestDiagnostics().cooldownActive,
+        rssBytes:memory.rss,
+        heapUsedBytes:memory.heapUsed
+      }));
+    }
     if (fnoStrategyScanCursor>=scanLimit && fnoStrategyScanLoggedRotation!==snapshot.rotationIndex) {
       fnoStrategyScanLoggedRotation=snapshot.rotationIndex;
       const memory=process.memoryUsage();
@@ -157,7 +170,7 @@ function startFnoStrategyScanner() {
         heapUsedBytes:memory.heapUsed
       }));
     }
-  },4500);
+  },SCANNER_POLL_INTERVAL_MS);
   fnoStrategyScanTimer.unref?.();
 }
 

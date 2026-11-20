@@ -11,7 +11,7 @@ export function getRestWaitMs(now, nextRequestAt) {
 export function parseRetryAfterMs(value, now = Date.now()) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const raw = String(value).trim();
-  if (/^\\d+(?:\\.\\d+)?$/.test(raw)) {
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
     const seconds = Number(raw);
     return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1000) : null;
   }

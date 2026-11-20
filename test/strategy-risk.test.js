@@ -11,6 +11,16 @@ test('fixed premium plan rounds exact entry and structural stop to official tick
   assert.ok(plan.target>=plan.entry+2*(plan.entry-plan.stopLoss)-1e-8);
 });
 
+test('fixed premium target rounds upward to a valid official tick without reducing target R', () => {
+  const plan=buildFixedPremiumPlan({breakoutLevel:100.02,tickSize:0.05,livePremium:100.10,swingLow:98.93,targetR:2.25});
+  assert.equal(plan.status,'SETUP_CONFIRMED');
+  assert.equal(plan.entry,100.10);
+  assert.equal(plan.stopLoss,98.85);
+  assert.equal(plan.target,102.95);
+  assert.ok(Math.abs(plan.target/0.05-Math.round(plan.target/0.05))<1e-8);
+  assert.ok(plan.rr>=2.25);
+});
+
 test('fixed premium plan rejects less than 2R and invalid target multiples', () => {
   assert.equal(buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:98.9,targetR:1.99}).status,'NO_TRADE');
   assert.equal(buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:98.9,targetR:3.01}).status,'NO_TRADE');

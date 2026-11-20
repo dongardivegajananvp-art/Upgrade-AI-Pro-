@@ -74,6 +74,6 @@ test('overlapping F&O slices scan only newly added tail symbols and cover the wh
     batches.push(...getFnoSliceScanSymbols(active));
   }
   assert.equal(new Set(batches).size,218);
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20))[0],'NSE:STOCK16-EQ');
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,4,20))[0],'NSE:STOCK20-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20))[0],'NSE:STOCK0-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,4,20))[0],'NSE:STOCK4-EQ');
 });

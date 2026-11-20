@@ -201,7 +201,6 @@ test('opening-range setup waits for the actual completed breakout candle before 
   const first={time:start,open:100,high:101,low:99,close:100,volume:100};
   const second={time:start+300,open:100,high:103,low:99.5,close:100.5,volume:250};
   // Even a live price above the opening range cannot borrow the prior candle's pressure/volume.
-  assert.equal(detectOpeningRange([first,second],555,103).constructor, Function);
   assert.equal(detectOpeningRange([first,second],555,103),null);
   const breakout={...second,close:102.5};
   const setup=detectOpeningRange([first,breakout],555,103);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta } from '../src/fyers-market-socket.js';
+import { getSocketSubscriptionDelta } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];

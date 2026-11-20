@@ -39,6 +39,9 @@ function parseCookies(header='') {
 const consumedOAuthStates = new Set();
 let fnoUniverseLoadPromise = null;
 let fnoUniverseLoadedDate = null;
+let fnoUniverseClearedForDate = null;
+let fnoUniverseRetryDate = null;
+let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
@@ -143,28 +146,33 @@ function startFnoStrategyScanner() {
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
   const sessionDate = getNseSessionDate();
+  if (fnoUniverseRetryDate !== sessionDate) {
+    fnoUniverseRetryDate = sessionDate;
+    fnoUniverseLoadRetryAt = 0;
+  }
   // Refresh official NSE F&O and option-contract masters once per IST trading day.
-  // This keeps newly listed/expired contracts and the rolling universe in sync
-  // without reconnecting FYERS or issuing additional REST market-data calls.
-  if (fnoUniverseLoadedDate !== sessionDate && !fnoUniverseLoadPromise) {
+  // Fail closed: remove the prior session's universe and selections while today's
+  // official master is unavailable; retry master download with bounded backoff.
+  if (fnoUniverseLoadedDate !== sessionDate && !fnoUniverseLoadPromise && Date.now() >= fnoUniverseLoadRetryAt) {
     const requestedDate = sessionDate;
+    if (fnoUniverseClearedForDate !== requestedDate) {
+      setFnoUniverse([]);
+      setSelectedUnderlyingSymbol(null);
+      setSelectedOptionSymbol(null);
+      fnoUniverseClearedForDate = requestedDate;
+      console.info('[FYERS_SCANNER] current-session official F&O master pending; prior-session universe and selections cleared');
+    }
     fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
       const coverage = setFnoUniverse(universe);
-      const selectedUnderlying = getMarketData().selectedUnderlying?.symbol;
-      if (selectedUnderlying && !universe.some(item => item.symbol === selectedUnderlying)) {
-        setSelectedUnderlyingSymbol(null);
-      }
-      const selectedOption = getMarketData().selectedOptionSymbol;
-      if (selectedOption) {
-        try { getVerifiedOptionContract(selectedOption); }
-        catch { setSelectedOptionSymbol(null); }
-      }
       fnoUniverseLoadedDate = requestedDate;
+      fnoUniverseClearedForDate = null;
+      fnoUniverseLoadRetryAt = 0;
       startFnoStrategyScanner();
       console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12, 'master date:', requestedDate);
       return true;
     }).catch(error => {
-      console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
+      fnoUniverseLoadRetryAt = Date.now() + 30_000;
+      console.error('[FYERS_SCANNER] official symbol-master load failed; retry in 30s:', String(error?.message || error).slice(0,180));
       return false;
     }).finally(() => {
       fnoUniverseLoadPromise = null;

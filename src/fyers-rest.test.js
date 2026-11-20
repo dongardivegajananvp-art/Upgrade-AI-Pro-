@@ -18,6 +18,7 @@ test('history normalization returns only valid completed NSE-session candles', (
   const now = (first + 600) * 1000 + 1000;
   const rows = [
     [first, 100, 102, 99, 101, 1000],
+    [first + 60, 100, 102, 99, 101, 1000], // misaligned 09:16 candle must be rejected
     [first + 300, 101, 103, 100, 102, 1200],
     [first + 600, 102, 104, 101, 103, 1400],
     [first + 900, 103, 104, 102, 103, 1500],
@@ -64,7 +65,7 @@ test('daily research excludes the current incomplete IST session candle', () => 
 });
 
 
-import { parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs } from './rest-scheduler-utils.js';
+import { parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 
 test('FYERS Retry-After seconds and HTTP dates never shorten the one-hour safety cooldown', () => {
   const now = Date.UTC(2026, 10, 20, 10, 0, 0);
@@ -81,4 +82,13 @@ test('FYERS WebSocket 1015 recovery uses bounded exponential backoff', () => {
   assert.equal(getSocketRateLimitBackoffMs(3), 240_000);
   assert.equal(getSocketRateLimitBackoffMs(50), 15 * 60_000);
   assert.equal(getSocketRateLimitBackoffMs(0), 60_000);
+});
+
+test('socket rate-limit recovery completes only after all paced batches drain on a connected socket', () => {
+  const base = { recoveryPending:true, pendingCount:0, socketConnected:true, now:5000, cooldownUntil:5000 };
+  assert.equal(canCompleteSocketRateLimitRecovery({...base,pendingCount:1}),false);
+  assert.equal(canCompleteSocketRateLimitRecovery({...base,socketConnected:false}),false);
+  assert.equal(canCompleteSocketRateLimitRecovery({...base,cooldownUntil:5001}),false);
+  assert.equal(canCompleteSocketRateLimitRecovery({...base}),true);
+  assert.equal(canCompleteSocketRateLimitRecovery({...base,recoveryPending:false}),false);
 });

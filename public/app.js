@@ -38,6 +38,7 @@ document.querySelectorAll('.indices article[data-symbol]').forEach(card => {
   });
 });
 function tickStatusText(md, freshCount) {
+  if (!isNseRegularSession(Date.now())) return 'MARKET CLOSED · FYERS LAST PRICES · NOT LIVE';
   if (freshCount === 3 && md.socketStatus !== 'CONNECTED') return 'FYERS RECONNECTING · LAST TICKS NOT CONFIRMED';
   if (freshCount > 0) return 'FYERS PARTIAL / STALE · ' + freshCount + '/3 INDEX TICKS FRESH';
   return 'FYERS STALE · WAITING FOR FRESH EXCHANGE TICKS';
@@ -176,12 +177,13 @@ async function refresh() {
       }
     }
     const indices = md.indices || {};
+    const nseSessionOpen = isNseRegularSession(Date.now());
     let freshCount = 0;
     for (const [symbol, priceId, changeId] of labels) {
       const tick = indices[symbol];
       const price = document.getElementById(priceId);
       const change = document.getElementById(changeId);
-      if (tick?.fresh) {
+      if (nseSessionOpen && tick?.fresh) {
         freshCount++;
         price.textContent = showNumber(tick.price);
         const points = tick.change != null && Number.isFinite(Number(tick.change)) ? Number(tick.change) : null;
@@ -197,7 +199,7 @@ async function refresh() {
         const pct = tick.changePercent != null && Number.isFinite(Number(tick.changePercent)) ? Number(tick.changePercent) : null;
         const pointsText = points === null ? 'POINTS UNAVAILABLE' : (points >= 0 ? '+' : '') + showNumber(points) + ' pts';
         const pctText = pct === null ? 'CHANGE % UNAVAILABLE' : (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-        change.textContent = 'STALE · ' + pointsText + ' · ' + pctText;
+        change.textContent = (nseSessionOpen ? 'STALE · ' : 'MARKET CLOSED · LAST SESSION · ') + pointsText + ' · ' + pctText;
         change.dataset.state = 'stale';
         price.dataset.state = 'stale';
       } else {
@@ -208,7 +210,10 @@ async function refresh() {
       }
     }
     const feed = document.querySelector('#feed');
-    if (md.socketStatus === 'CONNECTED' && freshCount === 3) {
+    if (!nseSessionOpen) {
+      feed.textContent = 'MARKET CLOSED · FYERS LAST PRICES · NOT LIVE';
+      feed.dataset.state = 'stale';
+    } else if (md.socketStatus === 'CONNECTED' && freshCount === 3) {
       feed.textContent = 'FYERS CONNECTED · 3/3 INDEX TICKS FRESH · NSE ONLY';
       feed.dataset.state = 'connected';
     } else if (md.socketStatus === 'CONNECTED' || md.socketStatus === 'CONNECTING' || freshCount > 0 || (s.auth?.tokenStored && !['ERROR','DISCONNECTED','SUBSCRIPTION_LIMIT_BLOCKED'].includes(md.socketStatus))) {
@@ -307,7 +312,7 @@ function renderMovers(fno) {
   const container = document.querySelector('#movers');
   container.replaceChildren();
   const live = Array.isArray(fno.topGainers) ? fno.topGainers.slice(0, 5) : [];
-  if (fno.status === 'ROTATING_LIVE_COVERAGE' && live.length && live.every(item => item?.fresh === true)) {
+  if (isNseRegularSession(Date.now()) && fno.status === 'ROTATING_LIVE_COVERAGE' && live.length && live.every(item => item?.fresh === true)) {
     try { localStorage.setItem(TOP_GAINERS_SNAPSHOT_KEY, JSON.stringify({ savedAt: Date.now(), items: live })); } catch {}
   }
   const snapshot = readTopGainersSnapshot();

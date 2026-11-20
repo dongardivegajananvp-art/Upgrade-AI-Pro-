@@ -30,7 +30,7 @@ export function normalizeTopGainersSnapshot(value) {
 
 export function resolveTopGainersView(fno = {}, snapshot = null, now = Date.now()) {
   const live = Array.isArray(fno.topGainers) ? fno.topGainers.slice(0, 5) : [];
-  if (fno.status === 'ROTATING_LIVE_COVERAGE' && live.length && live.every(item => item?.fresh === true)) {
+  if (isNseRegularSession(now) && fno.status === 'ROTATING_LIVE_COVERAGE' && live.length && live.every(item => item?.fresh === true)) {
     return { mode: 'LIVE', items: live };
   }
   const cached = normalizeTopGainersSnapshot(snapshot);

@@ -325,6 +325,22 @@ export function startMarketSocket() {
           attempt: socketRateLimitAttempt, backoffMs,
           retryAt: new Date(socketRateLimitUntil).toISOString()
         }));
+        socketRateLimitRecoveryTimer = setTimeout(() => {
+          socketRateLimitRecoveryTimer = null;
+          if (!['RATE_LIMITED','RATE_LIMITED_WAIT'].includes(socketStatus) || Date.now() < socketRateLimitUntil) return;
+          try {
+            const desired = [...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])];
+            socketStatus = 'CONNECTED';
+            syncSocketSubscriptions(desired, 'rate-limit-backoff-recovery');
+            socketHasConnected = true;
+            console.info('[FYERS_DATA] rate-limit backoff elapsed; subscription recovery attempted');
+          } catch (recoveryError) {
+            lastError = safeError(recoveryError);
+            socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+            console.error('[FYERS_DATA] rate-limit recovery attempt failed:', lastError);
+          }
+        }, backoffMs);
+        socketRateLimitRecoveryTimer.unref?.();
       }
       console.error('[FYERS_DATA] socket error:', lastError);
     });

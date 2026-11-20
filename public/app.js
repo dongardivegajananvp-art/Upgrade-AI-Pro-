@@ -957,7 +957,7 @@ async function evaluateSelectedSetup() {
   researchNote.className='empty-inline';
   researchNote.textContent='Checking verified FYERS daily, 15-minute and completed 5-minute candles for the selected stock.';
   researchResults.append(researchNote);
-  for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
+  for(const id of ['setup-entry','setup-sl','setup-target','setup-rr','setup-size']) document.getElementById(id).textContent='—';
   chartSetupLevels = null;
   renderChartViewport();
   try {
@@ -993,6 +993,8 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
       document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
+      const sizing=setup.positionSizing||{};
+      document.querySelector('#setup-size').textContent=sizing.status==='POSITION_SIZE_VALID'?(sizing.lots+' LOT · '+sizing.quantity+' QTY · EST ₹'+showNumber(sizing.estimatedPriceRisk)):'NO TRADE · '+(sizing.reason||sizing.status||'Sizing unavailable');
       state.textContent=setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · EARLY ENTRY · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
       chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
       renderChartViewport();

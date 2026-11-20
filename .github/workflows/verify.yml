@@ -16,6 +16,8 @@ jobs:
           node-version: 22
       - name: Install production dependencies
         run: npm install --no-audit --no-fund
+      - name: Audit production dependency tree
+        run: npm audit --omit=dev --audit-level=high
       - name: Check JavaScript syntax
         run: |
           node --check server.js

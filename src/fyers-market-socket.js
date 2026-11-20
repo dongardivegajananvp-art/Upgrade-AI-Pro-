@@ -8,8 +8,9 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
 // Three indices + twenty rotating equities + one selected option = at most 24.
 const MAX_UNDERLYING_SLOTS = 20;
-// Eleven fresh history reads per 60-second slice preserve the designed 20-minute
-// rolling pass. Nine symbols overlap the next socket slice for repeated live-tick windows.
+// Four new-symbol history reads per 60-second slice match observed production
+// throughput and avoid rotating past symbols before the scanner can evaluate them.
+// Sixteen symbols overlap the next socket slice for repeated live-tick windows.
 const SCAN_PER_SLICE = FNO_SCAN_PER_SLICE;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;

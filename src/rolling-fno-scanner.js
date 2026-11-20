@@ -1,6 +1,6 @@
 // Rolling market-wide F&O observation ranking for FYERS Standard's shared 100-symbol cap.
 // This is deliberately NOT a simultaneous live scan and never creates actionable signals.
-export const FNO_SCAN_PER_SLICE = 11;
+export const FNO_SCAN_PER_SLICE = 4;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);
 }

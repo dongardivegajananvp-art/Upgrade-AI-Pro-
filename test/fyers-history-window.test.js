@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getFiveMinuteHistoryRange, normalizeFiveMinuteCandles } from '../src/fyers-rest.js';
+import { getFiveMinuteHistoryRange, normalizeFiveMinuteCandles, filterFiveMinuteCandlesToNseSession } from '../src/fyers-rest.js';
 
 test('five-minute history requests a multi-session FYERS window', () => {
   const now = Date.parse('2026-11-20T04:10:00.000Z'); // 09:40 IST
@@ -31,4 +31,19 @@ test('normalizer retains verified completed candles across trading sessions', ()
   assert.equal(candles.length, 4);
   assert.deepEqual(candles.map(candle => candle.time), rows.map(row => row[0]));
   assert.ok(candles.every(candle => candle.completed && candle.source === 'FYERS_HISTORY'));
+});
+
+
+test('chart history requests only the current NSE session while research history remains multi-session', async () => {
+  const now = Date.parse('2026-11-20T04:10:00.000Z'); // 09:40 IST
+  const sessionStart = Date.parse('2026-11-20T03:45:00.000Z') / 1000;
+  const priorSession = Date.parse('2026-11-19T10:00:00.000Z') / 1000;
+  const rows = [
+    [priorSession, 100, 101, 99, 100.5, 1000],
+    [sessionStart, 101, 103, 100, 102, 1200]
+  ];
+  const candles = filterFiveMinuteCandlesToNseSession(normalizeFiveMinuteCandles(rows, now), now);
+  assert.equal(candles.length, 1);
+  assert.equal(candles[0].time, sessionStart);
+  assert.deepEqual(getFiveMinuteHistoryRange(now), { from: '2026-11-10', to: '2026-11-20' });
 });

@@ -71,6 +71,7 @@ export function calculatePositionSize({
   return {
     status: 'POSITION_SIZE_VALID', lots, lotSize: lot, quantity,
     riskBudget: budget, estimatedPriceRisk,
+    riskBasis: 'ENTRY_TO_STOP_PRICE_DIFFERENCE_EXCLUDES_FEES_SLIPPAGE_AND_GAP_RISK',
     rewardRisk: Number(rewardRisk.toFixed(2)),
     cappedBy: affordableLots > Number(maxLots) ? 'MAX_LOTS' : 'RISK_BUDGET',
     actionable: false

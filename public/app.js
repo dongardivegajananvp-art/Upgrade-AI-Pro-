@@ -22,6 +22,7 @@ let setupEvaluationDone = false;
 let setupLastBucket = null;
 let setupOptionTrigger = null;
 let setupRetryAfter = 0;
+const ACCOUNT_REFRESH_INTERVAL_MS = 120_000;
 let lastAccountRefresh = 0;
 let lastUniverseScanRefresh = 0;
 let universeScanRunning = false;
@@ -115,7 +116,7 @@ async function refresh() {
     const r = await fetch('/api/status',{cache:'no-store'});
     if (!r.ok) throw new Error('status unavailable');
     const s = await r.json();
-    if (s.auth?.tokenStored && Date.now() - lastAccountRefresh >= 30000) refreshAccount();
+    if (s.auth?.tokenStored && Date.now() - lastAccountRefresh >= ACCOUNT_REFRESH_INTERVAL_MS) refreshAccount();
     else if (!s.auth?.tokenStored) {
       document.querySelector('#positions-data').textContent = 'Connect FYERS to read current-day positions and P&L.';
       document.querySelector('#orders-data').textContent = 'Connect FYERS to read today’s order status.';

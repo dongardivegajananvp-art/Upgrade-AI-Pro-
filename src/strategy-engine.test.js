@@ -147,14 +147,14 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
     time:start+(47+i)*300,open:103+i,high:104+i,low:102+i,close:103.5+i,volume:500+i,completed:true
   }));
   const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
-  const optionTick={symbol:contract.symbol,price:106.95,exchangeTime:now/1000,receivedAt:now};
+  const optionTick={symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({
     underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
     optionCandles,optionTick,contract,dailyCandles:[],fifteenMinuteCandles:[],
     isTopGainer:false,researchEnabled:false,now
   });
   assert.equal(result.status,'WAITING_FOR_OPTION_BREAKOUT');
-  assert.equal(result.entryTriggerPrice,107.05);
+  assert.equal(result.entryTriggerPrice,106.05);
   assert.equal(result.optionTickSize,.05);
   assert.equal(result.contract,contract.symbol);
   assert.equal(result.optionSide,'CE');

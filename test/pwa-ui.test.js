@@ -33,7 +33,7 @@ test('PWA supports standalone desktop/mobile layout and responsive breakpoints',
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v8/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v9/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -41,4 +41,15 @@ test('top five gainers use distinct rank-based card colors', () => {
   for (const rank of ['1', '2', '3', '4', '5']) {
     assert.ok(css.includes('.mover-card[data-rank="' + rank + '"]'));
   }
+});
+
+test('chart supports direct TradingView-style zoom and pan without legacy zoom buttons', () => {
+  for (const legacyId of ['chart-zoom-in','chart-zoom-out','chart-reset']) assert.ok(!html.includes(legacyId));
+  assert.match(app, /addEventListener\('wheel'/);
+  assert.match(app, /addEventListener\('pointerdown'/);
+  assert.match(app, /addEventListener\('pointermove'/);
+  assert.match(app, /addEventListener\('dblclick'/);
+  assert.match(app, /chartPan/);
+  assert.match(css, /touch-action:none/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v9/);
 });

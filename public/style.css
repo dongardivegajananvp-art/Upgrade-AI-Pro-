@@ -155,3 +155,5 @@ main{width:min(100%,1800px)}
 .strategy-ledger-row small{font-size:10px;line-height:1.4;color:#9bb0ca}
 button.research-card{width:100%;text-align:left;color:inherit;font:inherit;cursor:pointer}
 button.research-card:focus-visible{outline:2px solid #63b3ff;outline-offset:2px}
+
+.chart-area{overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}.chart-area svg{touch-action:none;max-width:100%;cursor:crosshair}.chart-gesture-hint{font-size:9px;color:#8198b5;text-align:right;letter-spacing:.04em}@media(max-width:700px){.chart-gesture-hint{max-width:58%;font-size:8px;line-height:1.4}}

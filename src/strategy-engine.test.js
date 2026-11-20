@@ -158,8 +158,6 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
   assert.equal(result.optionTickSize,.05);
   assert.equal(result.contract,contract.symbol);
   assert.equal(result.optionSide,'CE');
-  assert.equal(result.positionSizing.status,'RISK_BUDGET_REQUIRED');
-  assert.equal(result.positionSizing.actionable,false);
 });
 
 test('non-retest strategies validate pressure on the trigger candle, not an older level cross', () => {

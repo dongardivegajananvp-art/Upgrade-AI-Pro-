@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -101,9 +101,8 @@ function nextSlice(startIndex = rotationIndex) {
   return buildFnoRotationSlice(universe,startIndex,MAX_UNDERLYING_SLOTS,selectedUnderlyingSymbol);
 }
 function applyFnoRotation(advance = false) {
-  const scanBatchSize=getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE);
   const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
-    ? (rotationIndex+scanBatchSize>=universe.length?0:rotationIndex+scanBatchSize) : rotationIndex;
+    ? getNextFnoRotationIndex(universe.length,rotationIndex,SCAN_PER_SLICE) : rotationIndex;
   const next=nextSlice(nextIndex);
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {

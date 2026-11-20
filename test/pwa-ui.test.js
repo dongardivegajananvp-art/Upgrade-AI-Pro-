@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v12/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v12/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -164,7 +164,7 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v12/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -182,4 +182,17 @@ test('restored cached chart never suppresses a fresh verified history request fo
 test('scanner UI defaults to the real four-symbol slice, not the obsolete eleven-symbol fallback', () => {
   assert.ok(app.includes('data.scanPerSlice??4'));
   assert.ok(!app.includes('data.scanPerSlice||11'));
+});
+
+
+test('fresh FYERS ticks are never labelled LIVE outside NSE regular session', () => {
+  const closed = Date.parse('2026-11-20T10:18:00Z'); // 15:48 IST
+  const freshGainers = { status: 'ROTATING_LIVE_COVERAGE', topGainers: Array.from({length:5},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ',price:100,changePercent:1,fresh:true})) };
+  const view = resolveTopGainersView(freshGainers, null, closed);
+  assert.notEqual(view.mode, 'LIVE');
+  assert.equal(view.mode, 'MARKET_CLOSED_NO_SNAPSHOT');
+  assert.match(app, /if \(!isNseRegularSession\(Date\.now\(\)\)\) return 'MARKET CLOSED · FYERS LAST PRICES · NOT LIVE'/);
+  assert.match(app, /const nseSessionOpen = isNseRegularSession\(Date\.now\(\)\)/);
+  assert.match(app, /if \(nseSessionOpen && tick\?\.fresh\)/);
+  assert.match(app, /if \(!nseSessionOpen\) \{/);
 });

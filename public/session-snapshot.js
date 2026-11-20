@@ -43,7 +43,7 @@ export function normalizeChartSnapshot(value) {
   const symbol = String(value.symbol || '');
   if (!INDEX_SYMBOLS.has(symbol) && !/^NSE:[A-Z0-9&_-]+-EQ$/.test(symbol)) return null;
   if (!Array.isArray(value.candles)) return null;
-  const candles = value.candles.slice(-240).filter(candle =>
+  const candles = value.candles.slice(-800).filter(candle =>
     candle && Number.isFinite(Number(candle.time)) && Number(candle.time) > 0 &&
     ['open','high','low','close'].every(key => Number.isFinite(Number(candle[key])) && Number(candle[key]) > 0) &&
     Number(candle.high) >= Math.max(Number(candle.open), Number(candle.close), Number(candle.low)) &&

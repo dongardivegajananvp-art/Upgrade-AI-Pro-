@@ -516,7 +516,7 @@ function restorePersistedChart() {
     chartCandles = snapshot.candles;
     chartRestoredFromCache = true;
     const title = document.querySelector('#symbol');
-    if (title) title.textContent = selectedSymbol + ' · LAST SESSION VERIFIED FYERS HISTORY · NOT LIVE';
+    if (title) title.textContent = selectedSymbol + ' · LAST 10 SESSIONS VERIFIED FYERS HISTORY · NOT LIVE';
     const candleStatus = document.querySelector('#chart-candle-status');
     if (candleStatus) candleStatus.textContent = 'LAST SESSION · VERIFIED FYERS 5-MIN CANDLES · NOT LIVE';
     renderChartViewport();
@@ -537,7 +537,7 @@ function renderLiveCandleSummary(tick) {
   panel.append(heading, state);
   if (!chartLiveCandle || chartLiveCandle.time <= 0) return;
   const c = chartLiveCandle;
-  const time = new Date((Number(c.time) + 19800) * 1000).toISOString().slice(11,16);
+  const time = new Date((Number(c.time) + 19800) * 1000).toISOString().slice(0,16).replace('T',' ');
   const fields = [
     ['TIME', time + '–' + new Date((Number(c.time) + 19800 + 300) * 1000).toISOString().slice(11,16) + ' IST'],
     ['LIVE PRICE', fresh ? '₹' + showNumber(tick.price) : '—'],
@@ -629,12 +629,12 @@ function renderChartViewport() {
       guide.setAttribute('x1',x);guide.setAttribute('x2',x);guide.setAttribute('y1',top);guide.setAttribute('y2',top+plotH);
       guide.setAttribute('stroke','#55c8ff');guide.setAttribute('stroke-width','2');guide.setAttribute('stroke-dasharray','7 6');guide.setAttribute('opacity','.85');svg.append(guide);
     }
-    const wick=document.createElementNS(ns,'line');wick.setAttribute('x1',x);wick.setAttribute('x2',x);wick.setAttribute('y1',y(Number(c.high)));wick.setAttribute('y2',y(Number(c.low)));wick.setAttribute('stroke',isLive?'#7bd8ff':color);wick.setAttribute('stroke-width',isLive?'4':'2');
+    const wick=document.createElementNS(ns,'line');wick.setAttribute('x1',x);wick.setAttribute('x2',x);wick.setAttribute('y1',y(Number(c.high)));wick.setAttribute('y2',y(Number(c.low)));wick.setAttribute('stroke',isLive?'#7bd8ff':color);wick.setAttribute('stroke-width',isLive?'4':String(Math.max(1,xStep*.12)));
     const body=document.createElementNS(ns,'rect'),bodyTop=y(Math.max(Number(c.open),Number(c.close))),bodyBottom=y(Math.min(Number(c.open),Number(c.close)));
-    body.setAttribute('x',x-Math.max(isLive?6:2,xStep*(isLive?.39:.29)));body.setAttribute('y',bodyTop);body.setAttribute('width',Math.max(isLive?12:4,xStep*(isLive?.78:.58)));body.setAttribute('height',Math.max(3,bodyBottom-bodyTop));body.setAttribute('fill',color);
+    body.setAttribute('x',x-Math.max(isLive?6:.5,xStep*(isLive?.39:.29)));body.setAttribute('y',bodyTop);body.setAttribute('width',Math.max(isLive?12:1,xStep*(isLive?.78:.58)));body.setAttribute('height',Math.max(3,bodyBottom-bodyTop));body.setAttribute('fill',color);
     if(isLive){body.setAttribute('stroke','#d8f5ff');body.setAttribute('stroke-width','2');body.setAttribute('filter','drop-shadow(0 0 7px #43bdff)');}
     const title=document.createElementNS(ns,'title');
-    title.textContent=(isLive?'LIVE · ':'')+new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · Vol '+showNumber(c.volume,0);
+    title.textContent=(isLive?'LIVE · ':'')+new Date((Number(c.time)+19800)*1000).toISOString().slice(0,16).replace('T',' ')+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · Vol '+showNumber(c.volume,0);
     body.append(title);svg.append(wick,body);
     if(isLive){
       const tag=document.createElementNS(ns,'text');tag.setAttribute('x',x);tag.setAttribute('y',top+18);tag.setAttribute('text-anchor','middle');tag.setAttribute('font-size','15');tag.setAttribute('font-weight','900');tag.setAttribute('fill','#7bd8ff');tag.textContent='LIVE';svg.append(tag);
@@ -673,11 +673,36 @@ function renderChartViewport() {
       label.textContent = item.label + '  ₹' + showNumber(item.value); svg.append(label);
     });
   }
-  for(let i=0;i<=4;i++){
-    const index=Math.min(visible.length-1,Math.round((visible.length-1)*i/4)),c=visible[index];
-    const label=document.createElementNS(ns,'text');label.setAttribute('x',xAt(index));label.setAttribute('y',550);label.setAttribute('text-anchor',i===0?'start':i===4?'end':'middle');label.setAttribute('fill','#9bb0ca');label.setAttribute('font-size','14');
-    label.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST';svg.append(label);
-  }
+  // Day-wise partitions use the exchange's IST calendar date. Every candle's
+  // native SVG tooltip carries its exact YYYY-MM-DD HH:mm IST timestamp.
+  const dayGroups=[];
+  visible.forEach((c,index)=>{
+    const date=new Date((Number(c.time)+19800)*1000).toISOString().slice(0,10);
+    const last=dayGroups[dayGroups.length-1];
+    if(!last||last.date!==date)dayGroups.push({date,start:index,end:index});
+    else last.end=index;
+  });
+  dayGroups.forEach((day,index)=>{
+    const xStart=left+xStep*day.start,xEnd=left+xStep*(day.end+1);
+    if(index>0){
+      const divider=document.createElementNS(ns,'line');
+      divider.setAttribute('x1',xStart);divider.setAttribute('x2',xStart);
+      divider.setAttribute('y1',top);divider.setAttribute('y2',top+plotH+38);
+      divider.setAttribute('stroke','#7890ad');divider.setAttribute('stroke-width','1.5');
+      divider.setAttribute('stroke-dasharray','5 5');divider.setAttribute('opacity','.7');svg.append(divider);
+    }
+    const label=document.createElementNS(ns,'text');
+    label.setAttribute('x',(xStart+xEnd)/2);label.setAttribute('y',568);
+    label.setAttribute('text-anchor','middle');label.setAttribute('fill','#d3e0f2');
+    label.setAttribute('font-size','12');label.setAttribute('font-weight','800');
+    label.textContent=new Date(day.date+'T00:00:00Z').toLocaleDateString('en-IN',{day:'2-digit',month:'short',timeZone:'UTC'})+' · '+(day.end-day.start+1)+'×5m';
+    svg.append(label);
+  });
+  const timeAxis=document.createElementNS(ns,'text');
+  timeAxis.setAttribute('x',left);timeAxis.setAttribute('y',594);
+  timeAxis.setAttribute('fill','#8fa6c2');timeAxis.setAttribute('font-size','11');
+  timeAxis.textContent='IST · 09:15 OPEN → 15:25 LAST 5-MIN BAR · HOVER / TAP A CANDLE FOR EXACT DATE & TIME';
+  svg.append(timeAxis);
   const crossV=document.createElementNS(ns,'line');crossV.setAttribute('id','chart-crosshair-v');crossV.setAttribute('y1',top);crossV.setAttribute('y2',top+plotH);crossV.setAttribute('stroke','#c6d4e6');crossV.setAttribute('stroke-dasharray','4 5');crossV.setAttribute('opacity','0');
   const crossH=document.createElementNS(ns,'line');crossH.setAttribute('id','chart-crosshair-h');crossH.setAttribute('x1',left);crossH.setAttribute('x2',left+plotW);crossH.setAttribute('stroke','#c6d4e6');crossH.setAttribute('stroke-dasharray','4 5');crossH.setAttribute('opacity','0');
   svg.append(crossV,crossH);

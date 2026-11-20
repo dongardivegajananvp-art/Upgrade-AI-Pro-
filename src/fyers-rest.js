@@ -140,8 +140,21 @@ export async function getFiveMinuteHistory(symbol, now = Date.now()) {
   fiveMinuteCache.set(symbol, { savedAt: now, sessionDate: date, value });
   return value;
 }
-// Chart-only history is restricted to the current NSE session. Multi-session history
-// remains available through getFiveMinuteHistory for nine-strategy research.
+// Chart history is the latest ten verified NSE trading sessions. Request a
+// 20-calendar-day window so weekends and exchange holidays do not reduce the
+// number of displayed sessions; retain only real completed FYERS candles.
+export function filterLastNseTradingSessions(candles, sessionCount = 10) {
+  const valid = Array.isArray(candles) ? candles : [];
+  const sessionDates = [...new Set(valid.map(candle =>
+    new Date((Number(candle.time) + 19800) * 1000).toISOString().slice(0, 10)
+  ))].sort();
+  const keep = new Set(sessionDates.slice(-Math.max(1, Math.floor(Number(sessionCount) || 10))));
+  return valid.filter(candle => keep.has(
+    new Date((Number(candle.time) + 19800) * 1000).toISOString().slice(0, 10)
+  ));
+}
+// Retain the one-session filter as a compatibility utility for existing callers/tests;
+// the chart endpoint now uses filterLastNseTradingSessions for its ten-day view.
 export function filterFiveMinuteCandlesToNseSession(candles, now = Date.now()) {
   const sessionStart = Math.floor((now / 1000 + 19800) / 86400) * 86400 - 19800;
   return (Array.isArray(candles) ? candles : []).filter(candle => Number(candle?.time) >= sessionStart);
@@ -152,13 +165,15 @@ export async function getFiveMinuteSessionHistory(symbol, now = Date.now()) {
   const date = istDate(now);
   const cached = fiveMinuteSessionCache.get(symbol);
   if (cached && cached.sessionDate === date && now - cached.savedAt < 20_000) return cached.value;
+  const range = getFiveMinuteHistoryRange(now, 20);
   const body = await fyersGet(DATA_BASE, '/history', {
-    symbol, resolution: '5', date_format: '1', range_from: date, range_to: date
+    symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
   });
-  if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified current-session 5-minute candles');
-  const candles = filterFiveMinuteCandlesToNseSession(normalizeFiveMinuteCandles(body.candles, now), now);
-  if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the current NSE session');
-  const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, source: 'FYERS_CURRENT_SESSION_HISTORY', range: 'ONE_NSE_SESSION', actionable: true };
+  if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified ten-session 5-minute history');
+  const candles = filterLastNseTradingSessions(normalizeFiveMinuteCandles(body.candles, now), 10);
+  if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the last ten NSE sessions');
+  const sessions = [...new Set(candles.map(candle => new Date((candle.time + 19800) * 1000).toISOString().slice(0, 10)))];
+  const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, sessions, sessionCount: sessions.length, source: 'FYERS_VERIFIED_5M_HISTORY', range: 'LAST_10_NSE_TRADING_SESSIONS', actionable: true };
   fiveMinuteSessionCache.set(symbol, { savedAt: now, sessionDate: date, value });
   return value;
 }

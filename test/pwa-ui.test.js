@@ -27,14 +27,14 @@ test('verified option entry, stop and target are rendered as labelled chart arro
   assert.match(app, /These levels are option-premium prices, not underlying-share prices/);
 });
 
-test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and v12 chart cache', () => {
+test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and v14 chart cache', () => {
   assert.equal(manifest.display, 'standalone');
   assert.ok(manifest.display_override.includes('standalone'));
   assert.ok(html.includes('viewport-fit=cover'));
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -155,16 +155,16 @@ test('NSE regular session uses India time and excludes weekends and 15:30 close'
 });
 
 test('verified chart snapshot survives reload with bounded valid candles and rejects malformed data', () => {
-  const candles = Array.from({length:300},(_,i)=>({time:1760000000+i*300,open:100,high:105,low:95,close:102,volume:1000}));
+  const candles = Array.from({length:900},(_,i)=>({time:1760000000+i*300,open:100,high:105,low:95,close:102,volume:1000}));
   const snapshot = normalizeChartSnapshot({symbol:'NSE:ABC-EQ',savedAt:Date.now(),candles});
-  assert.equal(snapshot.candles.length,240);
+  assert.equal(snapshot.candles.length,800);
   assert.equal(snapshot.symbol,'NSE:ABC-EQ');
   assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[{time:1,open:100,high:90,low:95,close:99}]}),null);
   assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[]}),null);
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -195,4 +195,23 @@ test('fresh FYERS ticks are never labelled LIVE outside NSE regular session', ()
   assert.match(app, /const nseSessionOpen = isNseRegularSession\(Date\.now\(\)\)/);
   assert.match(app, /if \(nseSessionOpen && tick\?\.fresh\)/);
   assert.match(app, /if \(!nseSessionOpen\) \{/);
+});
+
+
+test('chart requests ten completed NSE trading sessions and renders day partitions with IST timestamps', async () => {
+  const rest = await readFile(new URL('../src/fyers-rest.js', import.meta.url), 'utf8');
+  assert.match(rest, /getFiveMinuteHistoryRange\(now, 20\)/);
+  assert.match(rest, /filterLastNseTradingSessions\(normalizeFiveMinuteCandles\(body\.candles, now\), 10\)/);
+  assert.match(rest, /LAST_10_NSE_TRADING_SESSIONS/);
+  assert.match(app, /dayGroups\.forEach/);
+  assert.match(app, /YYYY-MM-DD HH:mm IST timestamp/);
+  assert.match(app, /toISOString\(\)\.slice\(0,16\)\.replace\('T',' '\)/);
+  assert.match(html, /10 NSE TRADING DAYS/);
+  assert.match(html, /DAY-WISE PARTITIONS/);
+});
+
+test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
+  const snapshotSource = app.includes('normalizeChartSnapshot');
+  assert.ok(snapshotSource);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });

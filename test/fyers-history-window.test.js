@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getFiveMinuteHistoryRange, normalizeFiveMinuteCandles, filterFiveMinuteCandlesToNseSession } from '../src/fyers-rest.js';
+import { getFiveMinuteHistoryRange, normalizeFiveMinuteCandles, filterFiveMinuteCandlesToNseSession, filterLastNseTradingSessions } from '../src/fyers-rest.js';
 
 test('five-minute history requests a multi-session FYERS window', () => {
   const now = Date.parse('2026-11-20T04:10:00.000Z'); // 09:40 IST
@@ -34,7 +34,7 @@ test('normalizer retains verified completed candles across trading sessions', ()
 });
 
 
-test('chart history requests only the current NSE session while research history remains multi-session', async () => {
+test('legacy one-session filter remains available while the chart uses ten trading sessions', async () => {
   const now = Date.parse('2026-11-20T04:10:00.000Z'); // 09:40 IST
   const sessionStart = Date.parse('2026-11-20T03:45:00.000Z') / 1000;
   const priorSession = Date.parse('2026-11-19T10:00:00.000Z') / 1000;
@@ -46,4 +46,17 @@ test('chart history requests only the current NSE session while research history
   assert.equal(candles.length, 1);
   assert.equal(candles[0].time, sessionStart);
   assert.deepEqual(getFiveMinuteHistoryRange(now), { from: '2026-11-10', to: '2026-11-20' });
+});
+
+
+test('chart history retains the latest ten distinct NSE dates in IST order', () => {
+  const dates = ['2026-11-09','2026-11-10','2026-11-11','2026-11-12','2026-11-13','2026-11-16','2026-11-17','2026-11-18','2026-11-19','2026-11-20','2026-11-23'];
+  const candles = dates.map((date,i)=>({
+    time: Date.parse(date+'T03:45:00Z')/1000,
+    open:100+i,high:102+i,low:99+i,close:101+i,volume:1000
+  }));
+  const selected = filterLastNseTradingSessions(candles,10);
+  assert.equal(selected.length,10);
+  assert.equal(new Date((selected[0].time+19800)*1000).toISOString().slice(0,10),'2026-11-10');
+  assert.equal(new Date((selected.at(-1).time+19800)*1000).toISOString().slice(0,10),'2026-11-23');
 });

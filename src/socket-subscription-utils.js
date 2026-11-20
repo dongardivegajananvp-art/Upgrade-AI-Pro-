@@ -8,3 +8,11 @@ export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols =
     added: desired.filter(symbol => !currentSet.has(symbol))
   };
 }
+
+export function splitSubscriptionBatches(symbols = [], batchSize = 4) {
+  const size = Math.max(1, Math.floor(Number(batchSize) || 4));
+  const unique = [...new Set((Array.isArray(symbols) ? symbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
+  const batches = [];
+  for (let i = 0; i < unique.length; i += size) batches.push(unique.slice(i, i + size));
+  return batches;
+}

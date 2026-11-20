@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, css, html, manifest, serviceWorker] = await Promise.all([
+const [app, css, html, manifest, serviceWorker, server] = await Promise.all([
   readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
   readFile(new URL('../public/style.css', import.meta.url), 'utf8'),
   readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
   readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8').then(JSON.parse),
-  readFile(new URL('../public/sw.js', import.meta.url), 'utf8')
+  readFile(new URL('../public/sw.js', import.meta.url), 'utf8'),
+  readFile(new URL('../server.js', import.meta.url), 'utf8')
 ]);
 
 test('top five gainer cards expose direction and stale-state styling', () => {
@@ -59,4 +60,18 @@ test('early option breakout is rechecked on the live tick, not delayed until the
   assert.match(app, /entryTriggerPrice/);
   assert.match(app, /setupRetryAfter = Date\.now\(\) \+ 5000/);
   assert.match(app, /Number\(optionTick\.price\).*entryTriggerPrice/);
+});
+
+test('entry evaluation respects FYERS one-hour REST cooldown instead of retrying every poll', () => {
+  assert.match(server, /retryAt:rateLimited&&rest\.cooldownUntil\?rest\.cooldownUntil:null/);
+  assert.match(app, /if\(response\.status===429\)/);
+  assert.match(app, /Number\(setup\.retryAt\).*Date\.now\(\)/);
+  assert.match(app, /60\*60\*1000/);
+});
+
+test('entry evaluation retries transient stale ticks and network/server failures without weakening trade gates', () => {
+  assert.match(app, /underlying\|option\) tick \(\?:became stale\|is not fresh\)/);
+  assert.match(app, /Date\.now\(\) \+ 5000/);
+  assert.match(app, /Date\.now\(\)\+15000/);
+  assert.match(app, /response\.status>=500/);
 });

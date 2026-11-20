@@ -845,13 +845,27 @@ async function evaluateSelectedSetup() {
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
+    if(response.status===429) {
+      setupOptionTrigger=null;
+      setupRetryAfter=Number.isFinite(Number(setup.retryAt))&&Number(setup.retryAt)>Date.now()
+        ?Number(setup.retryAt):Date.now()+60*60*1000;
+      state.textContent='FYERS REST COOLDOWN · ENTRY CHECK PAUSED UNTIL SAFE RETRY';
+      state.dataset.state='blocked';
+      return;
+    }
+    if(response.status>=500) {
+      setupRetryAfter=Date.now()+15000;
+      state.textContent='SERVER TEMPORARILY UNAVAILABLE · ENTRY CHECK WILL RETRY';
+      state.dataset.state='blocked';
+      return;
+    }
     setupOptionTrigger = null; setupRetryAfter = 0;
     if (Array.isArray(setup.researchRanking) || Array.isArray(setup.strategyLedger)) renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
     if (setup.status === 'WAITING_FOR_OPTION_BREAKOUT' && Number.isFinite(Number(setup.entryTriggerPrice)) && Number.isFinite(Number(setup.optionTickSize)) && Number(setup.optionTickSize) > 0) {
       setupOptionTrigger = { entryTriggerPrice:Number(setup.entryTriggerPrice), tickSize:Number(setup.optionTickSize), bucket:setupLastBucket };
-    } else if (setup.status === 'DATA_UNAVAILABLE_NO_TRADE' && /tick (?:became stale|is not fresh)|Fresh FYERS .* tick is required/i.test(String(setup.reason||''))) {
+    } else if (setup.status === 'DATA_UNAVAILABLE_NO_TRADE' && /(?:underlying|option) tick (?:became stale|is not fresh)|Fresh FYERS .* tick is required/i.test(String(setup.reason||''))) {
       setupRetryAfter = Date.now() + 5000;
     }
     if(setup.status==='SETUP_CONFIRMED') {
@@ -866,7 +880,7 @@ async function evaluateSelectedSetup() {
       chartSetupLevels = null; renderChartViewport();
       state.textContent=setup.status==='WAITING_FOR_OPTION_BREAKOUT'&&Number.isFinite(Number(setup.entryTriggerPrice))?'WAITING FOR OPTION BREAKOUT · TRIGGER ₹'+showNumber(setup.entryTriggerPrice)+' · LIVE TICK WATCH':(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
     }
-  } catch(error) { setupEvaluationDone=true; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
+  } catch(error) { setupEvaluationDone=true; setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
 async function autoSelectDirectionalOption(optionSide) {

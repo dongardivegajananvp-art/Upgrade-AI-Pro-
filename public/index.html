@@ -33,7 +33,7 @@
     <div id="chart-area" class="chart-area">
       <div class="chart-empty"><strong>10-SESSION 5-MINUTE CHART</strong><span>Ten verified NSE trading sessions, separated day by day.</span><span>No synthetic candles or stale prices.</span></div>
     </div>
-    <div class="levels" id="setup-ledger"><span>ENTRY <b id="setup-entry">—</b></span><span>STOP LOSS <b id="setup-sl">—</b></span><span>TARGET <b id="setup-target">—</b></span><span>RR <b id="setup-rr">—</b></span><span>POSITION SIZE <b id="setup-size">—</b></span><span id="setup-state">NO SETUP VERIFIED</span></div>
+    <div class="levels" id="setup-ledger"><span>ENTRY <b id="setup-entry">—</b></span><span>STOP LOSS <b id="setup-sl">—</b></span><span>TARGET <b id="setup-target">—</b></span><span>RR <b id="setup-rr">—</b></span><span id="setup-state">NO SETUP VERIFIED</span></div>
   </section>
 
   <section class="panel research">
@@ -56,12 +56,7 @@
       <div class="option-field"><small>OPTION LTP</small><strong id="option-ltp">—</strong></div>
       <button disabled>ORDERS DISABLED</button>
     </div>
-    <div class="option-row cost-assumptions" aria-label="Optional risk cost assumptions">
-      <div class="option-field"><small>ROUND-TRIP COST ₹</small><input id="risk-roundtrip-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="per trade"></div>
-      <div class="option-field"><small>SLIPPAGE / UNIT ₹</small><input id="risk-slippage-unit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="estimate"></div>
-      <div class="option-field"><small>GAP STRESS / UNIT ₹</small><input id="risk-gap-unit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="estimate"></div>
-    </div>
-    <p class="safety-note">Initial verification mode · ₹1,000 per-trade price-risk budget · Fill all three optional estimates to include modeled costs/slippage/gap stress; leave all blank for price-risk-only sizing · No broker orders · Fresh underlying + option data required</p>
+    <p class="safety-note">Verified FYERS contract and official lot quantity · Entry/SL/Target shown only after strategy and live-data checks · Orders disabled during verification</p>
   </section>
 
   <section class="panel bottom">

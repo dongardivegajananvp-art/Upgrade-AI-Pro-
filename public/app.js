@@ -770,8 +770,8 @@ async function loadOptionChain(symbol, underlyingPrice, timestamp = '') {
     const query = new URLSearchParams({symbol, strikecount:'10'});
     if (timestamp) query.set('timestamp', timestamp);
     const response = await fetch('/api/option-chain?' + query.toString(), {cache:'no-store'});
-    const payload = await response.json();
-    if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable');
+    const payload = await readJsonResponse(response, 'OPTION CHAIN /api/option-chain');
+    if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable · HTTP ' + response.status);
     const data = payload.data || payload;
     optionChainRows = Array.isArray(data.optionsChain) ? data.optionsChain : [];
     const expiries = Array.isArray(data.expiryData) ? data.expiryData : [];

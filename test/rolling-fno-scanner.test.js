@@ -65,7 +65,7 @@ test('selected underlying is pinned without duplicates or changing the rotation 
   assert.equal(new Set(slice).size,20);
 });
 
-test('overlapping F&O slices scan only newly added tail symbols and cover the whole universe fairly', () => {
+test('overlapping F&O slices scan only the newly added head symbols and cover the whole universe fairly', () => {
   assert.equal(FNO_SCAN_PER_SLICE,4);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const batches=[];

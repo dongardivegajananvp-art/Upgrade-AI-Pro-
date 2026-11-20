@@ -16,3 +16,10 @@ export function splitSubscriptionBatches(symbols = [], batchSize = 4) {
   for (let i = 0; i < unique.length; i += size) batches.push(unique.slice(i, i + size));
   return batches;
 }
+
+export function buildDesiredSocketSubscriptions(indexSymbols = [], activeSymbols = [], selectedOptionSymbol = null) {
+  const indices = Array.isArray(indexSymbols) ? indexSymbols : [...(indexSymbols || [])];
+  const active = Array.isArray(activeSymbols) ? activeSymbols : [];
+  const option = typeof selectedOptionSymbol === 'string' && selectedOptionSymbol ? [selectedOptionSymbol] : [];
+  return [...new Set([...indices, ...active, ...option].filter(symbol => typeof symbol === 'string' && symbol))];
+}

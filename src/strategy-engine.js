@@ -50,8 +50,10 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     Number(c.time)>0 && Number(c.open)>0 && Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low)) &&
     Number(c.low)<=Math.min(Number(c.open),Number(c.close)) && Number(c.volume)>=0);
   if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
+  if (!contiguousWindow(candles,20)) return {status:'UNAVAILABLE',reason:'The latest 20 completed 5-minute research candles must be contiguous across verified NSE sessions'};
   if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
   if (!valid(fifteenMinuteCandles) || fifteenMinuteCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified 15-minute candles are required for multi-timeframe research'};
+  if (!contiguousFifteenMinuteWindow(fifteenMinuteCandles,50)) return {status:'UNAVAILABLE',reason:'The latest 50 completed 15-minute research candles must be contiguous across verified NSE sessions'};
   const latest15m=Number(fifteenMinuteCandles.at(-1).time);
   if(!Number.isFinite(latest15m)||Number(tick?.exchangeTime)-latest15m < -3||Number(tick?.exchangeTime)-latest15m > 1800)
     return {status:'UNAVAILABLE',reason:'Latest completed FYERS 15-minute candle is stale or out of sequence'};
@@ -156,6 +158,21 @@ function contiguousWindow(rows, count, sessionStartMinute = 555, sessionCloseMin
   const required = rows.slice(-count);
   return required.every((candle, index) => index === 0 ||
     isTradingCandleContiguous(number(required[index - 1].time), number(candle.time), sessionStartMinute, sessionCloseMinute));
+}
+function contiguousFifteenMinuteWindow(rows, count) {
+  if (!Array.isArray(rows) || rows.length < count) return false;
+  const required = rows.slice(-count);
+  const parts = value => {
+    const date = new Date((Number(value) + 19800) * 1000);
+    return { day: date.toISOString().slice(0,10), minute: date.getUTCHours() * 60 + date.getUTCMinutes() };
+  };
+  return required.every((candle,index) => {
+    if (index === 0) return true;
+    const previous = parts(required[index - 1].time);
+    const current = parts(candle.time);
+    return Number(candle.time) - Number(required[index - 1].time) === 900 ||
+      (previous.minute === 915 && current.minute === 555 && current.day > previous.day);
+  });
 }
 function currentSessionRows(rows) {
   if (!Array.isArray(rows) || !rows.length) return [];

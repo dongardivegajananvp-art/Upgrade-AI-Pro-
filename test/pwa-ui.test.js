@@ -16,7 +16,7 @@ test('top five gainer cards expose direction and stale-state styling', () => {
     assert.ok(css.includes('.mover-card[data-state="' + state + '"]'));
   }
   assert.match(app, /button\.dataset\.state = cardState/);
-  assert.match(app, /change\.dataset\.state = item\.fresh \? direction : 'stale'/);
+  assert.match(app, /change\.dataset\.state = view\.mode === 'LIVE' && item\.fresh \? direction : 'stale'/);
 });
 
 test('verified option entry, stop and target are rendered as labelled chart arrows', () => {

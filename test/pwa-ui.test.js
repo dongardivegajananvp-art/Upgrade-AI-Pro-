@@ -75,3 +75,11 @@ test('entry evaluation retries transient stale ticks and network/server failures
   assert.match(app, /Date\.now\(\)\+15000/);
   assert.match(app, /response\.status>=500/);
 });
+
+test('directional and manual option-selection responses cannot overwrite a newer symbol, side or strike', () => {
+  assert.match(app, /const requestedUnderlying=selectedSymbol,requestedSide=optionSide/);
+  assert.match(app, /selectedSymbol!==requestedUnderlying\|\|selectedOptionSide!==requestedSide/);
+  assert.match(app, /const requestedUnderlying=selectedSymbol,requestedSymbol=symbol/);
+  assert.match(app, /document\.querySelector\('#strike-select'\)\.value!==requestedSymbol/);
+  assert.match(app, /selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true/);
+});

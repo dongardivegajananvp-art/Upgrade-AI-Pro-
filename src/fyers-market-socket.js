@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE } from './rolling-fno-scanner.js';
+import { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
+export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -32,8 +34,6 @@ const ticks = new Map();
 let socketHasConnected = false;
 const socketSubscribedSymbols = new Set();
 
-export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
-import { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 function syncSocketSubscriptions(desiredSymbols) {
   const { removed, added } = getSocketSubscriptionDelta([...socketSubscribedSymbols], desiredSymbols);

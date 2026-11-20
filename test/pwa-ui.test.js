@@ -127,3 +127,38 @@ test('read-only positions and orderbook REST polling is throttled to two minutes
   assert.match(app, /fetch\('\/api\/orderbook'/);
   assert.match(app, /fetch\('\/api\/positions'/);
 });
+
+
+import { isNseRegularSession, normalizeTopGainersSnapshot, resolveTopGainersView, normalizeChartSnapshot } from '../public/session-snapshot.js';
+
+test('last verified Top 5 gainers remain visible after market close and are never labelled live', () => {
+  const savedAt = Date.parse('2026-11-20T09:59:00Z');
+  const snapshot = normalizeTopGainersSnapshot({ savedAt, items: Array.from({length:5},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ',price:100+i,changePercent:5-i,fresh:true})) });
+  const view = resolveTopGainersView({status:'WAITING_FOR_FNO_TICKS',topGainers:[]}, snapshot, Date.parse('2026-11-20T10:00:00Z'));
+  assert.equal(view.mode, 'LAST_SESSION');
+  assert.equal(view.items.length, 5);
+  assert.equal(view.items[0].fresh, false);
+  assert.equal(resolveTopGainersView({status:'SOCKET_ERROR'}, snapshot, Date.parse('2026-11-20T10:00:00Z')).mode, 'LAST_SESSION');
+});
+
+test('last observed Top 5 remains visible during session feed failure with an explicit stale state', () => {
+  const snapshot = { savedAt: Date.now(), items: [{symbol:'NSE:ABC-EQ',price:123,changePercent:2.5}] };
+  const view = resolveTopGainersView({status:'SOCKET_ERROR'}, snapshot, Date.parse('2026-11-20T06:00:00Z'));
+  assert.equal(view.mode, 'LAST_OBSERVED');
+  assert.equal(view.items[0].fresh, false);
+});
+
+test('NSE regular session uses India time and excludes weekends and 15:30 close', () => {
+  assert.equal(isNseRegularSession(Date.parse('2026-11-20T03:45:00Z')), true);
+  assert.equal(isNseRegularSession(Date.parse('2026-11-20T10:00:00Z')), false);
+  assert.equal(isNseRegularSession(Date.parse('2026-11-21T05:00:00Z')), false);
+});
+
+test('verified chart snapshot survives reload with bounded valid candles and rejects malformed data', () => {
+  const candles = Array.from({length:300},(_,i)=>({time:1760000000+i*300,open:100,high:105,low:95,close:102,volume:1000}));
+  const snapshot = normalizeChartSnapshot({symbol:'NSE:ABC-EQ',savedAt:Date.now(),candles});
+  assert.equal(snapshot.candles.length,240);
+  assert.equal(snapshot.symbol,'NSE:ABC-EQ');
+  assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[{time:1,open:100,high:90,low:95,close:99}]}),null);
+  assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[]}),null);
+});

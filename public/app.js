@@ -16,6 +16,7 @@ let chartZoom = 1;
 let chartPan = 0;
 let chartPriceZoom = 1;
 let chartGestureActive = false;
+let chartLastTouchTap = 0;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
 let setupLastBucket = null;
@@ -609,7 +610,7 @@ function renderChartViewport() {
     }else zoomAt(chartZoom*factor,event.clientX);
   },{passive:false});
   const pointers=new Map();
-  let dragState=null,pinchState=null,lastTouchTap=0;
+  let dragState=null,pinchState=null;
   const finishGesture=()=>{
     if(!chartGestureActive)return;
     const svgRect=svg.getBoundingClientRect();
@@ -640,12 +641,12 @@ function renderChartViewport() {
   };
   svg.addEventListener('pointerdown',event=>{
     if(event.pointerType==='mouse'&&event.button!==0)return;
-    if(event.pointerType==='touch'){
+    if(event.pointerType==='touch'&&pointers.size===0){
       const now=Date.now();
-      if(now-lastTouchTap<320){
-        resetChartViewport();chartGestureActive=false;renderChartViewport();return;
+      if(now-chartLastTouchTap<320){
+        chartLastTouchTap=0;resetChartViewport();chartGestureActive=false;renderChartViewport();return;
       }
-      lastTouchTap=now;
+      chartLastTouchTap=now;
     }
     const rect=svg.getBoundingClientRect();
     const px=(event.clientX-rect.left)/rect.width*1200;

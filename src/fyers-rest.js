@@ -87,14 +87,26 @@ export function buildFyersUrl(base, path, params = {}) {
 }
 function istDate(now = Date.now()) { return new Date(now + 19800000).toISOString().slice(0, 10); }
 
+// A 10-calendar-day verified FYERS window supplies enough contiguous completed
+// 5-minute candles for EMA50/pattern research from the opening part of the session.
+// Session gaps are validated by the strategy engine; no synthetic candles are added.
+export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
+  const days = Math.max(2, Math.floor(Number(lookbackDays) || 10));
+  return {
+    from: new Date(now - days * 86400000 + 19800000).toISOString().slice(0, 10),
+    to: istDate(now)
+  };
+}
+
 const fiveMinuteCache = new Map();
 export async function getFiveMinuteHistory(symbol, now = Date.now()) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   const date = istDate(now);
   const cached = fiveMinuteCache.get(symbol);
   if (cached && cached.sessionDate === date && now - cached.savedAt < 20_000) return cached.value;
+  const range = getFiveMinuteHistoryRange(now);
   const body = await fyersGet(DATA_BASE, '/history', {
-    symbol, resolution: '5', date_format: '1', range_from: date, range_to: date
+    symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
   });
   if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified historical candles');
   const candles = normalizeFiveMinuteCandles(body.candles, now);

@@ -132,14 +132,28 @@ async function refresh() {
       renderChartViewport();
     }
     const optionLtp = document.querySelector('#option-ltp');
+    const optionStatus = document.querySelector('#option-status');
     if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) {
       optionLtp.textContent = '₹' + showNumber(optionTick.price);
+      if (optionStatus) {
+        const exchangeClock = new Date(Number(optionTick.exchangeTime) * 1000).toLocaleTimeString('en-IN', {
+          timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+        });
+        const baseStatus = optionStatus.textContent.replace(/ · LIVE TICK (?:PENDING|STALE|FRESH(?: @ [^·]+)?)/g, '');
+        optionStatus.textContent = baseStatus + ' · LIVE TICK FRESH @ ' + exchangeClock + ' IST';
+      }
       const selectedTick = md.selectedUnderlying;
       const bucket = selectedTick?.exchangeTime ? Math.floor(Number(selectedTick.exchangeTime)/300)*300 : null;
       if (bucket && setupLastBucket !== null && bucket !== setupLastBucket) setupEvaluationDone = false;
       if (!setupEvaluationDone && !setupEvaluationRunning && selectedTick?.fresh && selectedTick.symbol === selectedSymbol) evaluateSelectedSetup();
     }
-    else if (selectedContractSymbol) optionLtp.textContent = optionTick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR LIVE OPTION TICK';
+    else if (selectedContractSymbol) {
+      optionLtp.textContent = optionTick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR LIVE OPTION TICK';
+      if (optionStatus) {
+        const baseStatus = optionStatus.textContent.replace(/ · LIVE TICK (?:PENDING|STALE|FRESH(?: @ [^·]+)?)/g, '');
+        optionStatus.textContent = baseStatus + (optionTick ? ' · LIVE TICK STALE' : ' · LIVE TICK PENDING');
+      }
+    }
     const indices = md.indices || {};
     let freshCount = 0;
     for (const [symbol, priceId, changeId] of labels) {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
-import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
+import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
@@ -38,6 +38,9 @@ function parseCookies(header='') {
 }
 const consumedOAuthStates = new Set();
 let fnoUniverseLoadPromise = null;
+let fnoUniverseLoadedDate = null;
+let fnoUniverseRetryDate = null;
+let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
@@ -74,6 +77,9 @@ function startFnoStrategyScanner() {
       try {
         await getDailyHistory(warmupSymbol);
         await getFifteenMinuteHistory(warmupSymbol);
+        if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
+          throw new Error('Research warmup queue completion state was not registered');
+        }
         fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
         fnoStrategyScanStats.warmupLastCompletedSymbol=warmupSymbol;
         fnoStrategyScanStats.warmupLastFailure=null;
@@ -136,18 +142,57 @@ function startFnoStrategyScanner() {
   fnoStrategyScanTimer.unref?.();
 }
 
+function isFnoMasterCurrent() {
+  return fnoUniverseLoadedDate === getNseSessionDate();
+}
+function getSessionMarketData() {
+  const market = getMarketData();
+  if (!isFnoMasterCurrent()) {
+    market.fno = {
+      ...market.fno,
+      status:'SYMBOL_MASTER_NOT_LOADED',
+      topGainers:[],
+      coverageComplete:false,
+      lastError:'Current IST session official FYERS NSE F&O master is pending or unavailable'
+    };
+  }
+  return market;
+}
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
-  if (!fnoUniverseLoadPromise) {
+  const sessionDate = getNseSessionDate();
+  if (fnoUniverseRetryDate !== sessionDate) {
+    fnoUniverseRetryDate = sessionDate;
+    fnoUniverseLoadRetryAt = 0;
+  }
+  // Refresh official NSE F&O and option-contract masters once per IST trading day.
+  // Fail closed: remove the prior session's universe and selections while today's
+  // official master is unavailable; retry master download with bounded backoff.
+  if (fnoUniverseLoadedDate !== sessionDate && !fnoUniverseLoadPromise && Date.now() >= fnoUniverseLoadRetryAt) {
+    const requestedDate = sessionDate;
+    console.info('[FYERS_SCANNER] current-session official F&O master refresh pending; F&O ranking and selection gates remain closed');
     fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
       const coverage = setFnoUniverse(universe);
+      const selectedUnderlying = getMarketData().selectedUnderlying?.symbol;
+      if (selectedUnderlying && !universe.some(item => item.symbol === selectedUnderlying)) {
+        setSelectedUnderlyingSymbol(null);
+      }
+      const selectedOption = getMarketData().selectedOptionSymbol;
+      if (selectedOption) {
+        try { getVerifiedOptionContract(selectedOption); }
+        catch { setSelectedOptionSymbol(null); }
+      }
+      fnoUniverseLoadedDate = requestedDate;
+      fnoUniverseLoadRetryAt = 0;
       startFnoStrategyScanner();
-      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12);
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12, 'master date:', requestedDate);
       return true;
     }).catch(error => {
-      fnoUniverseLoadPromise = null;
-      console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
+      fnoUniverseLoadRetryAt = Date.now() + 30_000;
+      console.error('[FYERS_SCANNER] official symbol-master load failed; retry in 30s:', String(error?.message || error).slice(0,180));
       return false;
+    }).finally(() => {
+      fnoUniverseLoadPromise = null;
     });
   }
   return market;
@@ -160,7 +205,7 @@ const server = http.createServer(async (req,res) => {
   })) {
     ensureFyersMarketStarted();
   }
-  if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getMarketData());
+  if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteHistory(url.searchParams.get('symbol')));
@@ -171,6 +216,7 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
       if (url.pathname === '/api/research/universe') {
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:11,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();
@@ -184,6 +230,7 @@ const server = http.createServer(async (req,res) => {
           note:'Only cached FYERS histories and exchange-timestamped ticks are evaluated. Missing/stale inputs are BLOCKED; this endpoint does not fetch synthetic data or place orders.'});
       }
       if (url.pathname === '/api/research') {
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Current IST session official FYERS NSE F&O master is not verified'});
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
         const market = getMarketData();
@@ -220,7 +267,10 @@ const server = http.createServer(async (req,res) => {
         const symbols = (url.searchParams.get('symbols') || '').split(',').filter(Boolean);
         return send(res,200,await getFyersQuotes(symbols));
       }
-      if (url.pathname === '/api/option-chain') return send(res,200,await getFyersOptionChain(url.searchParams.get('symbol'),url.searchParams.get('strikecount') || 10,url.searchParams.get('timestamp') || ''));
+      if (url.pathname === '/api/option-chain') {
+        if (!isFnoMasterCurrent()) return send(res,503,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
+        return send(res,200,await getFyersOptionChain(url.searchParams.get('symbol'),url.searchParams.get('strikecount') || 10,url.searchParams.get('timestamp') || ''));
+      }
       if (url.pathname === '/api/positions') return send(res,200,await getFyersPositions());
       if (url.pathname === '/api/orderbook') return send(res,200,await getFyersOrderbook());
     } catch (error) {
@@ -230,9 +280,10 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'GET' && url.pathname === '/health') return send(res,200,{ok:true,app:'Upgrade AI Pro',mode:'NSE_ONLY',marketData:'NOT_CONNECTED',orders:'DISABLED'});
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    const market = getMarketData();
+    const market = getSessionMarketData();
     return send(res,200,{
     app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(market.selectedUnderlying), auth:getAuthStatus(), marketData:market, rest:getRestDiagnostics(),
+    fnoMaster:{status:isFnoMasterCurrent()?'CURRENT':'REFRESH_PENDING',sessionDate:getNseSessionDate(),loadedDate:fnoUniverseLoadedDate},
     configuration:{
       appIdConfigured:Boolean(process.env.FYERS_APP_ID?.trim()),
       appIdHasNewFormat: Boolean(process.env.FYERS_APP_ID?.trim().endsWith('-200')),
@@ -298,6 +349,7 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'POST' && url.pathname === '/api/select-underlying') {
     try {
+      if (!isFnoMasterCurrent()) return send(res,503,{status:'UNDERLYING_NOT_VERIFIED',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
       const result = setSelectedUnderlyingSymbol(body.symbol || null);
       if (body.symbol && result.status !== 'UNDERLYING_PINNED_TO_SOCKET_SLICE' && result.status !== 'UNCHANGED') return send(res,400,{status:'UNDERLYING_NOT_VERIFIED',reason:'Underlying is not in the official active NSE F&O universe'});
@@ -308,6 +360,7 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'POST' && url.pathname === '/api/evaluate-setup') {
     try {
+      if (!isFnoMasterCurrent()) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
       const market = getMarketData();
       const underlying = market.selectedUnderlying;
@@ -334,6 +387,7 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'POST' && url.pathname === '/api/auto-select-option') {
     try {
+      if (!isFnoMasterCurrent()) return send(res,503,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
       if (!validateNseSymbol(body.underlying) || !['LONG','SHORT'].includes(body.side)) {
         return send(res,400,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Verified NSE underlying and confirmed LONG/SHORT direction are required'});
@@ -377,6 +431,7 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'POST' && url.pathname === '/api/select-option') {
     try {
+      if (!isFnoMasterCurrent()) return send(res,503,{status:'CONTRACT_NOT_VERIFIED',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
       if (body.symbol === null) {
         setSelectedOptionSymbol(null);

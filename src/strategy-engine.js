@@ -25,9 +25,13 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandl
     Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&
     now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&
     now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
+  const validDaily=Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50;
+  const validFifteen=Array.isArray(fifteenMinuteCandles)&&fifteenMinuteCandles.filter(validOhlcv).length>=50;
+  const latest15m=Number(fifteenMinuteCandles?.at(-1)?.time);
+  const fifteenFresh=Number.isFinite(latest15m)&&now/1000-latest15m>=-3&&now/1000-latest15m<=1800;
   if(!fresh||!Array.isArray(candles)||candles.length<50||!contiguousWindow(candles,50)||
-     !Array.isArray(dailyCandles)||dailyCandles.length<50||
-     !Array.isArray(fifteenMinuteCandles)||fifteenMinuteCandles.length<50) return {status:'NO_WATCH',reason:'Fresh tick and contiguous 5m plus verified 50-candle daily/15m context are required'};
+     !validDaily||!validFifteen||!contiguousFifteenMinuteWindow(fifteenMinuteCandles,50)||!fifteenFresh)
+    return {status:'NO_WATCH',reason:'Fresh tick, contiguous 50-candle 5m/15m windows, and 50 verified daily candles are required'};
   const trend=rows=>{
     const closes=rows.map(row=>Number(row.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);
     if(!Number.isFinite(e20)||!Number.isFinite(e50))return 'NEUTRAL';
@@ -50,8 +54,10 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     Number(c.time)>0 && Number(c.open)>0 && Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low)) &&
     Number(c.low)<=Math.min(Number(c.open),Number(c.close)) && Number(c.volume)>=0);
   if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
+  if (!contiguousWindow(candles,20)) return {status:'UNAVAILABLE',reason:'The latest 20 completed 5-minute research candles must be contiguous across verified NSE sessions'};
   if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
   if (!valid(fifteenMinuteCandles) || fifteenMinuteCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified 15-minute candles are required for multi-timeframe research'};
+  if (!contiguousFifteenMinuteWindow(fifteenMinuteCandles,50)) return {status:'UNAVAILABLE',reason:'The latest 50 completed 15-minute research candles must be contiguous across verified NSE sessions'};
   const latest15m=Number(fifteenMinuteCandles.at(-1).time);
   if(!Number.isFinite(latest15m)||Number(tick?.exchangeTime)-latest15m < -3||Number(tick?.exchangeTime)-latest15m > 1800)
     return {status:'UNAVAILABLE',reason:'Latest completed FYERS 15-minute candle is stale or out of sequence'};
@@ -156,6 +162,21 @@ function contiguousWindow(rows, count, sessionStartMinute = 555, sessionCloseMin
   const required = rows.slice(-count);
   return required.every((candle, index) => index === 0 ||
     isTradingCandleContiguous(number(required[index - 1].time), number(candle.time), sessionStartMinute, sessionCloseMinute));
+}
+function contiguousFifteenMinuteWindow(rows, count) {
+  if (!Array.isArray(rows) || rows.length < count) return false;
+  const required = rows.slice(-count);
+  const parts = value => {
+    const date = new Date((Number(value) + 19800) * 1000);
+    return { day: date.toISOString().slice(0,10), minute: date.getUTCHours() * 60 + date.getUTCMinutes() };
+  };
+  return required.every((candle,index) => {
+    if (index === 0) return true;
+    const previous = parts(required[index - 1].time);
+    const current = parts(candle.time);
+    return Number(candle.time) - Number(required[index - 1].time) === 900 ||
+      (previous.minute === 915 && current.minute === 555 && current.day > previous.day);
+  });
 }
 function currentSessionRows(rows) {
   if (!Array.isArray(rows) || !rows.length) return [];

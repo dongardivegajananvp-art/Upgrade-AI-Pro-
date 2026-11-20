@@ -12,6 +12,9 @@ function rowsOf(master) {
 function dateKey(now) {
   return new Date(now + 19800000).toISOString().slice(0, 10);
 }
+export function getNseSessionDate(now = Date.now()) {
+  return dateKey(now);
+}
 function expiryEpoch(value) {
   const n = Number(value);
   if (Number.isFinite(n) && n > 0) return n > 1e12 ? n / 1000 : n;

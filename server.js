@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
-import { loadFnoEquityUniverse, getVerifiedOptionContract } from './src/fyers-symbol-master.js';
+import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { getFiveMinuteHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
@@ -38,6 +38,7 @@ function parseCookies(header='') {
 }
 const consumedOAuthStates = new Set();
 let fnoUniverseLoadPromise = null;
+let fnoUniverseLoadedDate = null;
 let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
@@ -141,16 +142,32 @@ function startFnoStrategyScanner() {
 
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
-  if (!fnoUniverseLoadPromise) {
+  const sessionDate = getNseSessionDate();
+  // Refresh official NSE F&O and option-contract masters once per IST trading day.
+  // This keeps newly listed/expired contracts and the rolling universe in sync
+  // without reconnecting FYERS or issuing additional REST market-data calls.
+  if (fnoUniverseLoadedDate !== sessionDate && !fnoUniverseLoadPromise) {
+    const requestedDate = sessionDate;
     fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
       const coverage = setFnoUniverse(universe);
+      const selectedUnderlying = getMarketData().selectedUnderlying?.symbol;
+      if (selectedUnderlying && !universe.some(item => item.symbol === selectedUnderlying)) {
+        setSelectedUnderlyingSymbol(null);
+      }
+      const selectedOption = getMarketData().selectedOptionSymbol;
+      if (selectedOption) {
+        try { getVerifiedOptionContract(selectedOption); }
+        catch { setSelectedOptionSymbol(null); }
+      }
+      fnoUniverseLoadedDate = requestedDate;
       startFnoStrategyScanner();
-      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12);
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12, 'master date:', requestedDate);
       return true;
     }).catch(error => {
-      fnoUniverseLoadPromise = null;
       console.error('[FYERS_SCANNER] official symbol-master load failed:', String(error?.message || error).slice(0,180));
       return false;
+    }).finally(() => {
+      fnoUniverseLoadPromise = null;
     });
   }
   return market;

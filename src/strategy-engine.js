@@ -302,7 +302,7 @@ export function detectFlagVolume(rows) {
   if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.5)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
   return null;
 }
-export function detectOpeningRange(rows, sessionStartMinute = 555, livePrice = null) {
+export function detectOpeningRange(rows, sessionStartMinute = 555) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
   if(!day.length)return null;
@@ -311,18 +311,12 @@ export function detectOpeningRange(rows, sessionStartMinute = 555, livePrice = n
     return t.getUTCHours()*60+t.getUTCMinutes();
   };
   // The first completed 5-minute candle defines the opening high/low.
-  // A fresh underlying exchange tick crossing that range is the early trigger;
-  // a completed close outside the range remains a valid confirmation fallback.
+  // A live tick alone is not a breakout candle: wait for the actual 5-minute
+  // candle to close outside the range so its direction and volume can be checked.
   const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
   const last=day.at(-1),prior=day.at(-2);
   if(first&&last){
     const firstHigh=number(first.high),firstLow=number(first.low);
-    const hasLivePrice=livePrice!==null&&livePrice!==undefined&&Number.isFinite(Number(livePrice));
-    const price=hasLivePrice?Number(livePrice):NaN;
-    if(hasLivePrice&&number(last.close)<=firstHigh&&price>firstHigh)
-      return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_LIVE_BREAKOUT'});
-    if(hasLivePrice&&number(last.close)>=firstLow&&price<firstLow)
-      return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_LIVE_BREAKDOWN'});
     if(prior&&number(last.time)>number(first.time)){
       if(number(prior.close)<=firstHigh&&number(last.close)>firstHigh)
         return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_BREAKOUT'});
@@ -461,7 +455,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
   consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','Flag volume did not contract below 75% of impulse volume or breakout volume did not reach 1.5x flag average');
-  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','Fresh live price or completed 5-minute close did not break and retest the first-candle/15-minute opening range');
+  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','No completed 5-minute candle broke and retested the first-candle/15-minute opening range');
   // Apply one identical pressure+volume gate to every strategy signal.
   const rejectedForConfirmation = [];
   const confirmedCandidates = candidates.filter(item => {

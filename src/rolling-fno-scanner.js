@@ -54,6 +54,14 @@ export function getFnoScanBatchSize(universeCount, startIndex = 0, scanPerSlice 
   return Math.min(limit, total - start);
 }
 
+export function getNextFnoRotationIndex(universeCount, startIndex = 0, scanPerSlice = FNO_SCAN_PER_SLICE) {
+  const total = Math.max(0, Math.floor(Number(universeCount) || 0));
+  if (!total) return 0;
+  const start = ((Math.floor(Number(startIndex) || 0) % total) + total) % total;
+  const batchSize = getFnoScanBatchSize(total, start, scanPerSlice);
+  return start + batchSize >= total ? 0 : start + batchSize;
+}
+
 export function getFnoSliceScanSymbols(activeSymbols, scanPerSlice = FNO_SCAN_PER_SLICE) {
   if (!Array.isArray(activeSymbols) || !activeSymbols.length) return [];
   const count = Math.max(1, Math.min(activeSymbols.length, Math.floor(Number(scanPerSlice) || FNO_SCAN_PER_SLICE)));

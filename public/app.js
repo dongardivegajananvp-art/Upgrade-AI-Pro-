@@ -961,7 +961,7 @@ async function evaluateSelectedSetup() {
   chartSetupLevels = null;
   renderChartViewport();
   try {
-    const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol,riskBudget:1000})});
+    const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol,riskBudget:1000,costAssumptions:{estimatedRoundTripCosts:document.querySelector('#risk-roundtrip-cost').value,slippagePerUnit:document.querySelector('#risk-slippage-unit').value,gapStressPerUnit:document.querySelector('#risk-gap-unit').value}})});
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;

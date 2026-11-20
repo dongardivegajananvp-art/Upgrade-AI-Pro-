@@ -210,6 +210,7 @@ export function startMarketSocket() {
         lastError = 'Subscription count exceeded the Standard plan 100-symbol limit';
         return;
       }
+      const isFirstConnection = !socketHasConnected;
       try {
         // FYERS auto-reconnect restores the existing subscriptions itself.
         // Reconcile only symbols changed while disconnected; do not resend the full list.

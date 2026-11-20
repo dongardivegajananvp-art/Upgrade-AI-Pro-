@@ -106,3 +106,33 @@ test('research targets adapt to aligned trend versus range regime without reduci
   assert.equal(range.targetR,2);
   assert.ok(range.targetR>=2);
 });
+
+import { calculatePositionSize } from '../src/safety.js';
+
+test('position sizing uses only explicit risk budget and whole verified lots', () => {
+  const sized = calculatePositionSize({
+    riskBudget: 5000, entry: 100, stopLoss: 90, target: 120,
+    lotSize: 25, contractVerified: true
+  });
+  assert.equal(sized.status, 'POSITION_SIZE_VALID');
+  assert.equal(sized.lots, 2);
+  assert.equal(sized.quantity, 50);
+  assert.equal(sized.estimatedMaxLoss, 500);
+  assert.equal(sized.actionable, false);
+});
+
+test('position sizing fails closed without verified contract or explicit affordable risk budget', () => {
+  const base = { riskBudget: 500, entry: 100, stopLoss: 90, target: 120, lotSize: 25 };
+  assert.equal(calculatePositionSize(base).status, 'NO_TRADE');
+  assert.match(calculatePositionSize(base).reason, /contract and lot size must be verified/);
+  const tooSmall = calculatePositionSize({ ...base, contractVerified: true });
+  assert.equal(tooSmall.status, 'NO_TRADE');
+  assert.match(tooSmall.reason, /below the risk of one official lot/);
+});
+
+test('position sizing rejects invalid risk/reward, fractional lots, and more than two lots', () => {
+  const base = { riskBudget: 5000, entry: 100, stopLoss: 90, target: 119, lotSize: 25, contractVerified: true };
+  assert.equal(calculatePositionSize(base).status, 'NO_TRADE');
+  assert.equal(calculatePositionSize({ ...base, target: 120, lotSize: 25.5 }).status, 'NO_TRADE');
+  assert.equal(calculatePositionSize({ ...base, target: 120, maxLots: 3 }).status, 'NO_TRADE');
+});

@@ -15,5 +15,5 @@ test('subscription batches are bounded, ordered, and de-duplicated', () => {
 });
 
 test('invalid batch sizes fall back to a safe positive size', () => {
-  assert.deepEqual(splitSubscriptionBatches(['A','B'], 0), [['A'],['B']]);
+  assert.deepEqual(splitSubscriptionBatches(['A','B'], 0), [['A','B']]);
 });

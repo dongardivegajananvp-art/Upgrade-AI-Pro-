@@ -47,6 +47,6 @@ export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount =
 export function getFnoSliceScanSymbols(activeSymbols, scanPerSlice = FNO_SCAN_PER_SLICE) {
   if (!Array.isArray(activeSymbols) || !activeSymbols.length) return [];
   const count = Math.max(1, Math.min(activeSymbols.length, Math.floor(Number(scanPerSlice) || FNO_SCAN_PER_SLICE)));
-  // The tail contains the newly-added symbols in the overlapping socket rotation.
-  return activeSymbols.slice(-count);
+  // Rotation advances by this count, so the head is the next unscanned batch.
+  return activeSymbols.slice(0,count);
 }

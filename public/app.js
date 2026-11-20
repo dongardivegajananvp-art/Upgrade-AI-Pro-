@@ -995,7 +995,7 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
       const sizing=setup.positionSizing||{};
       document.querySelector('#setup-size').textContent=sizing.status==='POSITION_SIZE_VALID'?(sizing.lots+' LOT · '+sizing.quantity+' QTY · EST ₹'+showNumber(sizing.estimatedPriceRisk)):'NO TRADE · '+(sizing.reason||sizing.status||'Sizing unavailable');
-      state.textContent=setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · EARLY ENTRY · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
+      state.textContent=(sizing.status==='POSITION_SIZE_VALID'?'SIGNAL VERIFIED · ':'SIGNAL VERIFIED · SIZE BLOCKED · ')+setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state=sizing.status==='POSITION_SIZE_VALID'?'confirmed':'blocked';
       chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
       renderChartViewport();
     } else {

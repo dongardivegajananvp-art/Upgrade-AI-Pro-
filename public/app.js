@@ -13,6 +13,9 @@ let chartCandles = [];
 let chartLiveCandle = null;
 let chartSetupLevels = null;
 let chartZoom = 1;
+let chartPan = 0;
+let chartPriceZoom = 1;
+let chartGestureActive = false;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
 let setupLastBucket = null;
@@ -129,7 +132,7 @@ async function refresh() {
     }
     if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh && underlyingTick.liveCandle) {
       chartLiveCandle = underlyingTick.liveCandle;
-      renderChartViewport();
+      if (!chartGestureActive) renderChartViewport();
     }
     const optionLtp = document.querySelector('#option-ltp');
     const optionStatus = document.querySelector('#option-status');
@@ -327,7 +330,7 @@ function renderMovers(fno) {
 }
 async function selectIndexSymbol(symbol) {
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
-  selectedSymbol = symbol; selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null;
+  selectedSymbol = symbol; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
   title.textContent=symbol+' · LOADING VERIFIED FYERS INDEX HISTORY';
@@ -362,6 +365,7 @@ async function selectIndexSymbol(symbol) {
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol || symbol === selectedSymbol) return;
   selectedSymbol = symbol;
+  resetChartViewport();
   chartSetupLevels = null;
   setupEvaluationDone = false;
   chartLiveCandle = null;
@@ -446,13 +450,19 @@ function renderLiveCandleSummary(tick) {
     panel.append(item);
   }
 }
+function resetChartViewport() {
+  chartZoom = 1; chartPan = 0; chartPriceZoom = 1;
+}
 function renderChartViewport() {
   const area = document.querySelector('#chart-area');
   const candles = chartLiveCandle && chartLiveCandle.time > 0 ? [...chartCandles, chartLiveCandle] : chartCandles;
   area.replaceChildren();
   if (!candles.length) return;
-  const visibleCount = Math.max(8, Math.ceil(candles.length / chartZoom));
-  const visible = candles.slice(-visibleCount);
+  const visibleCount = Math.max(8, Math.min(candles.length, Math.ceil(candles.length / chartZoom)));
+  const maxPan = Math.max(0, candles.length - visibleCount);
+  chartPan = Math.max(0, Math.min(maxPan, chartPan));
+  const startIndex = Math.max(0, candles.length - visibleCount - Math.round(chartPan));
+  const visible = candles.slice(startIndex, startIndex + visibleCount);
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 1200 620');
@@ -469,7 +479,7 @@ function renderChartViewport() {
   const left=76,right=92,top=chartSetupLevels?118:28,bottom=100,plotW=1200-left-right,plotH=620-top-bottom;
   const highs=visible.map(c=>Number(c.high)), lows=visible.map(c=>Number(c.low));
   const max=Math.max(...highs),min=Math.min(...lows),range=Math.max(max-min,0.000001);
-  const pad=range*.08, ceiling=max+pad, floor=min-pad, span=ceiling-floor;
+  const pad=range*.08, center=(max+min)/2, span=(range+pad*2)/chartPriceZoom, ceiling=center+span/2, floor=center-span/2;
   const y=p=>top+(ceiling-p)/span*plotH;
   const xStep=plotW/visible.length, xAt=i=>left+xStep*(i+.5);
   for(let i=0;i<=4;i++){
@@ -566,12 +576,108 @@ function renderChartViewport() {
   const info=document.createElementNS(ns,'text');info.setAttribute('id','chart-crosshair-info');info.setAttribute('x',left+8);info.setAttribute('y',18);info.setAttribute('fill','#dceaff');info.setAttribute('font-size','14');info.textContent='Move over chart for candle time and OHLCV';svg.append(info);
   svg.addEventListener('pointermove',event=>{
     const rect=svg.getBoundingClientRect(),px=(event.clientX-rect.left)/rect.width*1200,py=(event.clientY-rect.top)/rect.height*620;
-    if(px<left||px>left+plotW||py<top||py>top+plotH)return;
+    if(chartGestureActive||px<left||px>left+plotW||py<top||py>top+plotH)return;
     const index=Math.max(0,Math.min(visible.length-1,Math.floor((px-left)/xStep))),c=visible[index],price=ceiling-(py-top)/plotH*span;
     crossV.setAttribute('x1',px);crossV.setAttribute('x2',px);crossV.setAttribute('opacity','1');crossH.setAttribute('y1',py);crossH.setAttribute('y2',py);crossH.setAttribute('opacity','1');
     info.textContent=new Date((Number(c.time)+19800)*1000).toISOString().slice(11,16)+' IST · O '+showNumber(c.open)+' H '+showNumber(c.high)+' L '+showNumber(c.low)+' C '+showNumber(c.close)+' · V '+showNumber(c.volume,0)+' · CURSOR '+showNumber(price);
   });
   svg.addEventListener('pointerleave',()=>{crossV.setAttribute('opacity','0');crossH.setAttribute('opacity','0');info.textContent='Move over chart for candle time and OHLCV';});
+  // TradingView-style direct manipulation: wheel zoom, drag pan, pinch zoom,
+  // and price-axis drag scaling. The viewport state survives live-candle redraws.
+  const clamp=(value,minValue,maxValue)=>Math.max(minValue,Math.min(maxValue,value));
+  const zoomAt=(requestedZoom,clientX)=>{
+    const rect=svg.getBoundingClientRect();
+    const px=(clientX-rect.left)/rect.width*1200;
+    const fraction=clamp((px-left)/plotW,0,1);
+    const anchorIndex=startIndex+fraction*visible.length;
+    const nextZoom=clamp(requestedZoom,1,Math.max(1,candles.length/8));
+    const nextCount=Math.max(8,Math.min(candles.length,Math.ceil(candles.length/nextZoom)));
+    const nextStart=anchorIndex-fraction*nextCount;
+    chartZoom=nextZoom;
+    chartPan=clamp(candles.length-(nextStart+nextCount),0,candles.length-nextCount);
+    chartGestureActive=false;
+    renderChartViewport();
+  };
+  svg.addEventListener('wheel',event=>{
+    event.preventDefault();
+    const rect=svg.getBoundingClientRect();
+    const px=(event.clientX-rect.left)/rect.width*1200;
+    const factor=event.deltaY<0?1.15:1/1.15;
+    if(event.shiftKey||px>=left+plotW){
+      chartPriceZoom=clamp(chartPriceZoom*factor,.5,20);
+      renderChartViewport();
+    }else zoomAt(chartZoom*factor,event.clientX);
+  },{passive:false});
+  const pointers=new Map();
+  let dragState=null,pinchState=null,lastTouchTap=0;
+  const finishGesture=()=>{
+    if(!chartGestureActive)return;
+    const svgRect=svg.getBoundingClientRect();
+    if(pinchState&&pointers.size>=2){
+      const points=[...pointers.values()];
+      const distance=Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);
+      const factor=distance/Math.max(1,pinchState.distance);
+      const centerX=(points[0].x+points[1].x)/2;
+      const requested=pinchState.startZoom*factor;
+      svg.style.transform='';
+      pointers.clear();dragState=null;pinchState=null;
+      zoomAt(requested,centerX);
+      return;
+    }
+    if(dragState&&pointers.size===1){
+      const point=[...pointers.values()][0];
+      const dx=point.x-dragState.startX,dy=point.y-dragState.startY;
+      if(dragState.axis){
+        chartPriceZoom=clamp(dragState.startPriceZoom*Math.exp(-dy*.008),.5,20);
+      }else{
+        const candleShift=dx/Math.max(1,dragState.bounds.width)*1200/dragState.xStep;
+        chartPan=clamp(dragState.startPan+candleShift,0,candles.length-visible.length);
+      }
+    }
+    svg.style.transform='';
+    pointers.clear();dragState=null;pinchState=null;chartGestureActive=false;
+    renderChartViewport();
+  };
+  svg.addEventListener('pointerdown',event=>{
+    if(event.pointerType==='mouse'&&event.button!==0)return;
+    if(event.pointerType==='touch'){
+      const now=Date.now();
+      if(now-lastTouchTap<320){
+        resetChartViewport();chartGestureActive=false;renderChartViewport();return;
+      }
+      lastTouchTap=now;
+    }
+    const rect=svg.getBoundingClientRect();
+    const px=(event.clientX-rect.left)/rect.width*1200;
+    pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+    try{svg.setPointerCapture(event.pointerId);}catch{}
+    chartGestureActive=true;
+    if(pointers.size===1){
+      dragState={startX:event.clientX,startY:event.clientY,startPan:chartPan,startPriceZoom:chartPriceZoom,
+        axis:px>=left+plotW,bounds:rect,xStep};
+    }else if(pointers.size===2){
+      const points=[...pointers.values()];
+      pinchState={distance:Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y),startZoom:chartZoom};
+      dragState=null;
+    }
+  });
+  svg.addEventListener('pointermove',event=>{
+    if(!pointers.has(event.pointerId))return;
+    pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+    if(pointers.size>=2&&pinchState){
+      const points=[...pointers.values()];
+      const distance=Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);
+      const factor=clamp(distance/Math.max(1,pinchState.distance),.65,1.6);
+      svg.style.transform='scale('+factor+')';
+      svg.style.transformOrigin='center center';
+    }else if(dragState){
+      const dx=event.clientX-dragState.startX,dy=event.clientY-dragState.startY;
+      svg.style.transform=dragState.axis?'scaleY('+clamp(Math.exp(-dy*.008),.7,1.4)+')':'translateX('+dx+'px)';
+    }
+  });
+  svg.addEventListener('pointerup',finishGesture);
+  svg.addEventListener('pointercancel',finishGesture);
+  svg.addEventListener('dblclick',()=>{resetChartViewport();chartGestureActive=false;renderChartViewport();});
   // Draw the watermark after candles/zones so it remains visible on dark charts.
   // Pointer events stay disabled so chart crosshair and OHLCV inspection keep working.
   const watermark = document.createElementNS(ns, 'text');
@@ -595,9 +701,6 @@ function renderChartViewport() {
   const livePresent = Boolean(chartLiveCandle && visible.some(c=>c.time===chartLiveCandle.time));
   document.querySelector('#chart-candle-status').textContent=(visible.length-(livePresent?1:0))+' COMPLETED CANDLES · '+(livePresent?'LIVE 5-MIN CANDLE · TICK BUILT':'WAITING FOR LIVE UNDERLYING TICK');
 }
-document.querySelector('#chart-zoom-in').addEventListener('click',()=>{chartZoom=Math.min(4,chartZoom*1.35);renderChartViewport();});
-document.querySelector('#chart-zoom-out').addEventListener('click',()=>{chartZoom=Math.max(1,chartZoom/1.35);renderChartViewport();});
-document.querySelector('#chart-reset').addEventListener('click',()=>{chartZoom=1;renderChartViewport();});
 
 async function clearSelectedOption() {
   selectedContractSymbol = null;

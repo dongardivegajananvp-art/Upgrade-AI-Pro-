@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoSliceScanSymbols } from '../src/rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getFnoSliceScanSymbols } from '../src/rolling-fno-scanner.js';
 const now = Date.parse('2026-11-19T06:00:00Z');
 const sec = Date.parse('2026-11-19T05:59:55Z') / 1000;
 test('ranks rolling observations across all symbols and exposes partial coverage', () => {
@@ -65,16 +65,22 @@ test('selected underlying is pinned without duplicates or changing the rotation 
   assert.equal(new Set(slice).size,20);
 });
 
-test('overlapping F&O slices scan only the newly added head symbols and cover the whole universe fairly', () => {
+test('11-symbol F&O rotation covers all 218 symbols exactly once, including the final partial batch', () => {
   assert.equal(FNO_SCAN_PER_SLICE,11);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const batches=[];
-  for(let start=0;start<universe.length;start+=FNO_SCAN_PER_SLICE){
+  let start=0;
+  while(start<universe.length){
+    const batchSize=getFnoScanBatchSize(universe.length,start,FNO_SCAN_PER_SLICE);
     const active=buildFnoRotationSlice(universe,start,20);
-    batches.push(...getFnoSliceScanSymbols(active));
+    batches.push(...getFnoSliceScanSymbols(active,batchSize));
+    start+=batchSize;
   }
+  assert.equal(batches.length,218);
   assert.equal(new Set(batches).size,218);
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20)).length,11);
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20))[0],'NSE:STOCK0-EQ');
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,11,20))[0],'NSE:STOCK11-EQ');
+  assert.deepEqual([...batches].sort(),universe.map(item=>item.symbol).sort());
+  assert.equal(getFnoScanBatchSize(218,209,11),9);
+  assert.equal(getFnoScanBatchSize(218,0,11),11);
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20),11)[0],'NSE:STOCK0-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,11,20),11)[0],'NSE:STOCK11-EQ');
 });

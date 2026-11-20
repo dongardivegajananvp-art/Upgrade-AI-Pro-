@@ -47,6 +47,7 @@ let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
 let fnoScannerNextTask = 'SCAN';
 let fnoStrategyScanRotation = null;
+let fnoStrategyScanLoggedRotation = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
 const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0, warmupLastCompletedSymbol:null, warmupLastFailure:null, warmupLastRetryAt:null };
 function startFnoStrategyScanner() {
@@ -139,6 +140,23 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);
       fnoStrategyScanStats.lastScanAt=new Date().toISOString();
     } finally { fnoStrategyScanBusy=false; }
+    if (fnoStrategyScanCursor>=scanLimit && fnoStrategyScanLoggedRotation!==snapshot.rotationIndex) {
+      fnoStrategyScanLoggedRotation=snapshot.rotationIndex;
+      const memory=process.memoryUsage();
+      console.info('[FYERS_SCANNER] slice completed:',JSON.stringify({
+        rotationIndex:snapshot.rotationIndex,
+        sliceScannedCount:fnoStrategyScanStats.sliceScannedCount,
+        totalScannedCount:fnoStrategyScanStats.scannedCount,
+        lastSymbol:fnoStrategyScanStats.lastSymbol,
+        lastStatus:fnoStrategyScanStats.lastStatus,
+        warmupQueueDepth:fnoResearchWarmupQueue.size,
+        warmupCompletedCount:fnoStrategyScanStats.warmupCompletedCount,
+        warmupRetryCount:fnoStrategyScanStats.warmupRetryCount,
+        restCooldownActive:getRestDiagnostics().cooldownActive,
+        rssBytes:memory.rss,
+        heapUsedBytes:memory.heapUsed
+      }));
+    }
   },4500);
   fnoStrategyScanTimer.unref?.();
 }
@@ -283,7 +301,10 @@ const server = http.createServer(async (req,res) => {
     const market = getSessionMarketData();
     return send(res,200,buildHealthStatus({
       market, masterCurrent:isFnoMasterCurrent(), sessionDate:getNseSessionDate(),
-      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled()
+      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(),
+      scanner:fnoStrategyScanStats, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
+      rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
+      rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
     }));
   }
   if (req.method === 'GET' && url.pathname === '/api/status') {

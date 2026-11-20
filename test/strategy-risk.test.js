@@ -50,22 +50,44 @@ test('early breakout watch requires fresh tick and aligned daily plus 15m trends
   assert.equal(analyzeEarlyWatch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick:{...tick,receivedAt:now-20000},now}).status,'NO_WATCH');
 });
 
+function sessionRisingFifteen(day,count,start,step) {
+  const first=Date.parse(day+'T03:45:00Z')/1000;
+  return Array.from({length:count},(_,i)=>{
+    const open=start+i*step,close=open+step;
+    return {time:first+i*900,open,high:close+step,low:open-step,close,volume:1000+i};
+  });
+}
+function sessionFlatFifteen(day,count=25) {
+  const first=Date.parse(day+'T03:45:00Z')/1000;
+  return Array.from({length:count},(_,i)=>({time:first+i*900,open:100,high:100.1,low:99.9,close:100,volume:1000}));
+}
+
 test('research targets adapt to aligned trend versus range regime without reducing 2R floor', () => {
   const now=Date.parse('2026-11-19T08:00:00Z'), exchangeTime=now/1000;
   const tick={price:110,exchangeTime,receivedAt:now};
   const five=risingCandles(50,100,.1,300,exchangeTime-300);
   const daily=risingCandles(50,100,.5,86400,exchangeTime-86400);
-  const fifteen=risingCandles(50,100,.2,900,exchangeTime-900);
+  const fifteen=[
+    ...sessionRisingFifteen('2026-11-17',25,100,.2),
+    ...sessionRisingFifteen('2026-11-18',25,105,.2),
+    ...sessionRisingFifteen('2026-11-19',17,110,.2)
+  ];
   const setup={side:'LONG',strategy:'EMA20_EMA50_TREND',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
   const aligned=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick,setup,now});
   assert.equal(aligned.status,'COMPLETE',aligned.reason);
   assert.equal(aligned.targetR,2.5);
   assert.equal(aligned.marketRegime,'TRENDING_BULLISH');
   assert.equal(aligned.confidenceCalibration.status,'PENDING_REALIZED_OUTCOME_SAMPLE');
-  const flatBase=exchangeTime-49*900;
-  const flat=flatCandles(50,flatBase,900);
-  const range=analyzeSetupResearch({candles:flat,dailyCandles:flat,fifteenMinuteCandles:flat,tick,setup:{...setup,confirmedAt:flat.at(-1).time},now});
-  assert.equal(range.status,'COMPLETE');
+  const flatBase=exchangeTime-20*300;
+  const flatFive=flatCandles(20,flatBase,300);
+  const flatDaily=flatCandles(50,exchangeTime-49*86400,86400);
+  const flatFifteen=[
+    ...sessionFlatFifteen('2026-11-17'),
+    ...sessionFlatFifteen('2026-11-18'),
+    ...sessionFlatFifteen('2026-11-19',17)
+  ];
+  const range=analyzeSetupResearch({candles:flatFive,dailyCandles:flatDaily,fifteenMinuteCandles:flatFifteen,tick,setup:{...setup,confirmedAt:flatFive.at(-1).time},now});
+  assert.equal(range.status,'COMPLETE',range.reason);
   assert.equal(range.marketRegime,'RANGE/NEUTRAL');
   assert.equal(range.targetR,2);
   assert.ok(range.targetR>=2);

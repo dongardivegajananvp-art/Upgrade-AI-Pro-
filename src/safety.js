@@ -23,3 +23,56 @@ export function canAdvanceSetup({underlyingTick,optionTick,contractVerified,cand
  if(!contractVerified||!candlesComplete||!strategyConfirmed||riskPlan?.status!=='RISK_PLAN_VALID'||riskPlan.rr<MIN_REWARD_RISK)return{status:'NO_TRADE',reason:'Contract, completed candles, strategy, and 1:2 risk plan must all verify'};
  return{status:'SETUP_ELIGIBLE_ORDER_DISABLED',reason:'All data gates passed; broker order placement remains disabled'};
 }
+
+/**
+ * Conservative lot-based sizing for a verified long option premium plan.
+ * riskBudget is an explicit cash amount supplied by the operator; it is never
+ * inferred from account balance. lotSize must come from the verified contract
+ * master. This is advisory only and cannot enable broker order placement.
+ */
+export function calculatePositionSize({
+  riskBudget, entry, stopLoss, target, lotSize, contractVerified = false,
+  maxLots = 2
+} = {}) {
+  const values = [riskBudget, entry, stopLoss, target, lotSize].map(Number);
+  if (!values.every(Number.isFinite) || values.some(value => value <= 0)) {
+    return { status: 'NO_TRADE', reason: 'Explicit positive risk budget, prices, and official lot size are required' };
+  }
+  if (contractVerified !== true) {
+    return { status: 'NO_TRADE', reason: 'Official option contract and lot size must be verified before sizing' };
+  }
+  if (!Number.isInteger(Number(lotSize)) || !Number.isInteger(Number(maxLots)) ||
+      Number(maxLots) < 1 || Number(maxLots) > 2) {
+    return { status: 'NO_TRADE', reason: 'Official integer lot size and maxLots between one and two are required' };
+  }
+  const [budget, buy, stop, objective, lot] = values;
+  if (!(stop < buy && objective > buy)) {
+    return { status: 'NO_TRADE', reason: 'Long option Entry/SL/Target price structure is invalid' };
+  }
+  const perUnitRisk = buy - stop;
+  const rewardRisk = (objective - buy) / perUnitRisk;
+  if (!Number.isFinite(rewardRisk) || rewardRisk < MIN_REWARD_RISK - 1e-9) {
+    return { status: 'NO_TRADE', reason: 'Minimum reward/risk 1:2 is not met' };
+  }
+  const perLotRisk = perUnitRisk * lot;
+  if (!Number.isFinite(perLotRisk) || perLotRisk <= 0) {
+    return { status: 'NO_TRADE', reason: 'Per-lot risk calculation is invalid' };
+  }
+  const affordableLots = Math.floor((budget + 1e-9) / perLotRisk);
+  const lots = Math.min(affordableLots, Number(maxLots));
+  if (lots < 1) {
+    return { status: 'NO_TRADE', reason: 'Risk budget is below the risk of one official lot' };
+  }
+  const quantity = lots * lot;
+  const estimatedMaxLoss = Number((perUnitRisk * quantity).toFixed(8));
+  if (estimatedMaxLoss > budget + 1e-8) {
+    return { status: 'NO_TRADE', reason: 'Calculated quantity exceeds the explicit risk budget' };
+  }
+  return {
+    status: 'POSITION_SIZE_VALID', lots, lotSize: lot, quantity,
+    riskBudget: budget, estimatedMaxLoss,
+    rewardRisk: Number(rewardRisk.toFixed(2)),
+    cappedBy: affordableLots > Number(maxLots) ? 'MAX_LOTS' : 'RISK_BUDGET',
+    actionable: false
+  };
+}

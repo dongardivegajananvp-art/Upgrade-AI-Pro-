@@ -227,7 +227,7 @@ export function startMarketSocket() {
         optionSubscriptionError = null;
       }
       socket.autoreconnect(10);
-      console.info('[FYERS_DATA] connected; subscription reconciliation complete:', subscriptions.length, 'symbols; initial connection:', !socketHasConnected);
+      console.info('[FYERS_DATA] connected; subscription reconciliation complete:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
     });
     socket.on('message', message => accept(decode(message)));
     socket.on('error', error => {

@@ -210,7 +210,10 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
   const signalIndex = signalTime == null ? rows.length - 1 : rows.findIndex(c => number(c.time) === number(signalTime));
   if (signalIndex < 0) return { ok: false, reason: 'The strategy trigger candle is missing from verified history' };
   let breakoutIndex = signalIndex, levelCrossFound = false;
-  if (finite(breakoutLevel)) {
+  // Only retest strategies must trace the original level-crossing candle.
+  // Trend, momentum and pullback setups validate their own trigger candle;
+  // an older crossing of the same numeric level is not valid confirmation.
+  if (requireLevelCross && finite(breakoutLevel)) {
     for (let i = signalIndex; i >= 1; i--) {
       const crossed = side === 'LONG'
         ? number(rows[i].close) > number(breakoutLevel) && number(rows[i-1].close) <= number(breakoutLevel)

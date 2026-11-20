@@ -56,7 +56,12 @@
       <div class="option-field"><small>OPTION LTP</small><strong id="option-ltp">—</strong></div>
       <button disabled>ORDERS DISABLED</button>
     </div>
-    <p class="safety-note">Initial verification mode · ₹1,000 per-trade price-risk budget · Brokerage/slippage/gap estimates shown only when configured · No broker orders · Fresh underlying + option data required</p>
+    <div class="option-row cost-assumptions" aria-label="Optional risk cost assumptions">
+      <div class="option-field"><small>ROUND-TRIP COST ₹</small><input id="risk-roundtrip-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="per trade"></div>
+      <div class="option-field"><small>SLIPPAGE / UNIT ₹</small><input id="risk-slippage-unit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="estimate"></div>
+      <div class="option-field"><small>GAP STRESS / UNIT ₹</small><input id="risk-gap-unit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="estimate"></div>
+    </div>
+    <p class="safety-note">Initial verification mode · ₹1,000 per-trade price-risk budget · Fill all three optional estimates to include modeled costs/slippage/gap stress; leave all blank for price-risk-only sizing · No broker orders · Fresh underlying + option data required</p>
   </section>
 
   <section class="panel bottom">

@@ -64,13 +64,13 @@ export function calculatePositionSize({
     return { status: 'NO_TRADE', reason: 'Risk budget is below the risk of one official lot' };
   }
   const quantity = lots * lot;
-  const estimatedMaxLoss = Number((perUnitRisk * quantity).toFixed(8));
-  if (estimatedMaxLoss > budget + 1e-8) {
+  const estimatedPriceRisk = Number((perUnitRisk * quantity).toFixed(8));
+  if (estimatedPriceRisk > budget + 1e-8) {
     return { status: 'NO_TRADE', reason: 'Calculated quantity exceeds the explicit risk budget' };
   }
   return {
     status: 'POSITION_SIZE_VALID', lots, lotSize: lot, quantity,
-    riskBudget: budget, estimatedMaxLoss,
+    riskBudget: budget, estimatedPriceRisk,
     rewardRisk: Number(rewardRisk.toFixed(2)),
     cappedBy: affordableLots > Number(maxLots) ? 'MAX_LOTS' : 'RISK_BUDGET',
     actionable: false

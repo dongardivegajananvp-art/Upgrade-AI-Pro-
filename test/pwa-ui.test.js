@@ -127,3 +127,8 @@ test('read-only positions and orderbook REST polling is throttled to two minutes
   assert.match(app, /fetch\('\/api\/orderbook'/);
   assert.match(app, /fetch\('\/api\/positions'/);
 });
+
+test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
+  assert.match(serviceWorker, /'\/session-snapshot\.js'/);
+});

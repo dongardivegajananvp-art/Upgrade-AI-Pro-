@@ -884,15 +884,19 @@ async function evaluateSelectedSetup() {
   finally { setupEvaluationRunning=false; }
 }
 async function autoSelectDirectionalOption(optionSide) {
+  const requestedUnderlying=selectedSymbol,requestedSide=optionSide;
   const status=document.querySelector('#option-status');
   const expiry=document.querySelector('#expiry-select').value;
+  selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
   status.textContent='AUTO-SELECTING '+optionSide+' · VERIFYING FYERS MASTER';
   try {
     const response=await fetch('/api/auto-select-option',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({underlying:selectedSymbol,side:optionSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
+      body:JSON.stringify({underlying:requestedUnderlying,side:requestedSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
     const result=await response.json();
+    if(selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     if(!response.ok||result.status!=='AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason||'Automatic option selection failed');
     selectedContractSymbol=result.contract.symbol;
+    setupOptionTrigger=null; setupRetryAfter=0; chartSetupLevels=null; renderChartViewport();
     const strikeSelect=document.querySelector('#strike-select');
     if(optionChainRows.some(row=>row.symbol===selectedContractSymbol)) strikeSelect.value=selectedContractSymbol;
     document.querySelector('#option-quantity').textContent=showNumber(result.contract.lotSize,0);
@@ -901,20 +905,24 @@ async function autoSelectDirectionalOption(optionSide) {
     setupEvaluationDone=false;
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch(error) {
-    selectedContractSymbol=null;
+    if(selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
+    selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
     document.querySelector('#option-quantity').textContent='—';
     status.textContent='AUTO OPTION NOT VERIFIED · '+String(error.message||'No action');
   }
 }
 async function selectOptionContract(symbol) {
   if (!symbol) return;
+  const requestedUnderlying=selectedSymbol,requestedSymbol=symbol;
   const status = document.querySelector('#option-status');
+  selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
   status.textContent = 'VERIFYING EXACT CONTRACT IN FYERS MASTER';
   try {
     const response = await fetch('/api/select-option', {
-      method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({symbol})
+      method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({symbol:requestedSymbol})
     });
     const result = await response.json();
+    if(selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
     selectedContractSymbol = result.contract.symbol;
     setupOptionTrigger = null; setupRetryAfter = 0;
@@ -926,7 +934,8 @@ async function selectOptionContract(symbol) {
     status.textContent = result.contract.side + ' · STRIKE ' + showNumber(result.contract.strike) + ' · EXP ' + showExpiry(result.contract.expiry) + ' · LOT ' + showNumber(result.contract.lotSize,0) + ' · TICK ' + showNumber(result.contract.tickSize,4) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch (error) {
-    selectedContractSymbol = null;
+    if(selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
+    selectedContractSymbol = null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
     document.querySelector('#option-quantity').textContent = '—';
     status.textContent = 'CONTRACT NOT VERIFIED · ' + String(error.message || 'No action');
   }

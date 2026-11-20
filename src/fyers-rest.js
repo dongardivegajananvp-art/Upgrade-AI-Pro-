@@ -153,6 +153,12 @@ export function filterLastNseTradingSessions(candles, sessionCount = 10) {
     new Date((Number(candle.time) + 19800) * 1000).toISOString().slice(0, 10)
   ));
 }
+// Retain the one-session filter as a compatibility utility for existing callers/tests;
+// the chart endpoint now uses filterLastNseTradingSessions for its ten-day view.
+export function filterFiveMinuteCandlesToNseSession(candles, now = Date.now()) {
+  const sessionStart = Math.floor((now / 1000 + 19800) / 86400) * 86400 - 19800;
+  return (Array.isArray(candles) ? candles : []).filter(candle => Number(candle?.time) >= sessionStart);
+}
 const fiveMinuteSessionCache = new Map();
 export async function getFiveMinuteSessionHistory(symbol, now = Date.now()) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');

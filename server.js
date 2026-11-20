@@ -74,6 +74,9 @@ function startFnoStrategyScanner() {
       try {
         await getDailyHistory(warmupSymbol);
         await getFifteenMinuteHistory(warmupSymbol);
+        if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
+          throw new Error('Research warmup queue completion state was not registered');
+        }
         fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
         fnoStrategyScanStats.warmupLastCompletedSymbol=warmupSymbol;
         fnoStrategyScanStats.warmupLastFailure=null;

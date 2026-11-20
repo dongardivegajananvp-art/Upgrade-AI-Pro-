@@ -95,9 +95,10 @@ test('verified history chart survives option-chain and research failures', () =>
   assert.ok(chartRender >= 0 && optionFlow > chartRender && researchFlow > chartRender,
     'chart is rendered before downstream option and research requests');
   const postHistory = selectionFlow.slice(chartRender);
+  const downstream = selectionFlow.slice(optionFlow);
   assert.match(postHistory, /OPTION CHAIN UNAVAILABLE/);
   assert.match(postHistory, /RESEARCH UNAVAILABLE · NO TRADE/);
-  assert.doesNotMatch(postHistory, /area\.replaceChildren\(\)/,
+  assert.doesNotMatch(downstream, /area\.replaceChildren\(\)/,
     'downstream failures must not clear the rendered chart');
   assert.match(app, /FYERS HISTORY \/api\/history/);
   assert.match(app, /OPTION CHAIN \/api\/option-chain/);

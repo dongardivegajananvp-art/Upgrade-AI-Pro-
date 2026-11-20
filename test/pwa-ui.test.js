@@ -119,3 +119,11 @@ test('verified history chart survives option-chain and research failures', () =>
   assert.match(app, /OPTION CHAIN \/api\/option-chain/);
   assert.match(app, /returned non-JSON response · HTTP/);
 });
+
+
+test('read-only positions and orderbook REST polling is throttled to two minutes', () => {
+  assert.match(app, /const ACCOUNT_REFRESH_INTERVAL_MS = 120_000/);
+  assert.match(app, /Date\.now\(\) - lastAccountRefresh >= ACCOUNT_REFRESH_INTERVAL_MS/);
+  assert.match(app, /fetch\('\/api\/orderbook'/);
+  assert.match(app, /fetch\('\/api\/positions'/);
+});

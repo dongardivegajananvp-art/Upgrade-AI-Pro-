@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -155,16 +155,16 @@ test('NSE regular session uses India time and excludes weekends and 15:30 close'
 });
 
 test('verified chart snapshot survives reload with bounded valid candles and rejects malformed data', () => {
-  const candles = Array.from({length:300},(_,i)=>({time:1760000000+i*300,open:100,high:105,low:95,close:102,volume:1000}));
+  const candles = Array.from({length:900},(_,i)=>({time:1760000000+i*300,open:100,high:105,low:95,close:102,volume:1000}));
   const snapshot = normalizeChartSnapshot({symbol:'NSE:ABC-EQ',savedAt:Date.now(),candles});
-  assert.equal(snapshot.candles.length,240);
+  assert.equal(snapshot.candles.length,800);
   assert.equal(snapshot.symbol,'NSE:ABC-EQ');
   assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[{time:1,open:100,high:90,low:95,close:99}]}),null);
   assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[]}),null);
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 

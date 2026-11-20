@@ -374,6 +374,14 @@ async function selectIndexSymbol(symbol) {
     area.append(note);title.textContent=symbol+' · INDEX HISTORY UNAVAILABLE';
   }
 }
+async function readJsonResponse(response, endpoint) {
+  try {
+    return await response.json();
+  } catch {
+    const contentType = response.headers.get('content-type') || 'content-type missing';
+    throw new Error(endpoint + ' returned non-JSON response · HTTP ' + response.status + ' · ' + contentType);
+  }
+}
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol || symbol === selectedSymbol) return;
   selectedSymbol = symbol;
@@ -390,38 +398,69 @@ async function selectSymbol(symbol, livePrice = null) {
   loading.className = 'chart-empty';
   loading.textContent = 'Loading completed FYERS 5-minute candles. No synthetic candles are used.';
   area.append(loading);
+
+  let data;
   try {
     const selectionResponse = await fetch('/api/select-underlying',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol})});
-    const selection = await selectionResponse.json();
-    if (!selectionResponse.ok || !['UNDERLYING_PINNED_TO_SOCKET_SLICE','UNCHANGED'].includes(selection.status)) throw new Error(selection.reason || 'Underlying socket subscription was not confirmed');
+    const selection = await readJsonResponse(selectionResponse, 'FYERS UNDERLYING SELECTION');
+    if (!selectionResponse.ok || !['UNDERLYING_PINNED_TO_SOCKET_SLICE','UNCHANGED'].includes(selection.status)) {
+      throw new Error(selection.reason || 'Underlying socket subscription was not confirmed');
+    }
+    if (selectedSymbol !== symbol) return;
+
     const response = await fetch('/api/history?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) throw new Error(data.reason || 'Verified FYERS history is unavailable');
+    data = await readJsonResponse(response, 'FYERS HISTORY /api/history');
+    if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) {
+      throw new Error(data.reason || 'Verified FYERS history is unavailable');
+    }
+    if (selectedSymbol !== symbol) return;
+
     drawHistoryChart(data.candles);
     selectedUnderlyingPrice = Number(livePrice) > 0 ? Number(livePrice) : (Number(data.candles.at(-1)?.close) || null);
-    await clearSelectedOption();
-    // Load the selected option chain before background research warmup. The FYERS
-    // REST scheduler is shared and paced; background daily/15m history must not
-    // sit ahead of the user's option-chain request in that queue.
-    await loadOptionChain(symbol, selectedUnderlyingPrice);
-    // Warm daily/15m caches after the user-facing option-chain request, then
-    // calculate underlying research independently of option-premium availability.
-    const contextResponse = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
-    const contextPayload = await contextResponse.json();
-    let researchPayload = contextPayload;
-    if (contextResponse.ok) {
-      const researchResponse = await fetch('/api/research?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
-      researchPayload = await researchResponse.json();
-    }
-    if (selectedSymbol === symbol) renderResearchResults(researchPayload);
-    title.textContent = `${symbol} · FYERS HISTORY · ${data.count} COMPLETED 5-MIN CANDLES`;
+    title.textContent = `${symbol} · FYERS HISTORY · ${data.count ?? data.candles.length} COMPLETED 5-MIN CANDLES`;
   } catch (error) {
+    if (selectedSymbol !== symbol) return;
     area.replaceChildren();
     const note = document.createElement('div');
     note.className = 'chart-empty';
     note.textContent = String(error.message || 'History unavailable') + ' · NO TRADE';
     area.append(note);
     title.textContent = symbol + ' · HISTORY UNAVAILABLE';
+    return;
+  }
+
+  // Option selection is downstream of the chart. Its failure must never erase
+  // verified underlying history or change the chart's availability status.
+  try {
+    await clearSelectedOption();
+    if (selectedSymbol !== symbol) return;
+    // Keep the user-facing option-chain request ahead of daily/15m research warmup.
+    await loadOptionChain(symbol, selectedUnderlyingPrice);
+  } catch (error) {
+    if (selectedSymbol !== symbol) return;
+    document.querySelector('#option-status').textContent =
+      'OPTION CHAIN UNAVAILABLE · ' + String(error.message || 'No verified contracts');
+  }
+
+  // Research is an independent panel: malformed/HTML responses are diagnosed
+  // there, while the already-rendered history chart remains intact.
+  try {
+    const contextResponse = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+    const contextPayload = await readJsonResponse(contextResponse, 'RESEARCH CONTEXT /api/research-context');
+    if (!contextResponse.ok) throw new Error(contextPayload.reason || 'Research context request failed · HTTP ' + contextResponse.status);
+    const researchResponse = await fetch('/api/research?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+    const researchPayload = await readJsonResponse(researchResponse, 'RESEARCH /api/research');
+    if (!researchResponse.ok) throw new Error(researchPayload.reason || 'Research request failed · HTTP ' + researchResponse.status);
+    if (selectedSymbol === symbol) renderResearchResults(researchPayload);
+  } catch (error) {
+    if (selectedSymbol !== symbol) return;
+    document.querySelector('#research-status').textContent = 'RESEARCH UNAVAILABLE · NO TRADE';
+    const results = document.querySelector('#research-results');
+    results.replaceChildren();
+    const note = document.createElement('div');
+    note.className = 'empty-inline';
+    note.textContent = String(error.message || 'Research data unavailable') + '. Verified chart history is retained; no setup is inferred.';
+    results.append(note);
   }
 }
 function drawHistoryChart(candles) {
@@ -731,8 +770,8 @@ async function loadOptionChain(symbol, underlyingPrice, timestamp = '') {
     const query = new URLSearchParams({symbol, strikecount:'10'});
     if (timestamp) query.set('timestamp', timestamp);
     const response = await fetch('/api/option-chain?' + query.toString(), {cache:'no-store'});
-    const payload = await response.json();
-    if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable');
+    const payload = await readJsonResponse(response, 'OPTION CHAIN /api/option-chain');
+    if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable · HTTP ' + response.status);
     const data = payload.data || payload;
     optionChainRows = Array.isArray(data.optionsChain) ? data.optionsChain : [];
     const expiries = Array.isArray(data.expiryData) ? data.expiryData : [];

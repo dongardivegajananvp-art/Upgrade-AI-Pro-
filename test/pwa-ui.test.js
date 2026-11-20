@@ -83,3 +83,24 @@ test('directional and manual option-selection responses cannot overwrite a newer
   assert.match(app, /document\.querySelector\('#strike-select'\)\.value!==requestedSymbol/);
   assert.match(app, /selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true/);
 });
+
+test('verified history chart survives option-chain and research failures', () => {
+  const start = app.indexOf('async function selectSymbol(');
+  const end = app.indexOf('\nfunction drawHistoryChart', start);
+  assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
+  const selectionFlow = app.slice(start, end);
+  const chartRender = selectionFlow.indexOf('drawHistoryChart(data.candles)');
+  const optionFlow = selectionFlow.indexOf('await loadOptionChain');
+  const researchFlow = selectionFlow.indexOf('/api/research-context');
+  assert.ok(chartRender >= 0 && optionFlow > chartRender && researchFlow > chartRender,
+    'chart is rendered before downstream option and research requests');
+  const postHistory = selectionFlow.slice(chartRender);
+  const downstream = selectionFlow.slice(optionFlow);
+  assert.match(postHistory, /OPTION CHAIN UNAVAILABLE/);
+  assert.match(postHistory, /RESEARCH UNAVAILABLE · NO TRADE/);
+  assert.doesNotMatch(downstream, /area\.replaceChildren\(\)/,
+    'downstream failures must not clear the rendered chart');
+  assert.match(app, /FYERS HISTORY \/api\/history/);
+  assert.match(app, /OPTION CHAIN \/api\/option-chain/);
+  assert.match(app, /returned non-JSON response · HTTP/);
+});

@@ -864,7 +864,7 @@ async function evaluateSelectedSetup() {
       renderChartViewport();
     } else {
       chartSetupLevels = null; renderChartViewport();
-      state.textContent=(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
+      state.textContent=setup.status==='WAITING_FOR_OPTION_BREAKOUT'&&Number.isFinite(Number(setup.entryTriggerPrice))?'WAITING FOR OPTION BREAKOUT · TRIGGER ₹'+showNumber(setup.entryTriggerPrice)+' · LIVE TICK WATCH':(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
     }
   } catch(error) { setupEvaluationDone=true; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · '+String(error.message||'Setup verification unavailable'); state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }

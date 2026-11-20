@@ -957,11 +957,11 @@ async function evaluateSelectedSetup() {
   researchNote.className='empty-inline';
   researchNote.textContent='Checking verified FYERS daily, 15-minute and completed 5-minute candles for the selected stock.';
   researchResults.append(researchNote);
-  for(const id of ['setup-entry','setup-sl','setup-target','setup-rr','setup-size']) document.getElementById(id).textContent='—';
+  for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
   chartSetupLevels = null;
   renderChartViewport();
   try {
-    const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol,riskBudget:1000,costAssumptions:{estimatedRoundTripCosts:document.querySelector('#risk-roundtrip-cost').value,slippagePerUnit:document.querySelector('#risk-slippage-unit').value,gapStressPerUnit:document.querySelector('#risk-gap-unit').value}})});
+    const response=await fetch('/api/evaluate-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({underlying:selectedSymbol,contract:selectedContractSymbol})});
     const setup=await response.json();
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
@@ -993,9 +993,7 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
       document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
-      const sizing=setup.positionSizing||{};
-      document.querySelector('#setup-size').textContent=sizing.status==='POSITION_SIZE_VALID'?(sizing.lots+' LOT · '+sizing.quantity+' QTY · PRICE RISK ₹'+showNumber(sizing.estimatedPriceRisk)+(sizing.costModelStatus==='CONFIGURED_ESTIMATE'?' · ALL-IN EST ₹'+showNumber(sizing.estimatedAllInRisk):' · COST MODEL NOT CONFIGURED')):'NO TRADE · '+(sizing.reason||sizing.status||'Sizing unavailable');
-      state.textContent=(sizing.status==='POSITION_SIZE_VALID'?'SIGNAL VERIFIED · ':'SIGNAL VERIFIED · SIZE BLOCKED · ')+setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state=sizing.status==='POSITION_SIZE_VALID'?'confirmed':'blocked';
+      state.textContent='SIGNAL VERIFIED · '+setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
       chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
       renderChartViewport();
     } else {

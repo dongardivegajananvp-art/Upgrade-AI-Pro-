@@ -400,14 +400,22 @@ async function selectSymbol(symbol, livePrice = null) {
   area.append(loading);
 
   let data;
+  let socketPinError = null;
   try {
     const selectionResponse = await fetch('/api/select-underlying',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol})});
     const selection = await readJsonResponse(selectionResponse, 'FYERS UNDERLYING SELECTION');
     if (!selectionResponse.ok || !['UNDERLYING_PINNED_TO_SOCKET_SLICE','UNCHANGED'].includes(selection.status)) {
       throw new Error(selection.reason || 'Underlying socket subscription was not confirmed');
     }
-    if (selectedSymbol !== symbol) return;
+  } catch (error) {
+    // Live socket pinning is required for fresh-tick trading gates, not for
+    // independently verified historical candles. Keep the chart available
+    // while clearly marking the live feed as unavailable and NO TRADE.
+    socketPinError = String(error.message || 'Underlying socket subscription was not confirmed');
+  }
+  if (selectedSymbol !== symbol) return;
 
+  try {
     const response = await fetch('/api/history?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
     data = await readJsonResponse(response, 'FYERS HISTORY /api/history');
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) {
@@ -417,7 +425,7 @@ async function selectSymbol(symbol, livePrice = null) {
 
     drawHistoryChart(data.candles);
     selectedUnderlyingPrice = Number(livePrice) > 0 ? Number(livePrice) : (Number(data.candles.at(-1)?.close) || null);
-    title.textContent = `${symbol} · FYERS HISTORY · ${data.count ?? data.candles.length} COMPLETED 5-MIN CANDLES`;
+    title.textContent = symbol + ' · FYERS HISTORY · ' + (data.count ?? data.candles.length) + ' COMPLETED 5-MIN CANDLES' + (socketPinError ? ' · LIVE FEED UNAVAILABLE · NO TRADE' : '');
   } catch (error) {
     if (selectedSymbol !== symbol) return;
     area.replaceChildren();

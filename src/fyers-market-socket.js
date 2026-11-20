@@ -47,7 +47,7 @@ let socketTransportConnected = false;
 let resetRateLimitAfterSubscriptionFlush = false;
 
 function desiredSocketSubscriptions() {
-  return [...new Set([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])])];
+  return buildDesiredSocketSubscriptions(INDEX_SYMBOLS, activeFnoSymbols, selectedOptionSymbol);
 }
 
 function scheduleSubscriptionFlush(delay = 0) {

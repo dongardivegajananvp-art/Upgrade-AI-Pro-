@@ -16,7 +16,7 @@ test('top five gainer cards expose direction and stale-state styling', () => {
     assert.ok(css.includes('.mover-card[data-state="' + state + '"]'));
   }
   assert.match(app, /button\.dataset\.state = cardState/);
-  assert.match(app, /change\.dataset\.state = item\.fresh \? direction : 'stale'/);
+  assert.match(app, /change\.dataset\.state = view\.mode === 'LIVE' && item\.fresh \? direction : 'stale'/);
 });
 
 test('verified option entry, stop and target are rendered as labelled chart arrows', () => {
@@ -161,4 +161,9 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
   assert.equal(snapshot.symbol,'NSE:ABC-EQ');
   assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[{time:1,open:100,high:90,low:95,close:99}]}),null);
   assert.equal(normalizeChartSnapshot({symbol:'NSE:ABC-EQ',candles:[]}),null);
+});
+
+test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
+  assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });

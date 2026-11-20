@@ -1,5 +1,6 @@
 // Rolling market-wide F&O observation ranking for FYERS Standard's shared 100-symbol cap.
 // This is deliberately NOT a simultaneous live scan and never creates actionable signals.
+export const FNO_SCAN_PER_SLICE = 4;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);
 }
@@ -41,4 +42,11 @@ export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount =
   for(let i=0;i<count;i++)slice.push(symbols[(start+i)%symbols.length]);
   if(selectedSymbol&&symbols.includes(selectedSymbol)&&!slice.includes(selectedSymbol))slice[slice.length-1]=selectedSymbol;
   return [...new Set(slice)];
+}
+
+export function getFnoSliceScanSymbols(activeSymbols, scanPerSlice = FNO_SCAN_PER_SLICE) {
+  if (!Array.isArray(activeSymbols) || !activeSymbols.length) return [];
+  const count = Math.max(1, Math.min(activeSymbols.length, Math.floor(Number(scanPerSlice) || FNO_SCAN_PER_SLICE)));
+  // The tail contains the newly-added symbols in the overlapping socket rotation.
+  return activeSymbols.slice(-count);
 }

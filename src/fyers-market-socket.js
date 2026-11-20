@@ -43,6 +43,7 @@ let subscriptionFlushTimer = null;
 let socketRateLimitAttempt = 0;
 let socketRateLimitUntil = 0;
 let socketRateLimitRecoveryTimer = null;
+let socketTransportConnected = false;
 
 function scheduleSubscriptionFlush(delay = 0) {
   if (subscriptionFlushTimer || !pendingSubscriptionSymbols.length) return;
@@ -150,6 +151,7 @@ function accept(item) {
   ticks.set(symbol, tick);
   if (isFresh(tick)) {
     socketRateLimitAttempt = 0;
+    if (socketStatus === 'RATE_LIMITED_WAIT') socketStatus = 'CONNECTED';
     socketRateLimitUntil = 0;
     if (socketRateLimitRecoveryTimer) clearTimeout(socketRateLimitRecoveryTimer);
     socketRateLimitRecoveryTimer = null;
@@ -257,6 +259,7 @@ export function startMarketSocket() {
     lastError = null;
     socket = FyersDataSocket.getInstance(`${process.env.FYERS_APP_ID}:${token}`, '', true);
     socket.on('connect', () => {
+      socketTransportConnected = true;
       const subscriptions = [...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])];
       const waitMs = Math.max(0, socketRateLimitUntil - Date.now());
       if (waitMs > 0) {
@@ -265,7 +268,7 @@ export function startMarketSocket() {
         socketRateLimitRecoveryTimer = setTimeout(() => {
           socketRateLimitRecoveryTimer = null;
           // Only resume if the SDK connection is still open and the wait has elapsed.
-          if (socketStatus !== 'RATE_LIMITED_WAIT' || Date.now() < socketRateLimitUntil) return;
+          if (!socketTransportConnected || socketStatus !== 'RATE_LIMITED_WAIT' || Date.now() < socketRateLimitUntil) return;
           try {
             socketStatus = 'CONNECTED';
             syncSocketSubscriptions(subscriptions, 'rate-limit-backoff-recovery');
@@ -311,6 +314,7 @@ export function startMarketSocket() {
       lastError = safeError(error || 'FYERS data socket error');
       socketStatus = /1015|too many requests|rate.?limit/i.test(lastError) ? 'RATE_LIMITED' : 'ERROR';
       if (socketStatus === 'RATE_LIMITED') {
+        socketTransportConnected = false;
         socketRateLimitAttempt += 1;
         const backoffMs = getSocketRateLimitBackoffMs(socketRateLimitAttempt);
         socketRateLimitUntil = Date.now() + backoffMs;
@@ -325,26 +329,11 @@ export function startMarketSocket() {
           attempt: socketRateLimitAttempt, backoffMs,
           retryAt: new Date(socketRateLimitUntil).toISOString()
         }));
-        socketRateLimitRecoveryTimer = setTimeout(() => {
-          socketRateLimitRecoveryTimer = null;
-          if (!['RATE_LIMITED','RATE_LIMITED_WAIT'].includes(socketStatus) || Date.now() < socketRateLimitUntil) return;
-          try {
-            const desired = [...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])];
-            socketStatus = 'CONNECTED';
-            syncSocketSubscriptions(desired, 'rate-limit-backoff-recovery');
-            socketHasConnected = true;
-            console.info('[FYERS_DATA] rate-limit backoff elapsed; subscription recovery attempted');
-          } catch (recoveryError) {
-            lastError = safeError(recoveryError);
-            socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
-            console.error('[FYERS_DATA] rate-limit recovery attempt failed:', lastError);
-          }
-        }, backoffMs);
-        socketRateLimitRecoveryTimer.unref?.();
       }
       console.error('[FYERS_DATA] socket error:', lastError);
     });
     socket.on('close', () => {
+      socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
       console.warn('[FYERS_DATA] socket closed');
     });

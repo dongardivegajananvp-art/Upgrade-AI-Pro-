@@ -156,7 +156,7 @@ async function refresh() {
       if (setupRetryAfter && Date.now() >= setupRetryAfter) { setupEvaluationDone = false; setupRetryAfter = 0; }
       // A WAITING_FOR_OPTION_BREAKOUT result is a live trigger, not a final verdict.
       // Re-evaluate only when a fresh option tick crosses the exact official-tick entry.
-      if (setupOptionTrigger && setupOptionTrigger.bucket === bucket &&
+      if (setupOptionTrigger && setupOptionTrigger.bucket === bucket && optionTick?.fresh &&
           Number(optionTick.price) + setupOptionTrigger.tickSize * 1e-7 >= setupOptionTrigger.entryTriggerPrice) {
         setupOptionTrigger = null; setupEvaluationDone = false;
       }

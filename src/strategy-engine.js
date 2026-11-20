@@ -311,18 +311,12 @@ export function detectOpeningRange(rows, sessionStartMinute = 555, livePrice = n
     return t.getUTCHours()*60+t.getUTCMinutes();
   };
   // The first completed 5-minute candle defines the opening high/low.
-  // A fresh underlying exchange tick crossing that range is the early trigger;
-  // a completed close outside the range remains a valid confirmation fallback.
+  // A live tick alone is not a breakout candle: wait for the actual 5-minute
+  // candle to close outside the range so its direction and volume can be checked.
   const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
   const last=day.at(-1),prior=day.at(-2);
   if(first&&last){
     const firstHigh=number(first.high),firstLow=number(first.low);
-    const hasLivePrice=livePrice!==null&&livePrice!==undefined&&Number.isFinite(Number(livePrice));
-    const price=hasLivePrice?Number(livePrice):NaN;
-    if(hasLivePrice&&number(last.close)<=firstHigh&&price>firstHigh)
-      return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_LIVE_BREAKOUT'});
-    if(hasLivePrice&&number(last.close)>=firstLow&&price<firstLow)
-      return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_LIVE_BREAKDOWN'});
     if(prior&&number(last.time)>number(first.time)){
       if(number(prior.close)<=firstHigh&&number(last.close)>firstHigh)
         return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_BREAKOUT'});

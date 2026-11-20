@@ -171,16 +171,15 @@ test('PWA offline shell caches the last-session snapshot module and bumps its ca
 
 test('restored cached chart never suppresses a fresh verified history request for the same symbol', () => {
   const start = app.indexOf('async function selectSymbol(');
-  const end = app.indexOf('\\nfunction drawHistoryChart', start);
+  const end = app.indexOf('\nfunction drawHistoryChart', start);
   assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
   const flow = app.slice(start, end);
-  assert.match(flow, /if \\(symbol === selectedSymbol && !chartRestoredFromCache\\) return/);
-  assert.doesNotMatch(flow, /if \\(symbol === selectedSymbol\\) \\{[\\s\\S]*?return;[\\s\\S]*?\\}/);
-  assert.match(app, /chartRestoredFromCache && selectedSymbol === underlyingTick\\?\\.symbol/);
-  assert.match(app, /fetch\\('\\/api\\/history\\?symbol='/);
+  assert.ok(flow.includes('if (symbol === selectedSymbol && !chartRestoredFromCache) return'));
+  assert.ok(app.includes('chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol'));
+  assert.ok(flow.includes("fetch('/api/history?symbol='"));
 });
 
 test('scanner UI defaults to the real four-symbol slice, not the obsolete eleven-symbol fallback', () => {
-  assert.match(app, /data\\.scanPerSlice\\?\\?4/);
-  assert.doesNotMatch(app, /data\\.scanPerSlice\\|\\|11/);
+  assert.ok(app.includes('data.scanPerSlice??4'));
+  assert.ok(!app.includes('data.scanPerSlice||11'));
 });

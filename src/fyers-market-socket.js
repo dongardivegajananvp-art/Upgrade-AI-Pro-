@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 import { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
@@ -120,7 +120,7 @@ function nextSlice(startIndex = rotationIndex) {
 }
 function applyFnoRotation(advance = false) {
   const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
-    ? (rotationIndex+SCAN_PER_SLICE)%universe.length : rotationIndex;
+    ? getNextFnoRotationIndex(universe.length,rotationIndex,SCAN_PER_SLICE) : rotationIndex;
   const next=nextSlice(nextIndex);
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {
@@ -150,7 +150,7 @@ export function setFnoUniverse(items) {
     rotationTimer = setInterval(() => applyFnoRotation(true), ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
-  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
+  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
 }
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;
@@ -268,7 +268,7 @@ export function getMarketData(now = Date.now()) {
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, coverageComplete: rolling.coverageComplete,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
-      rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
+      rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
       subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
       topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: tick.fresh, ageSeconds: tick.ageSeconds, actionable: false }))
     }
@@ -283,7 +283,7 @@ export function getFnoUniverseSnapshot() {
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,
-    scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length,
+    scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length,
     symbolCap: 100
   };
 }

@@ -42,3 +42,14 @@ test('top five gainers use distinct rank-based card colors', () => {
     assert.ok(css.includes('.mover-card[data-rank="' + rank + '"]'));
   }
 });
+
+test('chart supports direct TradingView-style zoom and pan without legacy zoom buttons', () => {
+  for (const legacyId of ['chart-zoom-in','chart-zoom-out','chart-reset']) assert.ok(!html.includes(legacyId));
+  assert.match(app, /addEventListener\('wheel'/);
+  assert.match(app, /addEventListener\('pointerdown'/);
+  assert.match(app, /addEventListener\('pointermove'/);
+  assert.match(app, /addEventListener\('dblclick'/);
+  assert.match(app, /chartPan/);
+  assert.match(css, /touch-action:none/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v9/);
+});

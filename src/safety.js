@@ -25,14 +25,15 @@ export function canAdvanceSetup({underlyingTick,optionTick,contractVerified,cand
 }
 
 /**
- * Conservative lot-based sizing for a verified long option premium plan.
- * riskBudget is an explicit cash amount supplied by the operator; it is never
- * inferred from account balance. lotSize must come from the verified contract
- * master. This is advisory only and cannot enable broker order placement.
+ * Whole-lot sizing for a verified long-option plan.
+ * riskBudget is an explicit cash allowance, never inferred from account balance.
+ * Optional cost assumptions are estimates supplied by the caller, not broker quotes.
+ * When absent, sizing remains price-risk-only and explicitly reports that costs
+ * and gap risk are not quantified. This function is advisory and never enables orders.
  */
 export function calculatePositionSize({
   riskBudget, entry, stopLoss, target, lotSize, contractVerified = false,
-  maxLots = 2
+  estimatedRoundTripCosts, slippagePerUnit, gapStressPerUnit
 } = {}) {
   const values = [riskBudget, entry, stopLoss, target, lotSize].map(Number);
   if (!values.every(Number.isFinite) || values.some(value => value <= 0)) {
@@ -41,9 +42,14 @@ export function calculatePositionSize({
   if (contractVerified !== true) {
     return { status: 'NO_TRADE', reason: 'Official option contract and lot size must be verified before sizing' };
   }
-  if (!Number.isInteger(Number(lotSize)) || !Number.isInteger(Number(maxLots)) ||
-      Number(maxLots) < 1 || Number(maxLots) > 2) {
-    return { status: 'NO_TRADE', reason: 'Official integer lot size and maxLots between one and two are required' };
+  if (!Number.isInteger(Number(lotSize))) {
+    return { status: 'NO_TRADE', reason: 'Official integer contract lot size is required' };
+  }
+  const costInputs = [estimatedRoundTripCosts, slippagePerUnit, gapStressPerUnit];
+  const costModelConfigured = costInputs.every(value => value !== undefined && value !== null && value !== '');
+  const costs = costModelConfigured ? costInputs.map(Number) : null;
+  if (costModelConfigured && (!costs.every(Number.isFinite) || costs.some(value => value < 0))) {
+    return { status: 'NO_TRADE', reason: 'Cost, slippage and gap-stress assumptions must be finite non-negative values' };
   }
   const [budget, buy, stop, objective, lot] = values;
   if (!(stop < buy && objective > buy)) {
@@ -54,26 +60,45 @@ export function calculatePositionSize({
   if (!Number.isFinite(rewardRisk) || rewardRisk < MIN_REWARD_RISK - 1e-9) {
     return { status: 'NO_TRADE', reason: 'Minimum reward/risk 1:2 is not met' };
   }
-  const perLotRisk = perUnitRisk * lot;
-  if (!Number.isFinite(perLotRisk) || perLotRisk <= 0) {
+  const perLotPriceRisk = perUnitRisk * lot;
+  if (!Number.isFinite(perLotPriceRisk) || perLotPriceRisk <= 0) {
     return { status: 'NO_TRADE', reason: 'Per-lot risk calculation is invalid' };
   }
-  const affordableLots = Math.floor((budget + 1e-9) / perLotRisk);
-  const lots = Math.min(affordableLots, Number(maxLots));
-  if (lots < 1) {
-    return { status: 'NO_TRADE', reason: 'Risk budget is below the risk of one official lot' };
+  const fixedCosts = costModelConfigured ? costs[0] : 0;
+  const perUnitAllowance = costModelConfigured ? costs[1] + costs[2] : 0;
+  const perLotModeledRisk = perLotPriceRisk + perUnitAllowance * lot;
+  const affordableLots = Math.floor((budget - fixedCosts + 1e-9) / perLotModeledRisk);
+  if (affordableLots < 1) {
+    return { status: 'NO_TRADE', reason: costModelConfigured
+      ? 'Risk budget is below one official lot including configured cost and stress allowances'
+      : 'Risk budget is below the price risk of one official lot' };
   }
+  const lots = affordableLots;
   const quantity = lots * lot;
   const estimatedPriceRisk = Number((perUnitRisk * quantity).toFixed(8));
-  if (estimatedPriceRisk > budget + 1e-8) {
-    return { status: 'NO_TRADE', reason: 'Calculated quantity exceeds the explicit risk budget' };
+  const estimatedSlippage = costModelConfigured ? Number((costs[1] * quantity).toFixed(8)) : null;
+  const estimatedGapStress = costModelConfigured ? Number((costs[2] * quantity).toFixed(8)) : null;
+  const estimatedRoundTripCostsValue = costModelConfigured ? costs[0] : null;
+  const estimatedAllInRisk = costModelConfigured
+    ? Number((estimatedPriceRisk + estimatedSlippage + estimatedGapStress + estimatedRoundTripCostsValue).toFixed(8))
+    : null;
+  if (costModelConfigured && estimatedAllInRisk > budget + 1e-8) {
+    return { status: 'NO_TRADE', reason: 'Calculated quantity exceeds the explicit budget after configured cost and stress allowances' };
+  }
+  if (!costModelConfigured && estimatedPriceRisk > budget + 1e-8) {
+    return { status: 'NO_TRADE', reason: 'Calculated quantity exceeds the explicit price-risk budget' };
   }
   return {
     status: 'POSITION_SIZE_VALID', lots, lotSize: lot, quantity,
     riskBudget: budget, estimatedPriceRisk,
-    riskBasis: 'ENTRY_TO_STOP_PRICE_DIFFERENCE_EXCLUDES_FEES_SLIPPAGE_AND_GAP_RISK',
+    costModelStatus: costModelConfigured ? 'CONFIGURED_ESTIMATE' : 'NOT_CONFIGURED_PRICE_RISK_ONLY',
+    estimatedRoundTripCosts: estimatedRoundTripCostsValue,
+    estimatedSlippage, estimatedGapStress, estimatedAllInRisk,
+    riskBasis: costModelConfigured
+      ? 'PRICE_RISK_PLUS_CONFIGURED_ROUND_TRIP_COST_SLIPPAGE_AND_GAP_STRESS_ESTIMATES'
+      : 'PRICE_RISK_ONLY_FEES_SLIPPAGE_AND_GAP_RISK_NOT_QUANTIFIED',
     rewardRisk: Number(rewardRisk.toFixed(2)),
-    cappedBy: affordableLots > Number(maxLots) ? 'MAX_LOTS' : 'RISK_BUDGET',
+    cappedBy: 'EXPLICIT_RISK_BUDGET',
     actionable: false
   };
 }

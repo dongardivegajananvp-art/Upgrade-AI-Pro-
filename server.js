@@ -204,7 +204,8 @@ function ensureFyersMarketStarted() {
   if (fnoUniverseLoadedDate !== sessionDate && !fnoUniverseLoadPromise && Date.now() >= fnoUniverseLoadRetryAt) {
     const requestedDate = sessionDate;
     console.info('[FYERS_SCANNER] current-session official F&O master refresh pending; F&O ranking and selection gates remain closed');
-    fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ universe, diagnostics }) => {
+    fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ date, universe, diagnostics }) => {
+      if (date !== getNseSessionDate()) throw new Error('Official symbol master completed for a different IST session; current-session ranking remains blocked');
       const coverage = setFnoUniverse(universe);
       const selectedUnderlying = getMarketData().selectedUnderlying?.symbol;
       if (selectedUnderlying && !universe.some(item => item.symbol === selectedUnderlying)) {
@@ -215,7 +216,7 @@ function ensureFyersMarketStarted() {
         try { getVerifiedOptionContract(selectedOption); }
         catch { setSelectedOptionSymbol(null); }
       }
-      fnoUniverseLoadedDate = requestedDate;
+      fnoUniverseLoadedDate = date;
       fnoUniverseLoadRetryAt = 0;
       startFnoStrategyScanner();
       console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12, 'master date:', requestedDate);
@@ -249,7 +250,7 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
       if (url.pathname === '/api/research/universe') {
-        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:11,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:4,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();

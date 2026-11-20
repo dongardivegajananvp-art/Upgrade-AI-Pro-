@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize } from './rolling-fno-scanner.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
@@ -101,8 +101,9 @@ function nextSlice(startIndex = rotationIndex) {
   return buildFnoRotationSlice(universe,startIndex,MAX_UNDERLYING_SLOTS,selectedUnderlyingSymbol);
 }
 function applyFnoRotation(advance = false) {
+  const scanBatchSize=getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE);
   const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
-    ? (rotationIndex+SCAN_PER_SLICE)%universe.length : rotationIndex;
+    ? (rotationIndex+scanBatchSize>=universe.length?0:rotationIndex+scanBatchSize) : rotationIndex;
   const next=nextSlice(nextIndex);
   if (!next.length) { activeFnoSymbols = []; return; }
   if (socket && socketStatus === 'CONNECTED') {
@@ -139,7 +140,7 @@ export function setFnoUniverse(items) {
     rotationTimer = setInterval(() => applyFnoRotation(true), ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
-  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? SCAN_PER_SLICE : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
+  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
 }
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;

@@ -44,6 +44,11 @@ let socketRateLimitAttempt = 0;
 let socketRateLimitUntil = 0;
 let socketRateLimitRecoveryTimer = null;
 let socketTransportConnected = false;
+let resetRateLimitAfterSubscriptionFlush = false;
+
+function desiredSocketSubscriptions() {
+  return [...new Set([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])])];
+}
 
 function scheduleSubscriptionFlush(delay = 0) {
   if (subscriptionFlushTimer || !pendingSubscriptionSymbols.length) return;
@@ -68,7 +73,20 @@ function scheduleSubscriptionFlush(delay = 0) {
       console.error('[FYERS_DATA] paced subscription batch failed:', lastError);
       return;
     }
-    if (pendingSubscriptionSymbols.length) scheduleSubscriptionFlush(SUBSCRIPTION_BATCH_INTERVAL_MS);
+    if (pendingSubscriptionSymbols.length) {
+      scheduleSubscriptionFlush(SUBSCRIPTION_BATCH_INTERVAL_MS);
+    } else if (canCompleteSocketRateLimitRecovery({
+      recoveryPending: resetRateLimitAfterSubscriptionFlush,
+      pendingCount: pendingSubscriptionSymbols.length,
+      socketConnected: socketTransportConnected && socketStatus === 'CONNECTED',
+      now: Date.now(),
+      cooldownUntil: socketRateLimitUntil
+    })) {
+      resetRateLimitAfterSubscriptionFlush = false;
+      socketRateLimitUntil = 0;
+      socketRateLimitAttempt = 0;
+      console.info('[FYERS_DATA] rate-limit backoff cleared after all paced subscription batches were accepted');
+    }
   }, delay);
   subscriptionFlushTimer.unref?.();
 }
@@ -149,9 +167,6 @@ function accept(item) {
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
-  if (isFresh(tick) && socketStatus === 'CONNECTED' && Date.now() >= socketRateLimitUntil) {
-    socketRateLimitAttempt = 0;
-  }
   if (symbol === selectedOptionSymbol) {
     optionSubscriptionStatus = 'TICK_RECEIVED';
     optionSubscriptionError = null;
@@ -256,7 +271,7 @@ export function startMarketSocket() {
     socket = FyersDataSocket.getInstance(`${process.env.FYERS_APP_ID}:${token}`, '', true);
     socket.on('connect', () => {
       socketTransportConnected = true;
-      const subscriptions = [...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])];
+      const subscriptions = desiredSocketSubscriptions();
       const waitMs = Math.max(0, socketRateLimitUntil - Date.now());
       if (waitMs > 0) {
         socketStatus = 'RATE_LIMITED_WAIT';
@@ -266,11 +281,14 @@ export function startMarketSocket() {
           // Only resume if the SDK connection is still open and the wait has elapsed.
           if (!socketTransportConnected || socketStatus !== 'RATE_LIMITED_WAIT' || Date.now() < socketRateLimitUntil) return;
           try {
+            // Recompute at recovery time: the selected underlying/option may have
+            // changed while the SDK was waiting through the 1015 backoff.
+            const currentSubscriptions = desiredSocketSubscriptions();
+            if (currentSubscriptions.length > 100) throw new Error('Subscription count exceeded the Standard plan 100-symbol limit');
             socketStatus = 'CONNECTED';
-            syncSocketSubscriptions(subscriptions, 'rate-limit-backoff-recovery');
+            resetRateLimitAfterSubscriptionFlush = true;
+            syncSocketSubscriptions(currentSubscriptions, 'rate-limit-backoff-recovery');
             socketHasConnected = true;
-            socketRateLimitUntil = 0;
-            socketRateLimitAttempt = 0;
             console.info('[FYERS_DATA] rate-limit backoff elapsed; paced subscription reconciliation resumed');
           } catch (error) {
             lastError = safeError(error);
@@ -313,6 +331,7 @@ export function startMarketSocket() {
       socketStatus = /1015|too many requests|rate.?limit/i.test(lastError) ? 'RATE_LIMITED' : 'ERROR';
       if (socketStatus === 'RATE_LIMITED') {
         socketTransportConnected = false;
+        resetRateLimitAfterSubscriptionFlush = false;
         socketRateLimitAttempt += 1;
         const backoffMs = getSocketRateLimitBackoffMs(socketRateLimitAttempt);
         socketRateLimitUntil = Date.now() + backoffMs;

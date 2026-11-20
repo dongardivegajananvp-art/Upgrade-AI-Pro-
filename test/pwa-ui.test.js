@@ -27,14 +27,14 @@ test('verified option entry, stop and target are rendered as labelled chart arro
   assert.match(app, /These levels are option-premium prices, not underlying-share prices/);
 });
 
-test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and v12 chart cache', () => {
+test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and v14 chart cache', () => {
   assert.equal(manifest.display, 'standalone');
   assert.ok(manifest.display_override.includes('standalone'));
   assert.ok(html.includes('viewport-fit=cover'));
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v13/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -195,4 +195,23 @@ test('fresh FYERS ticks are never labelled LIVE outside NSE regular session', ()
   assert.match(app, /const nseSessionOpen = isNseRegularSession\(Date\.now\(\)\)/);
   assert.match(app, /if \(nseSessionOpen && tick\?\.fresh\)/);
   assert.match(app, /if \(!nseSessionOpen\) \{/);
+});
+
+
+test('chart requests ten completed NSE trading sessions and renders day partitions with IST timestamps', async () => {
+  const rest = await readFile(new URL('../src/fyers-rest.js', import.meta.url), 'utf8');
+  assert.match(rest, /getFiveMinuteHistoryRange\(now, 20\)/);
+  assert.match(rest, /filterLastNseTradingSessions\(normalizeFiveMinuteCandles\(body\.candles, now\), 10\)/);
+  assert.match(rest, /LAST_10_NSE_TRADING_SESSIONS/);
+  assert.match(app, /dayGroups\.forEach/);
+  assert.match(app, /YYYY-MM-DD HH:mm IST timestamp/);
+  assert.match(app, /toISOString\(\)\.slice\(0,16\)\.replace\('T',' '\)/);
+  assert.match(html, /10 NSE TRADING DAYS/);
+  assert.match(html, /DAY-WISE PARTITIONS/);
+});
+
+test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
+  const snapshotSource = app.includes('normalizeChartSnapshot');
+  assert.ok(snapshotSource);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });

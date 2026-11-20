@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches } from './socket-subscription-utils.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
@@ -45,7 +45,8 @@ function scheduleSubscriptionFlush(delay = 0) {
   subscriptionFlushTimer = setTimeout(() => {
     subscriptionFlushTimer = null;
     if (!socket || socketStatus !== 'CONNECTED') return;
-    const batch = pendingSubscriptionSymbols.splice(0, SUBSCRIPTION_BATCH_SIZE);
+    const batch = splitSubscriptionBatches(pendingSubscriptionSymbols, SUBSCRIPTION_BATCH_SIZE)[0] || [];
+    pendingSubscriptionSymbols.splice(0, batch.length);
     for (const symbol of batch) pendingSubscriptionSet.delete(symbol);
     try {
       console.info('[FYERS_DATA] paced subscribe batch:', JSON.stringify({

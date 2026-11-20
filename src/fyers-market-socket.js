@@ -149,12 +149,8 @@ function accept(item) {
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
-  if (isFresh(tick)) {
+  if (isFresh(tick) && socketStatus === 'CONNECTED' && Date.now() >= socketRateLimitUntil) {
     socketRateLimitAttempt = 0;
-    if (socketStatus === 'RATE_LIMITED_WAIT') socketStatus = 'CONNECTED';
-    socketRateLimitUntil = 0;
-    if (socketRateLimitRecoveryTimer) clearTimeout(socketRateLimitRecoveryTimer);
-    socketRateLimitRecoveryTimer = null;
   }
   if (symbol === selectedOptionSymbol) {
     optionSubscriptionStatus = 'TICK_RECEIVED';
@@ -273,6 +269,8 @@ export function startMarketSocket() {
             socketStatus = 'CONNECTED';
             syncSocketSubscriptions(subscriptions, 'rate-limit-backoff-recovery');
             socketHasConnected = true;
+            socketRateLimitUntil = 0;
+            socketRateLimitAttempt = 0;
             console.info('[FYERS_DATA] rate-limit backoff elapsed; paced subscription reconciliation resumed');
           } catch (error) {
             lastError = safeError(error);

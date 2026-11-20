@@ -41,8 +41,12 @@ test('early breakout watch requires fresh tick and aligned daily plus 15m trends
   const now=Date.parse('2026-11-19T08:00:00Z');
   const start=Date.parse('2026-11-19T03:45:00Z')/1000;
   const five=Array.from({length:50},(_,i)=>{const open=100+i*.1,close=open+.1;return{time:start+i*300,open,high:close+.1,low:open-.1,close,volume:1000};});
-  const daily=risingCandles(50,100,.5,86400);
-  const fifteen=risingCandles(50,100,.2,900);
+  const daily=risingCandles(50,100,.5,86400,now/1000-86400);
+  const fifteen=[
+    ...sessionRisingFifteen('2026-11-17',25,100,.2),
+    ...sessionRisingFifteen('2026-11-18',25,105,.2),
+    ...sessionRisingFifteen('2026-11-19',17,110,.2)
+  ];
   const tick={price:five.at(-1).high+.1,exchangeTime:now/1000,receivedAt:now};
   const watch=analyzeEarlyWatch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick,now});
   assert.equal(watch.status,'WATCH');

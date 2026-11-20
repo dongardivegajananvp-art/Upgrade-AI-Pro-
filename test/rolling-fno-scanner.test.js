@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getFnoSliceScanSymbols } from '../src/rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex, getFnoSliceScanSymbols } from '../src/rolling-fno-scanner.js';
 const now = Date.parse('2026-11-19T06:00:00Z');
 const sec = Date.parse('2026-11-19T05:59:55Z') / 1000;
 test('ranks rolling observations across all symbols and exposes partial coverage', () => {
@@ -70,17 +70,19 @@ test('four-symbol F&O rotation covers all 218 symbols exactly once, including th
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const batches=[];
   let start=0;
-  while(start<universe.length){
+  do {
     const batchSize=getFnoScanBatchSize(universe.length,start,FNO_SCAN_PER_SLICE);
     const active=buildFnoRotationSlice(universe,start,20);
     batches.push(...getFnoSliceScanSymbols(active,batchSize));
-    start+=batchSize;
-  }
+    start=getNextFnoRotationIndex(universe.length,start,FNO_SCAN_PER_SLICE);
+  } while(start!==0);
   assert.equal(batches.length,218);
   assert.equal(new Set(batches).size,218);
   assert.deepEqual([...batches].sort(),universe.map(item=>item.symbol).sort());
   assert.equal(getFnoScanBatchSize(218,216,4),2);
   assert.equal(getFnoScanBatchSize(218,0,4),4);
+  assert.equal(getNextFnoRotationIndex(218,212,4),216);
+  assert.equal(getNextFnoRotationIndex(218,216,4),0);
   assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20),4)[0],'NSE:STOCK0-EQ');
   assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,4,20),4)[0],'NSE:STOCK4-EQ');
 });

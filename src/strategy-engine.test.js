@@ -159,3 +159,18 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
   assert.equal(result.contract,contract.symbol);
   assert.equal(result.optionSide,'CE');
 });
+
+test('non-retest strategies validate pressure on the trigger candle, not an older level cross', () => {
+  const rows = [
+    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
+    { time: 1800000300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 200 },
+    { time: 1800000600, open: 103, high: 103.5, low: 102, close: 102.5, volume: 150 }
+  ];
+  const nonRetest = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[2].time, false);
+  assert.equal(nonRetest.ok, false);
+  assert.match(nonRetest.reason, /Buying pressure is absent/);
+
+  const retest = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[2].time, true);
+  assert.equal(retest.ok, true);
+  assert.equal(retest.candleTime, rows[1].time);
+});

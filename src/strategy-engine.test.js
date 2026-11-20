@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch, detectOpeningRange } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -193,4 +193,32 @@ test('top-gainer breakout can be evaluated with its own two-candle window withou
   assert.equal(topGainer.status,'DETECTED');
   assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='BLOCKED'));
   assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
+});
+
+
+test('opening-range setup waits for the actual completed breakout candle before pressure and volume confirmation', () => {
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
+  const first={time:start,open:100,high:101,low:99,close:100,volume:100};
+  const second={time:start+300,open:100,high:103,low:99.5,close:100.5,volume:250};
+  // Even a live price above the opening range cannot borrow the prior candle's pressure/volume.
+  assert.equal(detectOpeningRange([first,second],555,103).constructor, Function);
+  assert.equal(detectOpeningRange([first,second],555,103),null);
+  const breakout={...second,close:102.5};
+  const setup=detectOpeningRange([first,breakout],555,103);
+  assert.equal(setup.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(setup.side,'LONG');
+  const confirmation=confirmBreakoutPressureVolume([first,breakout],'LONG',101,breakout.time);
+  assert.equal(confirmation.ok,true);
+  assert.equal(confirmation.pressure,'BUYING');
+  assert.equal(confirmation.breakoutVolume,250);
+});
+
+test('breakout candle confirmation requires directional body and positive candle volume only on that candle', () => {
+  const prior={time:1800000000,open:100,high:101,low:99,close:100,volume:500};
+  const bullish={time:1800000300,open:100,high:103,low:99.5,close:102,volume:10};
+  const bearish={time:1800000300,open:102,high:102.5,low:97,close:98,volume:10};
+  assert.equal(confirmBreakoutPressureVolume([prior,bullish],'LONG',101,bullish.time).ok,true);
+  assert.equal(confirmBreakoutPressureVolume([prior,bearish],'SHORT',99,bearish.time).ok,true);
+  assert.equal(confirmBreakoutPressureVolume([prior,{...bullish,volume:0}],'LONG',101,bullish.time).ok,false);
+  assert.equal(confirmBreakoutPressureVolume([prior,{...bullish,close:100}],'LONG',101,bullish.time).ok,false);
 });

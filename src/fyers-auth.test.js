@@ -37,6 +37,9 @@ test('FYERS session survives process-memory loss through an encrypted HttpOnly c
    assert.ok(cookie.maxAge>0);
    assert.equal(restoreSessionCookie(cookie.value,{appId:'TEST-100',appSecret:'test-secret'}),true);
    assert.equal(getAuthStatus().tokenStored,true);
+   // A live process token must not make an arbitrary or tampered cookie valid.
+   assert.equal(restoreSessionCookie('forged-cookie-value'.repeat(4),{appId:'TEST-100',appSecret:'test-secret'}),false);
+   assert.equal(restoreSessionCookie(cookie.value.slice(0,-1)+'x',{appId:'TEST-100',appSecret:'test-secret'}),false);
    await assert.rejects(
      exchangeAuthCode({appId:'TEST-100',appSecret:'test-secret',authCode:'one-time-test-code'}),
      /already been processed/

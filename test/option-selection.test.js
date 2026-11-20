@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from '../src/option-selection.js';
-import { verifyOptionContractRow } from '../src/fyers-symbol-master.js';
+import { compactOptionMasterRows, verifyOptionContractRow } from '../src/fyers-symbol-master.js';
 
 const now = Date.parse('2026-11-19T06:00:00Z');
 const base = {
@@ -52,4 +52,13 @@ test('automatic selection requires a valid exact requested expiry day', () => {
   assert.equal(matchesRequestedExpiry(expiry,Date.parse('2026-12-03T10:00:00Z')/1000),false);
   assert.equal(matchesRequestedExpiry(expiry,null),false);
   assert.equal(matchesRequestedExpiry(null,expiry),false);
+});
+
+test('cached official option master rows retain contract identity while dropping unused fields', () => {
+  const compact = compactOptionMasterRows([{ ...base, largeUnusedField:'x'.repeat(10000) }]);
+  assert.equal(compact.length,1);
+  assert.deepEqual(Object.keys(compact[0]).sort(),[
+    'expiryDate','fyToken','minLotSize','optType','strikePrice','symTicker','tickSize','tradeStatus','underSym'
+  ].sort());
+  assert.deepEqual(verifyOptionContractRow(compact[0],base.symTicker,now),verifyOptionContractRow(base,base.symTicker,now));
 });

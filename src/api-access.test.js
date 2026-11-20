@@ -4,6 +4,7 @@ import { requiresFyersSession } from './api-access.js';
 
 test('broker-backed endpoints require a verified FYERS session', () => {
   for (const path of [
+    '/api/market-data',
     '/api/history',
     '/api/research',
     '/api/research/universe',
@@ -21,7 +22,6 @@ test('broker-backed endpoints require a verified FYERS session', () => {
 
 test('only safe market/status views and OAuth entry routes are public', () => {
   for (const path of [
-    '/api/market-data',
     '/api/status',
     '/api/fyers/login',
     '/api/fyers/auth/callback'

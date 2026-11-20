@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 import { getSocketSubscriptionDelta, splitSubscriptionBatches } from './socket-subscription-utils.js';
+import { getSocketRateLimitBackoffMs } from './rest-scheduler-utils.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
@@ -39,6 +40,10 @@ const SUBSCRIPTION_BATCH_INTERVAL_MS = 1200;
 let pendingSubscriptionSymbols = [];
 const pendingSubscriptionSet = new Set();
 let subscriptionFlushTimer = null;
+let socketRateLimitAttempt = 0;
+let socketRateLimitUntil = 0;
+let socketRateLimitRecoveryTimer = null;
+let socketTransportConnected = false;
 
 function scheduleSubscriptionFlush(delay = 0) {
   if (subscriptionFlushTimer || !pendingSubscriptionSymbols.length) return;
@@ -144,6 +149,9 @@ function accept(item) {
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
+  if (isFresh(tick) && socketStatus === 'CONNECTED' && Date.now() >= socketRateLimitUntil) {
+    socketRateLimitAttempt = 0;
+  }
   if (symbol === selectedOptionSymbol) {
     optionSubscriptionStatus = 'TICK_RECEIVED';
     optionSubscriptionError = null;
@@ -247,8 +255,34 @@ export function startMarketSocket() {
     lastError = null;
     socket = FyersDataSocket.getInstance(`${process.env.FYERS_APP_ID}:${token}`, '', true);
     socket.on('connect', () => {
-      socketStatus = 'CONNECTED';
+      socketTransportConnected = true;
       const subscriptions = [...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])];
+      const waitMs = Math.max(0, socketRateLimitUntil - Date.now());
+      if (waitMs > 0) {
+        socketStatus = 'RATE_LIMITED_WAIT';
+        if (socketRateLimitRecoveryTimer) clearTimeout(socketRateLimitRecoveryTimer);
+        socketRateLimitRecoveryTimer = setTimeout(() => {
+          socketRateLimitRecoveryTimer = null;
+          // Only resume if the SDK connection is still open and the wait has elapsed.
+          if (!socketTransportConnected || socketStatus !== 'RATE_LIMITED_WAIT' || Date.now() < socketRateLimitUntil) return;
+          try {
+            socketStatus = 'CONNECTED';
+            syncSocketSubscriptions(subscriptions, 'rate-limit-backoff-recovery');
+            socketHasConnected = true;
+            socketRateLimitUntil = 0;
+            socketRateLimitAttempt = 0;
+            console.info('[FYERS_DATA] rate-limit backoff elapsed; paced subscription reconciliation resumed');
+          } catch (error) {
+            lastError = safeError(error);
+            socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+            console.error('[FYERS_DATA] rate-limit recovery reconciliation failed:', lastError);
+          }
+        }, waitMs);
+        socketRateLimitRecoveryTimer.unref?.();
+        console.warn('[FYERS_DATA] socket connected during rate-limit backoff; subscription reconciliation deferred:', waitMs);
+        return;
+      }
+      socketStatus = 'CONNECTED';
       if (subscriptions.length > 100) {
         socketStatus = 'SUBSCRIPTION_LIMIT_BLOCKED';
         lastError = 'Subscription count exceeded the Standard plan 100-symbol limit';
@@ -278,15 +312,26 @@ export function startMarketSocket() {
       lastError = safeError(error || 'FYERS data socket error');
       socketStatus = /1015|too many requests|rate.?limit/i.test(lastError) ? 'RATE_LIMITED' : 'ERROR';
       if (socketStatus === 'RATE_LIMITED') {
-        // A rejected provider batch must not remain recorded as subscribed.
-        // Reconcile the desired set on the next successful connection.
+        socketTransportConnected = false;
+        socketRateLimitAttempt += 1;
+        const backoffMs = getSocketRateLimitBackoffMs(socketRateLimitAttempt);
+        socketRateLimitUntil = Date.now() + backoffMs;
+        // Discard locally queued subscription work. The SDK may reconnect on its
+        // own, but this process will not issue another batch before the backoff ends.
         socketSubscribedSymbols.clear();
         pendingSubscriptionSymbols = [];
         pendingSubscriptionSet.clear();
+        if (socketRateLimitRecoveryTimer) clearTimeout(socketRateLimitRecoveryTimer);
+        socketRateLimitRecoveryTimer = null;
+        console.warn('[FYERS_DATA] rate-limit backoff armed:', JSON.stringify({
+          attempt: socketRateLimitAttempt, backoffMs,
+          retryAt: new Date(socketRateLimitUntil).toISOString()
+        }));
       }
       console.error('[FYERS_DATA] socket error:', lastError);
     });
     socket.on('close', () => {
+      socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
       console.warn('[FYERS_DATA] socket closed');
     });
@@ -309,7 +354,7 @@ export function getMarketData(now = Date.now()) {
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
-    socketStatus, lastError, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
+    socketStatus, lastError, socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil }, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
     optionSubscription: {
       status: optionSubscriptionStatus,
       symbol: selectedOptionSymbol,
@@ -323,7 +368,7 @@ export function getMarketData(now = Date.now()) {
     subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
     symbolLimit: 100, indices,
     fno: {
-      status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
+      status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','RATE_LIMITED_WAIT','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, coverageComplete: rolling.coverageComplete,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,

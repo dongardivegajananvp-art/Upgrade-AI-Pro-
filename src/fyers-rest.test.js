@@ -62,3 +62,23 @@ test('daily research excludes the current incomplete IST session candle', () => 
   assert.deepEqual(candles.map(c => c.time), [yesterday]);
   assert.ok(candles.every(c => c.completed && c.source === 'FYERS_DAILY_HISTORY'));
 });
+
+
+import { parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs } from './rest-scheduler-utils.js';
+
+test('FYERS Retry-After seconds and HTTP dates never shorten the one-hour safety cooldown', () => {
+  const now = Date.UTC(2026, 10, 20, 10, 0, 0);
+  assert.equal(parseRetryAfterMs('120', now), 120_000);
+  assert.equal(getRateLimitCooldownUntil(now, '120'), now + 60 * 60 * 1000);
+  assert.equal(getRateLimitCooldownUntil(now, '7200'), now + 2 * 60 * 60 * 1000);
+  assert.equal(getRateLimitCooldownUntil(now, new Date(now + 3 * 60 * 60 * 1000).toUTCString()), now + 3 * 60 * 60 * 1000);
+  assert.equal(parseRetryAfterMs('not-a-date', now), null);
+});
+
+test('FYERS WebSocket 1015 recovery uses bounded exponential backoff', () => {
+  assert.equal(getSocketRateLimitBackoffMs(1), 60_000);
+  assert.equal(getSocketRateLimitBackoffMs(2), 120_000);
+  assert.equal(getSocketRateLimitBackoffMs(3), 240_000);
+  assert.equal(getSocketRateLimitBackoffMs(50), 15 * 60_000);
+  assert.equal(getSocketRateLimitBackoffMs(0), 60_000);
+});

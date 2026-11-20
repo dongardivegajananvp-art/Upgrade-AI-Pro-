@@ -507,7 +507,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,strategyLedger,underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 
-export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, riskBudget=null, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
+export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, riskBudget=null, costAssumptions=null, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
   let setup=null;
   const blockDetected=(reason)=>({
     status:'DATA_UNAVAILABLE_NO_TRADE',reason,
@@ -539,7 +539,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:plan.reason}:row)};
   const positionSizing = riskBudget === null || riskBudget === undefined || riskBudget === ''
     ? { status: 'RISK_BUDGET_REQUIRED', reason: 'Enter an explicit per-trade cash risk budget; account balance is never inferred', actionable: false }
-    : calculatePositionSize({ riskBudget, entry: plan.entry, stopLoss: plan.stopLoss, target: plan.target, lotSize: contract.lotSize, contractVerified: Number.isInteger(Number(contract.lotSize)) && Number(contract.lotSize) > 0 });
+    : calculatePositionSize({ riskBudget, entry: plan.entry, stopLoss: plan.stopLoss, target: plan.target, lotSize: contract.lotSize, contractVerified: Number.isInteger(Number(contract.lotSize)) && Number(contract.lotSize) > 0, ...(costAssumptions && typeof costAssumptions === 'object' ? costAssumptions : {}) });
   return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',entryTiming:'EARLY_VERIFIED_LIVE_PREMIUM_BREAK',entryBasis:'LATEST_COMPLETED_OPTION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',targetR:plan.targetR,targetRationale:chosen.research?.targetRationale||'Minimum 2R research objective',contract:contract.symbol,positionSizing,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {

@@ -27,7 +27,7 @@ test('verified option entry, stop and target are rendered as labelled chart arro
   assert.match(app, /These levels are option-premium prices, not underlying-share prices/);
 });
 
-test('PWA supports standalone desktop/mobile layout and responsive breakpoints', () => {
+test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and v12 chart cache', () => {
   assert.equal(manifest.display, 'standalone');
   assert.ok(manifest.display_override.includes('standalone'));
   assert.ok(html.includes('viewport-fit=cover'));

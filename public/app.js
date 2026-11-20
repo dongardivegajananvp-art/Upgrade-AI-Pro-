@@ -1,9 +1,13 @@
+import { isNseRegularSession, normalizeTopGainersSnapshot, resolveTopGainersView, normalizeChartSnapshot } from './session-snapshot.js';
 const labels = [
   ['NSE:NIFTY50-INDEX','nifty','nifty-change'],
   ['NSE:NIFTYBANK-INDEX','bank','bank-change'],
   ['BSE:SENSEX-INDEX','sensex','sensex-change']
 ];
 let selectedSymbol = null;
+let chartRestoredFromCache = false;
+const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
+const CHART_SNAPSHOT_KEY = 'upgrade-ai-pro:last-verified-chart:v1';
 let selectedUnderlyingPrice = null;
 let optionChainRows = [];
 let selectedOptionSide = 'CE';
@@ -218,6 +222,7 @@ async function refresh() {
     document.querySelector('#feed').dataset.state = 'disconnected';
   }
 }
+restorePersistedChart();
 refresh();
 setInterval(refresh,2000);
 if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
@@ -293,29 +298,42 @@ async function refreshAccount() {
   }
 }
 
+function readTopGainersSnapshot() {
+  try { return normalizeTopGainersSnapshot(JSON.parse(localStorage.getItem(TOP_GAINERS_SNAPSHOT_KEY) || 'null')); }
+  catch { return null; }
+}
 function renderMovers(fno) {
   const container = document.querySelector('#movers');
   container.replaceChildren();
-  const top = Array.isArray(fno.topGainers) ? fno.topGainers : [];
-  if (fno.status !== 'ROTATING_LIVE_COVERAGE') {
-    const labels = { SYMBOL_MASTER_NOT_LOADED: 'SYMBOL MASTER NOT READY', SOCKET_ERROR: 'FYERS SOCKET ERROR', WAITING_FOR_FNO_TICKS: 'WAITING FOR F&O TICKS' };
-    document.querySelector('#movers-status').textContent = labels[fno.status] || 'F&O FEED PENDING';
-    const note = document.createElement('div');
-    note.className = 'empty-inline';
-    note.textContent = fno.status === 'SYMBOL_MASTER_NOT_LOADED'
-      ? 'Official FYERS NSE F&O symbol master is not loaded. No sample gainers are shown.'
-      : fno.status === 'SOCKET_ERROR'
-        ? 'FYERS rejected or closed the F&O subscription. ' + (fno.lastError || 'Socket error detail unavailable.')
-        : 'Waiting for fresh exchange-timestamped F&O ticks in the active rotating slice.';
-    container.append(note);
-    return;
+  const live = Array.isArray(fno.topGainers) ? fno.topGainers.slice(0, 5) : [];
+  if (fno.status === 'ROTATING_LIVE_COVERAGE' && live.length && live.every(item => item?.fresh === true)) {
+    try { localStorage.setItem(TOP_GAINERS_SNAPSHOT_KEY, JSON.stringify({ savedAt: Date.now(), items: live })); } catch {}
   }
-  const coverageText = (fno.observedCount ?? 0) + '/' + fno.universeCount + ' OBSERVED';
-  document.querySelector('#movers-status').textContent = (fno.coverageComplete ? 'ROLLING FULL-UNIVERSE · ' : 'ROLLING PARTIAL · ') + coverageText + ' · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's/SLICE · NON-SIMULTANEOUS · ' + fno.subscriptionCount + '/100 SYMBOLS';
+  const snapshot = readTopGainersSnapshot();
+  const view = resolveTopGainersView(fno, snapshot, Date.now());
+  const top = view.items;
+  const status = document.querySelector('#movers-status');
+  if (view.mode === 'LIVE') {
+    const coverageText = (fno.observedCount ?? 0) + '/' + fno.universeCount + ' OBSERVED';
+    status.textContent = (fno.coverageComplete ? 'ROLLING FULL-UNIVERSE · ' : 'ROLLING PARTIAL · ') + coverageText + ' · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's/SLICE · NON-SIMULTANEOUS · ' + fno.subscriptionCount + '/100 SYMBOLS';
+  } else if (view.mode === 'LAST_SESSION') {
+    status.textContent = 'MARKET CLOSED · LAST SESSION TOP 5 · NOT LIVE';
+  } else if (view.mode === 'LAST_OBSERVED') {
+    status.textContent = 'FYERS FEED STALE / DISCONNECTED · LAST OBSERVED TOP 5 · NOT LIVE';
+  } else {
+    const labels = { SYMBOL_MASTER_NOT_LOADED: 'SYMBOL MASTER NOT READY', SOCKET_ERROR: 'FYERS SOCKET ERROR', WAITING_FOR_FNO_TICKS: 'WAITING FOR F&O TICKS' };
+    status.textContent = labels[fno.status] || (view.mode === 'MARKET_CLOSED_NO_SNAPSHOT' ? 'MARKET CLOSED · NO SAVED SESSION SNAPSHOT' : 'F&O FEED PENDING');
+  }
   if (!top.length) {
     const note = document.createElement('div');
     note.className = 'empty-inline';
-    note.textContent = 'Waiting for fresh exchange-timestamped F&O underlying ticks in this slice.';
+    note.textContent = view.mode === 'MARKET_CLOSED_NO_SNAPSHOT'
+      ? 'No verified Top 5 snapshot was saved during the last session. No sample gainers are shown.'
+      : fno.status === 'SYMBOL_MASTER_NOT_LOADED'
+        ? 'Official FYERS NSE F&O symbol master is not loaded. No sample gainers are shown.'
+        : fno.status === 'SOCKET_ERROR'
+          ? 'FYERS rejected or closed the F&O subscription. ' + (fno.lastError || 'Socket error detail unavailable.')
+          : 'Waiting for fresh exchange-timestamped F&O underlying ticks. No sample gainers are shown.';
     container.append(note);
     return;
   }
@@ -325,18 +343,18 @@ function renderMovers(fno) {
     button.className = 'mover-card';
     const pct = Number(item.changePercent);
     const direction = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
-    const cardState = item.fresh ? direction : 'stale';
+    const cardState = view.mode === 'LIVE' && item.fresh ? direction : 'stale';
     button.dataset.state = cardState;
     button.dataset.rank = String(index + 1);
-    button.title = item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : 'STALE ROLLING OBSERVATION · ' + Math.floor((item.ageSeconds || 0) / 60) + 'm old · not actionable';
+    button.title = view.mode === 'LIVE' && item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : (view.mode === 'LAST_SESSION' ? 'LAST SESSION SNAPSHOT · NOT LIVE OR ACTIONABLE' : 'LAST OBSERVED SNAPSHOT · NOT LIVE OR ACTIONABLE');
     button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
     name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
     const price = document.createElement('span');
     price.textContent = `₹${showNumber(item.price)}`;
     const change = document.createElement('span');
-    change.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '% · ' + (item.fresh ? 'FRESH' : 'SEEN ' + Math.floor((item.ageSeconds || 0) / 60) + 'm AGO');
-    change.dataset.state = item.fresh ? direction : 'stale';
+    change.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '% · ' + (view.mode === 'LIVE' && item.fresh ? 'FRESH' : view.mode === 'LAST_SESSION' ? 'LAST SESSION' : 'LAST OBSERVED · NOT LIVE');
+    change.dataset.state = view.mode === 'LIVE' && item.fresh ? direction : 'stale';
     button.append(name, price, change);
     container.append(button);
   });
@@ -384,8 +402,18 @@ async function readJsonResponse(response, endpoint) {
   }
 }
 async function selectSymbol(symbol, livePrice = null) {
-  if (!symbol || symbol === selectedSymbol) return;
+  if (!symbol) return;
+  if (symbol === selectedSymbol) {
+    if (chartRestoredFromCache) {
+      chartRestoredFromCache = false;
+      try {
+        await fetch('/api/select-underlying', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ symbol }) });
+      } catch {}
+    }
+    return;
+  }
   selectedSymbol = symbol;
+  chartRestoredFromCache = false;
   resetChartViewport();
   setupOptionTrigger = null; setupRetryAfter = 0;
   chartSetupLevels = null;
@@ -474,7 +502,26 @@ async function selectSymbol(symbol, livePrice = null) {
 }
 function drawHistoryChart(candles) {
   chartCandles = Array.isArray(candles) ? candles.slice() : [];
+  try {
+    const snapshot = normalizeChartSnapshot({ symbol: selectedSymbol, savedAt: Date.now(), candles: chartCandles });
+    if (snapshot) localStorage.setItem(CHART_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {}
   renderChartViewport();
+}
+function restorePersistedChart() {
+  try {
+    const snapshot = normalizeChartSnapshot(JSON.parse(localStorage.getItem(CHART_SNAPSHOT_KEY) || 'null'));
+    if (!snapshot) return;
+    selectedSymbol = snapshot.symbol;
+    chartCandles = snapshot.candles;
+    chartRestoredFromCache = true;
+    const title = document.querySelector('#symbol');
+    if (title) title.textContent = selectedSymbol + ' · LAST SESSION VERIFIED FYERS HISTORY · NOT LIVE';
+    const candleStatus = document.querySelector('#chart-candle-status');
+    if (candleStatus) candleStatus.textContent = 'LAST SESSION · VERIFIED FYERS 5-MIN CANDLES · NOT LIVE';
+    renderChartViewport();
+    renderLiveCandleSummary(null);
+  } catch {}
 }
 function renderLiveCandleSummary(tick) {
   const panel = document.querySelector('#live-candle-summary');

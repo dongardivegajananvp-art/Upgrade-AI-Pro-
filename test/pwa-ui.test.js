@@ -100,5 +100,6 @@ test('verified history chart survives option-chain and research failures', () =>
   assert.doesNotMatch(postHistory, /area\.replaceChildren\(\)/,
     'downstream failures must not clear the rendered chart');
   assert.match(app, /FYERS HISTORY \/api\/history/);
+  assert.match(app, /OPTION CHAIN \/api\/option-chain/);
   assert.match(app, /returned non-JSON response · HTTP/);
 });

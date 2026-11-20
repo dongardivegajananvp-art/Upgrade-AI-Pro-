@@ -425,7 +425,7 @@ const server = http.createServer(async (req,res) => {
       if(!latestOption?.fresh||latestOption.symbol!==body.contract)
         return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Option tick became stale while verified research history was loading'});
       const isTopGainer = (latestMarket.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
-      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,optionCandles:optionHistory.candles,optionTick:latestOption,contract,riskBudget:body.riskBudget,costAssumptions:body.costAssumptions,dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,isTopGainer,researchEnabled:true,now:Date.now()});
+      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,optionCandles:optionHistory.candles,optionTick:latestOption,contract,dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,isTopGainer,researchEnabled:true,now:Date.now()});
       return send(res,200,{...setup,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'});
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));

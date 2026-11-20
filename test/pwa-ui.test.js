@@ -84,6 +84,21 @@ test('directional and manual option-selection responses cannot overwrite a newer
   assert.match(app, /selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true/);
 });
 
+test('verified chart history is fetched even when live socket pinning is unavailable', () => {
+  const start = app.indexOf('async function selectSymbol(');
+  const end = app.indexOf('\nfunction drawHistoryChart', start);
+  assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
+  const selectionFlow = app.slice(start, end);
+  const pinAttempt = selectionFlow.indexOf("fetch('/api/select-underlying'");
+  const historyRequest = selectionFlow.indexOf("fetch('/api/history?symbol='");
+  assert.ok(pinAttempt >= 0 && historyRequest > pinAttempt,
+    'socket pin is attempted before independent history retrieval');
+  assert.match(selectionFlow, /socketPinError = String\(error\.message/);
+  assert.match(selectionFlow, /LIVE FEED UNAVAILABLE · NO TRADE/);
+  assert.doesNotMatch(selectionFlow.slice(pinAttempt, historyRequest), /return;/,
+    'socket pin failure must not abort verified history retrieval');
+});
+
 test('verified history chart survives option-chain and research failures', () => {
   const start = app.indexOf('async function selectSymbol(');
   const end = app.indexOf('\nfunction drawHistoryChart', start);

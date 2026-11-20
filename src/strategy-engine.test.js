@@ -174,3 +174,23 @@ test('non-retest strategies validate pressure on the trigger candle, not an olde
   assert.equal(retest.ok, true);
   assert.equal(retest.candleTime, rows[1].time);
 });
+
+
+test('top-gainer breakout can be evaluated with its own two-candle window without waiting for unrelated EMA/daily history', () => {
+  const now=1800000601000;
+  const underlyingCandles=[
+    {time:1800000000,open:99.5,high:101,low:99,close:100,volume:100},
+    {time:1800000300,open:100,high:103,low:99.8,close:102,volume:250}
+  ];
+  const result=detectNineStrategySetup({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
+    isTopGainer:true,researchEnabled:false,now
+  });
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(topGainer.status,'DETECTED');
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='BLOCKED'));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
+});

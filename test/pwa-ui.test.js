@@ -167,3 +167,20 @@ test('PWA offline shell caches the last-session snapshot module and bumps its ca
   assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
+
+
+test('restored cached chart never suppresses a fresh verified history request for the same symbol', () => {
+  const start = app.indexOf('async function selectSymbol(');
+  const end = app.indexOf('\\nfunction drawHistoryChart', start);
+  assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
+  const flow = app.slice(start, end);
+  assert.match(flow, /if \\(symbol === selectedSymbol && !chartRestoredFromCache\\) return/);
+  assert.doesNotMatch(flow, /if \\(symbol === selectedSymbol\\) \\{[\\s\\S]*?return;[\\s\\S]*?\\}/);
+  assert.match(app, /chartRestoredFromCache && selectedSymbol === underlyingTick\\?\\.symbol/);
+  assert.match(app, /fetch\\('\\/api\\/history\\?symbol='/);
+});
+
+test('scanner UI defaults to the real four-symbol slice, not the obsolete eleven-symbol fallback', () => {
+  assert.match(app, /data\\.scanPerSlice\\?\\?4/);
+  assert.doesNotMatch(app, /data\\.scanPerSlice\\|\\|11/);
+});

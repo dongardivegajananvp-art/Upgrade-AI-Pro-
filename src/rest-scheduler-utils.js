@@ -32,3 +32,8 @@ export function getSocketRateLimitBackoffMs(attempt, baseMs = 60_000, maxMs = 15
   const cap = Math.max(base, Number(maxMs) || 15 * 60_000);
   return Math.min(cap, base * (2 ** Math.min(n - 1, 20)));
 }
+
+export function canCompleteSocketRateLimitRecovery({ recoveryPending, pendingCount, socketConnected, now, cooldownUntil } = {}) {
+  return Boolean(recoveryPending) && Number(pendingCount) === 0 &&
+    Boolean(socketConnected) && Number(now) >= Number(cooldownUntil);
+}

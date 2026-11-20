@@ -329,6 +329,22 @@ const server = http.createServer(async (req,res) => {
     }));
   }
   if (req.method === 'GET' && url.pathname === '/api/status') {
+    if (!hasFyersSession) {
+      // Do not expose a logged-in user's selected symbols, live ticks, scanner
+      // diagnostics, or broker-session state to anonymous visitors.
+      return send(res,200,{
+        app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS',
+        feed:{status:'MISSING',fresh:false,actionable:false,reason:'A valid FYERS session is required'},
+        auth:{status:'NOT_AUTHENTICATED',tokenStored:false},
+        marketData:{
+          socketStatus:'NOT_AUTHENTICATED',indices:{},selectedUnderlying:null,
+          selectedOption:null,selectedOptionSymbol:null,
+          optionSubscription:{status:'SESSION_REQUIRED'},
+          fno:{status:'SESSION_REQUIRED',topGainers:[]}
+        },
+        orderPlacementEnabled:false, marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+      });
+    }
     const market = getSessionMarketData();
     return send(res,200,{
     app:'Upgrade AI Pro', exchange:'NSE', provider:'FYERS', feed:assessFeed(market.selectedUnderlying), auth:getAuthStatus(), marketData:market, rest:getRestDiagnostics(),

@@ -58,7 +58,7 @@ async function refreshUniverseScan() {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
     container.replaceChildren();
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice||11)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
@@ -135,7 +135,8 @@ async function refresh() {
     renderLiveCandleSummary(underlyingTick);
     // Restore the backend's selected chart symbol after a page reload; otherwise
     // the server can build a live candle while the client never renders it.
-    if (!selectedSymbol && underlyingTick?.symbol && underlyingTick.fresh) {
+    if ((!selectedSymbol || (chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol)) &&
+        underlyingTick?.symbol && underlyingTick.fresh) {
       selectSymbol(underlyingTick.symbol, underlyingTick.price);
     }
     if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh && underlyingTick.liveCandle) {
@@ -403,15 +404,9 @@ async function readJsonResponse(response, endpoint) {
 }
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol) return;
-  if (symbol === selectedSymbol) {
-    if (chartRestoredFromCache) {
-      chartRestoredFromCache = false;
-      try {
-        await fetch('/api/select-underlying', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ symbol }) });
-      } catch {}
-    }
-    return;
-  }
+  // A persisted chart is display-only. Selecting that same symbol must still
+  // fetch current verified FYERS history; never let a cache hit suppress reload.
+  if (symbol === selectedSymbol && !chartRestoredFromCache) return;
   selectedSymbol = symbol;
   chartRestoredFromCache = false;
   resetChartViewport();

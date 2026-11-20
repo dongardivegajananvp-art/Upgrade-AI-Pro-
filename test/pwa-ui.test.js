@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout and responsive breakpoints',
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v11/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v11/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -164,6 +164,22 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v10/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v11/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
+});
+
+
+test('restored cached chart never suppresses a fresh verified history request for the same symbol', () => {
+  const start = app.indexOf('async function selectSymbol(');
+  const end = app.indexOf('\nfunction drawHistoryChart', start);
+  assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
+  const flow = app.slice(start, end);
+  assert.ok(flow.includes('if (symbol === selectedSymbol && !chartRestoredFromCache) return'));
+  assert.ok(app.includes('chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol'));
+  assert.ok(flow.includes("fetch('/api/history?symbol='"));
+});
+
+test('scanner UI defaults to the real four-symbol slice, not the obsolete eleven-symbol fallback', () => {
+  assert.ok(app.includes('data.scanPerSlice??4'));
+  assert.ok(!app.includes('data.scanPerSlice||11'));
 });

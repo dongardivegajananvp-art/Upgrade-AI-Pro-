@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches } from './socket-subscription-utils.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
@@ -34,28 +34,70 @@ const ticks = new Map();
 let socketHasConnected = false;
 const socketSubscribedSymbols = new Set();
 let subscriptionOperationSequence = 0;
+const SUBSCRIPTION_BATCH_SIZE = 4;
+const SUBSCRIPTION_BATCH_INTERVAL_MS = 1200;
+let pendingSubscriptionSymbols = [];
+const pendingSubscriptionSet = new Set();
+let subscriptionFlushTimer = null;
 
+function scheduleSubscriptionFlush(delay = 0) {
+  if (subscriptionFlushTimer || !pendingSubscriptionSymbols.length) return;
+  subscriptionFlushTimer = setTimeout(() => {
+    subscriptionFlushTimer = null;
+    if (!socket || socketStatus !== 'CONNECTED') return;
+    const batch = splitSubscriptionBatches(pendingSubscriptionSymbols, SUBSCRIPTION_BATCH_SIZE)[0] || [];
+    pendingSubscriptionSymbols.splice(0, batch.length);
+    for (const symbol of batch) pendingSubscriptionSet.delete(symbol);
+    try {
+      console.info('[FYERS_DATA] paced subscribe batch:', JSON.stringify({
+        count: batch.length, remaining: pendingSubscriptionSymbols.length,
+        batchSize: SUBSCRIPTION_BATCH_SIZE, intervalMs: SUBSCRIPTION_BATCH_INTERVAL_MS
+      }));
+      socket.subscribe(batch);
+      for (const symbol of batch) socketSubscribedSymbols.add(symbol);
+    } catch (error) {
+      pendingSubscriptionSymbols = [...batch, ...pendingSubscriptionSymbols];
+      for (const symbol of batch) pendingSubscriptionSet.add(symbol);
+      lastError = safeError(error);
+      socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+      console.error('[FYERS_DATA] paced subscription batch failed:', lastError);
+      return;
+    }
+    if (pendingSubscriptionSymbols.length) scheduleSubscriptionFlush(SUBSCRIPTION_BATCH_INTERVAL_MS);
+  }, delay);
+  subscriptionFlushTimer.unref?.();
+}
 
 function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
-  const { removed, added } = getSocketSubscriptionDelta([...socketSubscribedSymbols], desiredSymbols);
+  const desired = [...new Set(desiredSymbols)];
+  const known = [...socketSubscribedSymbols, ...pendingSubscriptionSet];
+  const { removed, added } = getSocketSubscriptionDelta(known, desired);
   const operationId = ++subscriptionOperationSequence;
   console.info('[FYERS_DATA] subscription delta:', JSON.stringify({
     operationId, reason, at: new Date().toISOString(),
-    socketStatus, currentCount: socketSubscribedSymbols.size,
-    desiredCount: desiredSymbols.length, addedCount: added.length,
-    removedCount: removed.length
+    currentCount: socketSubscribedSymbols.size, queuedCount: pendingSubscriptionSet.size,
+    desiredCount: desired.length, addedCount: added.length, removedCount: removed.length
   }));
   if (removed.length) {
-    if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
-    console.info('[FYERS_DATA] unsubscribe request:', JSON.stringify({ operationId, count: removed.length }));
-    socket.unsubscribe(removed);
-    for (const symbol of removed) socketSubscribedSymbols.delete(symbol);
+    const removedSet = new Set(removed);
+    pendingSubscriptionSymbols = pendingSubscriptionSymbols.filter(symbol => !removedSet.has(symbol));
+    for (const symbol of removed) pendingSubscriptionSet.delete(symbol);
+    const activeRemoved = removed.filter(symbol => socketSubscribedSymbols.has(symbol));
+    if (activeRemoved.length) {
+      if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
+      console.info('[FYERS_DATA] unsubscribe request:', JSON.stringify({ operationId, count: activeRemoved.length }));
+      socket.unsubscribe(activeRemoved);
+      for (const symbol of activeRemoved) socketSubscribedSymbols.delete(symbol);
+    }
   }
   if (added.length) {
-    console.info('[FYERS_DATA] subscribe request:', JSON.stringify({ operationId, count: added.length }));
-    socket.subscribe(added);
-    for (const symbol of added) socketSubscribedSymbols.add(symbol);
+    for (const symbol of added) {
+      pendingSubscriptionSymbols.push(symbol);
+      pendingSubscriptionSet.add(symbol);
+    }
   }
+  // Resume any batches paused by a disconnect, even when the desired set did not change.
+  scheduleSubscriptionFlush();
 }
 
 function safeError(error) {
@@ -192,7 +234,7 @@ export function setSelectedOptionSymbol(symbol) {
   optionSubscriptionRequestedAt = next ? Date.now() : null;
   optionLastTickAt = null;
   optionSubscriptionError = null;
-  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_SENT' : 'QUEUED_UNTIL_SOCKET_CONNECT';
+  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_QUEUED' : 'QUEUED_UNTIL_SOCKET_CONNECT';
   console.info('[FYERS_DATA] option subscription state:', optionSubscriptionStatus, next || 'cleared');
   return { status: optionSubscriptionStatus, symbol: next };
 }
@@ -225,16 +267,23 @@ export function startMarketSocket() {
         return;
       }
       if (selectedOptionSymbol) {
-        optionSubscriptionStatus = 'SUBSCRIPTION_SENT';
+        optionSubscriptionStatus = 'SUBSCRIPTION_QUEUED';
         optionSubscriptionError = null;
       }
       socket.autoreconnect(10);
-      console.info('[FYERS_DATA] connected; subscription reconciliation complete:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
+      console.info('[FYERS_DATA] connected; subscription reconciliation queued:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
     });
     socket.on('message', message => accept(decode(message)));
     socket.on('error', error => {
       lastError = safeError(error || 'FYERS data socket error');
-      socketStatus = 'ERROR';
+      socketStatus = /1015|too many requests|rate.?limit/i.test(lastError) ? 'RATE_LIMITED' : 'ERROR';
+      if (socketStatus === 'RATE_LIMITED') {
+        // A rejected provider batch must not remain recorded as subscribed.
+        // Reconcile the desired set on the next successful connection.
+        socketSubscribedSymbols.clear();
+        pendingSubscriptionSymbols = [];
+        pendingSubscriptionSet.clear();
+      }
       console.error('[FYERS_DATA] socket error:', lastError);
     });
     socket.on('close', () => {
@@ -274,7 +323,7 @@ export function getMarketData(now = Date.now()) {
     subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
     symbolLimit: 100, indices,
     fno: {
-      status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
+      status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, coverageComplete: rolling.coverageComplete,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,

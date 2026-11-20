@@ -1,4 +1,5 @@
 import { getAccessTokenForServer } from './fyers-auth.js';
+import { getRestWaitMs, isRestCooldownActive } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -41,8 +42,19 @@ async function scheduledFetch(url, options) {
   const run = queue.then(async () => {
     lastRequestPath = url.pathname;
     const now = Date.now();
-    const delay = Math.max(0, nextRequestAt - now, cooldownUntil - now);
+    // A prior queued request may have received 429. Reject immediately rather
+    // than sleeping until cooldown expiry and accidentally sending stale work.
+    if (isRestCooldownActive(now, cooldownUntil)) {
+      lastRestStatus = 'RATE_LIMITED';
+      throw new Error('FYERS REST cooldown active; queued request was not sent upstream');
+    }
+    const delay = getRestWaitMs(now, nextRequestAt);
     if (delay) await wait(delay);
+    // Re-check after pacing wait in case a cooldown was activated meanwhile.
+    if (isRestCooldownActive(Date.now(), cooldownUntil)) {
+      lastRestStatus = 'RATE_LIMITED';
+      throw new Error('FYERS REST cooldown active; queued request was not sent upstream');
+    }
     const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
     nextRequestAt = Date.now() + MIN_REST_GAP_MS;
     lastRestMeta = {

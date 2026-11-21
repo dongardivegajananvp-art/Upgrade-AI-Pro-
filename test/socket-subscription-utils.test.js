@@ -54,3 +54,14 @@ test('reconnect desired subscription reconciliation remains within the Standard 
   assert.equal(desired.length,24);
   assert.ok(desired.length<=100);
 });
+
+
+test('off-session socket plan retains indices but excludes F&O and selected option', async () => {
+  const { buildSessionSocketSubscriptions } = await import('../src/socket-subscription-utils.js');
+  assert.deepEqual(buildSessionSocketSubscriptions(['IDX-A','IDX-B'],['NSE:ABC-EQ'],'NSE:ABC26NOV100CE',false),['IDX-A','IDX-B']);
+});
+
+test('session-ready socket plan includes active F&O and selected option', async () => {
+  const { buildSessionSocketSubscriptions } = await import('../src/socket-subscription-utils.js');
+  assert.deepEqual(buildSessionSocketSubscriptions(['IDX-A'],['NSE:ABC-EQ'],'NSE:ABC26NOV100CE',true),['IDX-A','NSE:ABC-EQ','NSE:ABC26NOV100CE']);
+});

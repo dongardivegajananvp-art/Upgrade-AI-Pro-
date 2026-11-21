@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { isNseRegularSession } from './nse-session.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
@@ -47,8 +47,12 @@ let socketRateLimitRecoveryTimer = null;
 let socketTransportConnected = false;
 let resetRateLimitAfterSubscriptionFlush = false;
 
+function sessionFeedReady(now = Date.now()) {
+  return isNseRegularSession(now) && INDEX_SYMBOLS.some(symbol => isFresh(ticks.get(symbol), now));
+}
+
 function desiredSocketSubscriptions() {
-  return buildDesiredSocketSubscriptions(INDEX_SYMBOLS, activeFnoSymbols, selectedOptionSymbol);
+  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, activeFnoSymbols, selectedOptionSymbol, sessionFeedReady());
 }
 
 function scheduleSubscriptionFlush(delay = 0) {
@@ -148,7 +152,7 @@ function isFresh(tick, now = Date.now()) {
     now / 1000 - tick.exchangeTime <= 10 && now / 1000 - tick.exchangeTime >= -3);
 }
 function acceptedSymbols() {
-  return new Set([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])]);
+  return new Set(desiredSocketSubscriptions());
 }
 function accept(item) {
   if (Array.isArray(item)) { for (const child of item) accept(child); return; }
@@ -195,13 +199,38 @@ function nextSlice(startIndex = rotationIndex) {
   return buildFnoRotationSlice(universe,startIndex,MAX_UNDERLYING_SLOTS,selectedUnderlyingSymbol);
 }
 function applyFnoRotation(advance = false) {
+  const ready = sessionFeedReady();
+  if (!ready) {
+    activeFnoSymbols = [];
+    if (socket && socketStatus === 'CONNECTED') {
+      try { syncSocketSubscriptions(desiredSocketSubscriptions(), 'nse-session-or-index-feed-not-ready'); }
+      catch (error) {
+        lastError = safeError(error);
+        socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+        console.error('[FYERS_DATA] off-session subscription cleanup failed:', lastError);
+      }
+    }
+    if (selectedOptionSymbol) optionSubscriptionStatus = 'QUEUED_UNTIL_FRESH_NSE_SESSION';
+    return;
+  }
   const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
     ? getNextFnoRotationIndex(universe.length,rotationIndex,SCAN_PER_SLICE) : rotationIndex;
   const next=nextSlice(nextIndex);
-  if (!next.length) { activeFnoSymbols = []; return; }
+  if (!next.length) {
+    activeFnoSymbols = [];
+    if (socket && socketStatus === 'CONNECTED') {
+      try { syncSocketSubscriptions(desiredSocketSubscriptions(), 'empty-fno-universe'); }
+      catch (error) {
+        lastError = safeError(error);
+        socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+        console.error('[FYERS_DATA] empty-universe subscription cleanup failed:', lastError);
+      }
+    }
+    return;
+  }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      syncSocketSubscriptions([...INDEX_SYMBOLS, ...next, ...(selectedOptionSymbol ? [selectedOptionSymbol] : [])], advance ? 'fno-rotation' : 'fno-slice-selection');
+      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, next, selectedOptionSymbol, true), advance ? 'fno-rotation' : 'fno-slice-selection');
     } catch (error) {
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
@@ -211,6 +240,10 @@ function applyFnoRotation(advance = false) {
   }
   activeFnoSymbols = next;
   rotationIndex = nextIndex;
+  if (selectedOptionSymbol) {
+    optionSubscriptionStatus = 'SUBSCRIPTION_QUEUED';
+    optionSubscriptionError = null;
+  }
 }
 export function setFnoUniverse(items) {
   const unique = new Map();
@@ -222,10 +255,13 @@ export function setFnoUniverse(items) {
   rotationIndex = 0;
   applyFnoRotation();
   if (rotationTimer) clearInterval(rotationTimer);
-  if (universe.length > MAX_UNDERLYING_SLOTS) {
+  if (universe.length) {
     rotationTimer = setInterval(() => {
-      if (!isNseRegularSession(Date.now())) return;
-      applyFnoRotation(true);
+      if (!sessionFeedReady()) {
+        applyFnoRotation(false);
+        return;
+      }
+      applyFnoRotation(activeFnoSymbols.length > 0 && universe.length > MAX_UNDERLYING_SLOTS);
     }, ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
@@ -245,9 +281,10 @@ export function setSelectedOptionSymbol(symbol) {
   if (next === selectedOptionSymbol) {
     return { status: optionSubscriptionStatus, symbol: next, reason: optionSubscriptionError };
   }
+  selectedOptionSymbol = next;
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      syncSocketSubscriptions([...INDEX_SYMBOLS, ...activeFnoSymbols, ...(next ? [next] : [])], 'selected-option-change');
+      syncSocketSubscriptions(desiredSocketSubscriptions(), 'selected-option-change');
     } catch (error) {
       lastError = safeError(error);
       optionSubscriptionStatus = 'SUBSCRIPTION_FAILED';
@@ -257,11 +294,10 @@ export function setSelectedOptionSymbol(symbol) {
       return { status: optionSubscriptionStatus, symbol: selectedOptionSymbol, reason: lastError };
     }
   }
-  selectedOptionSymbol = next;
   optionSubscriptionRequestedAt = next ? Date.now() : null;
   optionLastTickAt = null;
   optionSubscriptionError = null;
-  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_QUEUED' : 'QUEUED_UNTIL_SOCKET_CONNECT';
+  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : !sessionFeedReady() ? 'QUEUED_UNTIL_FRESH_NSE_SESSION' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_QUEUED' : 'QUEUED_UNTIL_SOCKET_CONNECT';
   console.info('[FYERS_DATA] option subscription state:', optionSubscriptionStatus, next || 'cleared');
   return { status: optionSubscriptionStatus, symbol: next };
 }

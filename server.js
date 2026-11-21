@@ -297,7 +297,7 @@ const server = http.createServer(async (req,res) => {
       if (url.pathname === '/api/research-context') {
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
-        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol),getFifteenMinuteHistory(symbol)]);
+        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol,Date.now(),50),getFifteenMinuteHistory(symbol,Date.now(),50)]);
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
       if (url.pathname === '/api/research/historical-universe') {
@@ -375,7 +375,7 @@ const server = http.createServer(async (req,res) => {
           return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Fresh selected-underlying FYERS tick is required for independent research'});
         }
         const [fiveMinute,daily,fifteenMinute] = await Promise.all([
-          getFiveMinuteHistory(symbol), getDailyHistory(symbol), getFifteenMinuteHistory(symbol)
+          getFiveMinuteHistory(symbol,Date.now(),50), getDailyHistory(symbol,Date.now(),50), getFifteenMinuteHistory(symbol,Date.now(),50)
         ]);
         const latestMarket = getMarketData();
         const latestUnderlying = latestMarket.selectedUnderlying;

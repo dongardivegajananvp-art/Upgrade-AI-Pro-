@@ -3,6 +3,7 @@ import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { isNseRegularSession } from './nse-session.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
@@ -222,7 +223,10 @@ export function setFnoUniverse(items) {
   applyFnoRotation();
   if (rotationTimer) clearInterval(rotationTimer);
   if (universe.length > MAX_UNDERLYING_SLOTS) {
-    rotationTimer = setInterval(() => applyFnoRotation(true), ROTATION_INTERVAL_MS);
+    rotationTimer = setInterval(() => {
+      if (!isNseRegularSession(Date.now())) return;
+      applyFnoRotation(true);
+    }, ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
   return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };

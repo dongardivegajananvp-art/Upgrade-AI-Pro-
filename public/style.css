@@ -157,3 +157,15 @@ button.research-card{width:100%;text-align:left;color:inherit;font:inherit;curso
 button.research-card:focus-visible{outline:2px solid #63b3ff;outline-offset:2px}
 
 .chart-area{overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}.chart-area svg{touch-action:none;max-width:100%;cursor:crosshair}.chart-gesture-hint{font-size:9px;color:#8198b5;text-align:right;letter-spacing:.04em}@media(max-width:700px){.chart-gesture-hint{max-width:58%;font-size:8px;line-height:1.4}}
+
+
+/* Search across the official FYERS F&O universe */
+.fno-search-label{display:block;margin:2px 0 7px;color:#9bb0ca;font-size:10px;letter-spacing:.08em}
+#fno-search-input{display:block;width:100%;padding:12px 13px;border:1px solid #38516f;border-radius:8px;background:#081525;color:#eaf2ff;font:inherit;font-size:14px;outline:none}
+#fno-search-input:focus{border-color:#4c9aff;box-shadow:0 0 0 2px #4c9aff25}
+.fno-search-results{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.fno-search-result{display:grid;gap:5px;min-width:0;padding:10px 12px;text-align:left;border:1px solid #29415f;border-radius:8px;background:#102039;color:#eaf2ff;cursor:pointer}
+.fno-search-result:hover,.fno-search-result:focus-visible{border-color:#4c9aff;outline:none;background:#142b49}
+.fno-search-result strong{font-size:12px;overflow-wrap:anywhere}
+.fno-search-result small{font-size:9px;color:#91a9c7;overflow-wrap:anywhere}
+@media(max-width:700px){.fno-search-results{grid-template-columns:repeat(2,minmax(0,1fr))}.fno-search-result{padding:9px}}

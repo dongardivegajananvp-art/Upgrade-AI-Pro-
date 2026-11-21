@@ -7,7 +7,9 @@ const MIN_REST_GAP_MS = 4000;
 const RATE_LIMIT_COOLDOWN_MS = 60 * 60 * 1000;
 let nextRequestAt = 0;
 let cooldownUntil = 0;
-let queue = Promise.resolve();
+const restQueue = [];
+let restQueueSequence = 0;
+let drainingRestQueue = false;
 let lastRestStatus = 'IDLE';
 let lastRestError = null;
 let lastRestMeta = { retryAfter: null, cfRay: null, server: null, contentType: null };
@@ -38,70 +40,90 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a, b) => a.time - b.time);
 }
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function scheduledFetch(url, options) {
-  const run = queue.then(async () => {
-    lastRequestPath = url.pathname;
-    const now = Date.now();
-    // A prior queued request may have received 429. Reject immediately rather
-    // than sleeping until cooldown expiry and accidentally sending stale work.
-    if (isRestCooldownActive(now, cooldownUntil)) {
-      lastRestStatus = 'RATE_LIMITED';
-      throw new Error('FYERS REST cooldown active; queued request was not sent upstream');
+async function drainRestQueue() {
+  if (drainingRestQueue) return;
+  drainingRestQueue = true;
+  try {
+    while (restQueue.length) {
+      if (isRestCooldownActive(Date.now(), cooldownUntil)) {
+        const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
+        for (const job of restQueue.splice(0)) job.reject(error);
+        lastRestStatus = 'RATE_LIMITED';
+        break;
+      }
+      restQueue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+      const delay = getRestWaitMs(Date.now(), nextRequestAt);
+      if (delay) await wait(delay);
+      if (isRestCooldownActive(Date.now(), cooldownUntil)) {
+        const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
+        for (const job of restQueue.splice(0)) job.reject(error);
+        lastRestStatus = 'RATE_LIMITED';
+        break;
+      }
+      const job = restQueue.shift();
+      if (!job) continue;
+      lastRequestPath = job.url.pathname;
+      try {
+        const response = await fetch(job.url, { ...job.options, signal: AbortSignal.timeout(12000) });
+        nextRequestAt = Date.now() + MIN_REST_GAP_MS;
+        lastRestMeta = {
+          retryAfter: response.headers.get('retry-after'),
+          cfRay: response.headers.get('cf-ray'),
+          server: response.headers.get('server'),
+          contentType: response.headers.get('content-type')
+        };
+        const rawBody = await response.text().catch(() => '');
+        let body = {};
+        try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
+        if (response.status === 429) {
+          cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, RATE_LIMIT_COOLDOWN_MS);
+          lastRestStatus = 'RATE_LIMITED';
+          const markers = [lastRestMeta.retryAfter ? 'Retry-After=' + lastRestMeta.retryAfter : null, lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null, lastRestMeta.server ? 'Server=' + lastRestMeta.server : null].filter(Boolean).join(' · ');
+          lastRateLimitAt = new Date().toISOString();
+          lastRestError = 'FYERS HTTP 429; REST cooldown active until ' + new Date(cooldownUntil).toISOString() + ' (process-local; restart persistence requires durable storage)' + (markers ? ' · ' + markers : '');
+          console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
+            path: lastRequestPath, status: response.status, at: lastRateLimitAt,
+            retryAfter: lastRestMeta.retryAfter, cfRay: lastRestMeta.cfRay,
+            server: lastRestMeta.server, contentType: lastRestMeta.contentType
+          }));
+          job.reject(new Error(lastRestError));
+          const queuedError = new Error('FYERS REST cooldown active; queued request was not sent upstream');
+          for (const pending of restQueue.splice(0)) pending.reject(queuedError);
+          break;
+        }
+        if (!response.ok || body.s === 'error' || Number(body.code) < 0) {
+          lastRestStatus = 'ERROR';
+          lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
+          job.reject(new Error(lastRestError));
+          continue;
+        }
+        lastRestStatus = 'OK';
+        lastRestError = null;
+        job.resolve(body);
+      } catch (error) {
+        lastRestStatus = 'ERROR';
+        lastRestError = String(error?.message || 'FYERS REST request failed').slice(0,180);
+        job.reject(error);
+      }
     }
-    const delay = getRestWaitMs(now, nextRequestAt);
-    if (delay) await wait(delay);
-    // Re-check after pacing wait in case a cooldown was activated meanwhile.
-    if (isRestCooldownActive(Date.now(), cooldownUntil)) {
-      lastRestStatus = 'RATE_LIMITED';
-      throw new Error('FYERS REST cooldown active; queued request was not sent upstream');
-    }
-    const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
-    nextRequestAt = Date.now() + MIN_REST_GAP_MS;
-    lastRestMeta = {
-      retryAfter: response.headers.get('retry-after'),
-      cfRay: response.headers.get('cf-ray'),
-      server: response.headers.get('server'),
-      contentType: response.headers.get('content-type')
-    };
-    const rawBody = await response.text().catch(() => '');
-    let body = {};
-    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
-    if (response.status === 429) {
-      cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, RATE_LIMIT_COOLDOWN_MS);
-      lastRestStatus = 'RATE_LIMITED';
-      const markers = [lastRestMeta.retryAfter ? 'Retry-After=' + lastRestMeta.retryAfter : null, lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null, lastRestMeta.server ? 'Server=' + lastRestMeta.server : null].filter(Boolean).join(' · ');
-      lastRateLimitAt = new Date().toISOString();
-      lastRestError = 'FYERS HTTP 429; REST cooldown active until ' + new Date(cooldownUntil).toISOString() + ' (process-local; restart persistence requires durable storage)' + (markers ? ' · ' + markers : '');
-      console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
-        path: lastRequestPath,
-        status: response.status,
-        at: lastRateLimitAt,
-        retryAfter: lastRestMeta.retryAfter,
-        cfRay: lastRestMeta.cfRay,
-        server: lastRestMeta.server,
-        contentType: lastRestMeta.contentType
-      }));
-      throw new Error(lastRestError);
-    }
-    if (!response.ok || body.s === 'error' || (Number(body.code) < 0)) {
-      lastRestStatus = 'ERROR';
-      lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
-      throw new Error(lastRestError);
-    }
-    lastRestStatus = 'OK';
-    lastRestError = null;
-    return body;
-  });
-  queue = run.catch(() => {});
-  return run;
+  } finally {
+    drainingRestQueue = false;
+    if (restQueue.length && !isRestCooldownActive(Date.now(), cooldownUntil)) void drainRestQueue();
+  }
 }
-async function fyersGet(base, path, params = {}) {
+function scheduledFetch(url, options, priority = 0) {
+  return new Promise((resolve, reject) => {
+    restQueue.push({ url, options, priority: Number(priority) || 0, sequence: ++restQueueSequence, resolve, reject });
+    void drainRestQueue();
+  });
+}
+async function fyersGet(base, path, params = {}, priority = 0) {
   const token = getAccessTokenForServer();
   const appId = process.env.FYERS_APP_ID?.trim();
   if (!token || !appId) throw new Error('FYERS authentication is not active in this server process');
   if (Date.now() < cooldownUntil) throw new Error('FYERS REST cooldown active; no upstream request was sent');
   const url = buildFyersUrl(base, path, params);
-  return scheduledFetch(url, { method: 'GET', headers: { Authorization: `${appId}:${token}`, Accept: 'application/json' } });
+  return scheduledFetch(url, { method: 'GET', headers: { Authorization: `${appId}:${token}`, Accept: 'application/json' } }, priority);
 }
 export function buildFyersUrl(base, path, params = {}) {
   const url = new URL(path.replace(/^\/+/, ''), base.endsWith('/') ? base : base + '/');
@@ -124,7 +146,7 @@ export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
 }
 
 const fiveMinuteCache = new Map();
-export async function getFiveMinuteHistory(symbol, now = Date.now()) {
+export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = 0) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   const date = istDate(now);
   const cached = fiveMinuteCache.get(symbol);
@@ -132,7 +154,7 @@ export async function getFiveMinuteHistory(symbol, now = Date.now()) {
   const range = getFiveMinuteHistoryRange(now);
   const body = await fyersGet(DATA_BASE, '/history', {
     symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
-  });
+  }, priority);
   if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified historical candles');
   const candles = normalizeFiveMinuteCandles(body.candles, now);
   if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the NSE session');
@@ -195,13 +217,13 @@ export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const fifteenMinuteCache = new Map();
-export async function getFifteenMinuteHistory(symbol, now = Date.now()) {
+export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = -10) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
   const cached=fifteenMinuteCache.get(symbol);
   if(cached&&now-cached.savedAt<30*60*1000)return cached.value;
   const to=istDate(now);
   const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
-  const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to});
+  const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority);
   if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute research candles');
   const candles=normalizeFifteenMinuteCandles(body.candles,now);
   if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles for research');
@@ -233,13 +255,13 @@ export function normalizeDailyCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const dailyCache = new Map();
-export async function getDailyHistory(symbol, now = Date.now()) {
+export async function getDailyHistory(symbol, now = Date.now(), priority = -10) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
   const cached = dailyCache.get(symbol);
   if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
   const to = istDate(now);
   const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
-  const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to });
+  const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority);
   if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
   const candles = normalizeDailyCandles(body.candles, now);
   if (candles.length < 50) throw new Error('Insufficient completed FYERS daily candles for research');
@@ -251,7 +273,7 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');
   const count = Number(strikecount);
   if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error('Option-chain strike count must be from 1 to 50');
-  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' });
+  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' }, 100);
 }
 export async function getFyersPositions() { return fyersGet(API_BASE, '/positions'); }
 export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders'); }

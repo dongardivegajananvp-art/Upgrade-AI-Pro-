@@ -141,6 +141,27 @@ async function refreshUniverseScan() {
         empty.textContent='No historical candidate is currently proven from cached verified candles. Missing history is counted as blocked; no sample setup is shown.';
         container.append(empty);
       }
+      const historicalAudit=document.createElement('details');
+      const auditTitle=document.createElement('summary');
+      auditTitle.textContent='HISTORICAL F&O COVERAGE AUDIT · '+(historical.evaluations||[]).length+' SYMBOLS';
+      historicalAudit.append(auditTitle);
+      for(const stock of historical.evaluations||[]) {
+        const group=document.createElement('details');
+        const summary=document.createElement('summary');
+        summary.textContent=stock.symbol+' · '+stock.status+' · '+(stock.strategy||'NO CONFIRMED PATTERN');
+        group.append(summary);
+        if(stock.reason) {
+          const reason=document.createElement('small');reason.className='empty-inline';reason.textContent=stock.reason;group.append(reason);
+        }
+        for(const item of stock.strategyLedger||[]) {
+          const row=document.createElement('div');row.className='strategy-ledger-row';
+          const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+          const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+          row.append(label,reason);group.append(row);
+        }
+        historicalAudit.append(group);
+      }
+      container.append(historicalAudit);
     }
   } catch(error) {
     status.textContent='UNIVERSE SCAN UNAVAILABLE';

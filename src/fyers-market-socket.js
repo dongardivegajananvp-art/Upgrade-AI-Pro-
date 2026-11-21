@@ -216,7 +216,18 @@ function applyFnoRotation(advance = false) {
   const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
     ? getNextFnoRotationIndex(universe.length,rotationIndex,SCAN_PER_SLICE) : rotationIndex;
   const next=nextSlice(nextIndex);
-  if (!next.length) { activeFnoSymbols = []; return; }
+  if (!next.length) {
+    activeFnoSymbols = [];
+    if (socket && socketStatus === 'CONNECTED') {
+      try { syncSocketSubscriptions(desiredSocketSubscriptions(), 'empty-fno-universe'); }
+      catch (error) {
+        lastError = safeError(error);
+        socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
+        console.error('[FYERS_DATA] empty-universe subscription cleanup failed:', lastError);
+      }
+    }
+    return;
+  }
   if (socket && socketStatus === 'CONNECTED') {
     try {
       syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, next, selectedOptionSymbol, true), advance ? 'fno-rotation' : 'fno-slice-selection');

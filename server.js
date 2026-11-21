@@ -533,7 +533,7 @@ const server = http.createServer(async (req,res) => {
       if (contract.symbol !== body.contract || contract.underlying !== expectedUnderlying || !['CE','PE'].includes(contract.side)) {
         return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected option contract identity, underlying or CE/PE side does not match the requested setup'});
       }
-      const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([getFiveMinuteHistory(body.underlying),getFiveMinuteHistory(body.contract),getDailyHistory(body.underlying),getFifteenMinuteHistory(body.underlying)]);
+      const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([getFiveMinuteHistory(body.underlying,Date.now(),50),getFiveMinuteHistory(body.contract,Date.now(),50),getDailyHistory(body.underlying,Date.now(),50),getFifteenMinuteHistory(body.underlying,Date.now(),50)]);
       // REST history requests are serialized to respect FYERS pacing. Re-read the
       // WebSocket snapshot afterwards so the 10-second freshness gate uses current ticks.
       const latestMarket=getMarketData();

@@ -380,6 +380,7 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   // One completed post-breakout confirmation/retest candle defines the swing low.
   // Place the stop one official option tick below that candle structure; ATR(14) is not required.
   const stopLoss=Number((Math.floor((number(swingLow)-step+1e-9)/step)*step).toFixed(8));
+  if (!(Number.isFinite(stopLoss) && stopLoss > 0)) return { status: 'NO_TRADE', reason: 'Structural stop rounds to a non-positive option premium; a valid positive exchange stop is required' };
   const risk=entry-stopLoss;
   if(!(risk>=step))return{status:'NO_TRADE',reason:'Single-candle confirmation swing low does not leave positive option-premium risk'};
   if(number(livePremium)+step*1e-7<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};

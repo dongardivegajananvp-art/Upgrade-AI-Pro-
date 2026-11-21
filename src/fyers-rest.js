@@ -1,5 +1,5 @@
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRestQueue } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -51,7 +51,7 @@ async function drainRestQueue() {
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
-      restQueue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+      restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
       const delay = getRestWaitMs(Date.now(), nextRequestAt);
       if (delay) await wait(delay);
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
@@ -60,7 +60,7 @@ async function drainRestQueue() {
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
-      restQueue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+      restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
       const job = restQueue.shift();
       if (!job) continue;
       lastRequestPath = job.url.pathname;

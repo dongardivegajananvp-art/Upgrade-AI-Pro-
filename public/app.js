@@ -59,13 +59,13 @@ async function refreshUniverseScan() {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
     container.replaceChildren();
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
-    warmup.textContent='RESEARCH WARMUP · '+(scanner.warmupStatus||'IDLE')+
+    warmup.textContent='RESEARCH WARMUP · '+(data.marketSession==='CLOSED'?'PAUSED · MARKET CLOSED':(scanner.warmupStatus||'IDLE'))+
       ' · QUEUED '+(scanner.warmupQueueDepth||0)+
       ' · DONE '+(scanner.warmupCompletedCount||0)+
       ' · RETRIES '+(scanner.warmupRetryCount||0)+
@@ -301,6 +301,18 @@ async function refresh() {
       feed.textContent = 'FYERS DISCONNECTED · NO VERIFIED LIVE TICK';
       feed.dataset.state = 'disconnected';
     }
+    const ws = md.socketDiagnostics || {};
+    const tickAge = Number.isFinite(Number(ws.lastTickAgeSeconds)) ? ws.lastTickAgeSeconds + 's AGO' : 'NEVER';
+    feed.textContent += ' · WS ' + (md.socketStatus || 'UNKNOWN') +
+      ' · RECONNECTS ' + (ws.reconnectCount || 0) +
+      ' · CLOSES ' + (ws.closeCount || 0) +
+      ' · ERRORS ' + (ws.errorCount || 0) +
+      ' · LAST TICK ' + tickAge;
+    feed.title = 'WebSocket last connected: ' + (ws.lastConnectedAt || 'unknown') +
+      ' · last closed: ' + (ws.lastClosedAt || 'unknown') +
+      ' · last message: ' + (ws.lastMessageAt || 'unknown') +
+      ' · last valid tick: ' + (ws.lastTickAt || 'unknown') +
+      ' · last socket error: ' + (ws.lastErrorAt || 'none');
   } catch {
     document.querySelector('#feed').textContent = 'BACKEND DISCONNECTED';
     document.querySelector('#feed').dataset.state = 'disconnected';

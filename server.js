@@ -15,6 +15,7 @@ import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
 import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
 import { requiresFyersSession } from './src/api-access.js';
+import { isNseRegularSession } from './src/nse-session.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -60,6 +61,16 @@ function startFnoStrategyScanner() {
   fnoStrategyScanStats.status='RUNNING';
   fnoStrategyScanTimer=setInterval(async () => {
     if (fnoStrategyScanBusy) return;
+    if (!isNseRegularSession(Date.now())) {
+      fnoStrategyScanStats.status='OUTSIDE_NSE_SESSION';
+      return;
+    }
+    const sessionMarket=getMarketData();
+    const freshIndexCount=Object.values(sessionMarket.indices||{}).filter(tick=>tick?.fresh).length;
+    if (freshIndexCount===0) {
+      fnoStrategyScanStats.status='WAITING_FOR_FRESH_INDEX_FEED';
+      return;
+    }
     const snapshot=getFnoUniverseSnapshot();
     const active=snapshot.activeSymbols || [];
     if (!active.length) { fnoStrategyScanStats.status='WAITING_FOR_ACTIVE_FNO_SLICE'; return; }

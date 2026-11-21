@@ -352,7 +352,11 @@ export function startMarketSocket() {
     socket.on('close', () => {
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
-      console.warn('[FYERS_DATA] socket closed');
+      // Do not assume the SDK retained server-side subscriptions across a transport
+      // reconnect. Clear the local acknowledgement set so the next connect event
+      // reconciles the complete current desired set in paced batches.
+      socketSubscribedSymbols.clear();
+      console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
     });
     socket.connect();
     return { status: socketStatus };

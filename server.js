@@ -84,8 +84,8 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.warmupSymbol=warmupSymbol;
       fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
       try {
-        await getDailyHistory(warmupSymbol);
-        await getFifteenMinuteHistory(warmupSymbol);
+        await getDailyHistory(warmupSymbol,Date.now(),-10);
+        await getFifteenMinuteHistory(warmupSymbol,Date.now(),-10);
         if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
           throw new Error('Research warmup queue completion state was not registered');
         }
@@ -117,7 +117,7 @@ function startFnoStrategyScanner() {
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
     try {
-      const history=await getFiveMinuteHistory(symbol);
+      const history=await getFiveMinuteHistory(symbol,Date.now(),-10);
       const latest=getFnoUniverseSnapshot();
       const tick=latest.ticks.get(symbol);
       const market=getMarketData();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getRestWaitMs, isRestCooldownActive, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from '../src/rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery, sortRestQueue } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
   assert.equal(getRestWaitMs(1000, 5000), 4000);
@@ -42,4 +42,18 @@ test('socket recovery cannot clear backoff before transport and all subscription
   assert.equal(canCompleteSocketRateLimitRecovery({...base,socketConnected:false}), false);
   assert.equal(canCompleteSocketRateLimitRecovery({...base,now:199999}), false);
   assert.equal(canCompleteSocketRateLimitRecovery({...base,recoveryPending:false}), false);
+});
+
+test('interactive FYERS requests are ordered ahead of background scans with stable FIFO ties', () => {
+  const jobs = [
+    { id:'scan-a', priority:-10, sequence:1 },
+    { id:'chart', priority:0, sequence:2 },
+    { id:'option-chain', priority:100, sequence:3 },
+    { id:'scan-b', priority:-10, sequence:4 },
+    { id:'user-history', priority:0, sequence:5 }
+  ];
+  assert.deepEqual(sortRestQueue(jobs).map(job=>job.id),[
+    'option-chain','chart','user-history','scan-a','scan-b'
+  ]);
+  assert.deepEqual(jobs.map(job=>job.id),['scan-a','chart','option-chain','scan-b','user-history']);
 });

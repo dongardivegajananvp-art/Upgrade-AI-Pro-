@@ -169,3 +169,134 @@ button.research-card:focus-visible{outline:2px solid #63b3ff;outline-offset:2px}
 .fno-search-result strong{font-size:12px;overflow-wrap:anywhere}
 .fno-search-result small{font-size:9px;color:#91a9c7;overflow-wrap:anywhere}
 @media(max-width:700px){.fno-search-results{grid-template-columns:repeat(2,minmax(0,1fr))}.fno-search-result{padding:9px}}
+
+
+/* UPGRADE AI PRO · chart readability and scanner diagnostics */
+.chart-area{
+  height:min(66vh,760px);
+  min-height:440px;
+  padding:8px;
+  border-style:solid;
+}
+.chart-area svg{shape-rendering:geometricPrecision}
+.chart-tools{flex-wrap:wrap}
+.chart-gesture-hint{max-width:72%;line-height:1.45}
+#universe-scan-results{min-width:0}
+#universe-scan-results>details,
+#universe-scan-results details{
+  min-width:0;
+  border:1px solid #2a4260;
+  border-radius:8px;
+  background:linear-gradient(145deg,#0e1c2e,#0a1727);
+  padding:9px 11px;
+  margin-top:8px;
+}
+#universe-scan-results summary{
+  cursor:pointer;
+  color:#cfe0f5;
+  font-size:11px;
+  font-weight:800;
+  line-height:1.55;
+  overflow-wrap:anywhere;
+  list-style-position:inside;
+}
+#universe-scan-results summary:focus-visible{
+  outline:2px solid #63b3ff;
+  outline-offset:3px;
+  border-radius:4px;
+}
+#universe-scan-results details details{
+  margin:7px 0 0;
+  padding:8px;
+  background:#0a1524;
+  border-color:#243a55;
+}
+#universe-scan-results .strategy-ledger-row{
+  margin-top:6px;
+  padding:8px 10px;
+}
+#universe-scan-results .empty-inline{
+  min-height:0;
+  padding:7px 2px;
+  line-height:1.55;
+  overflow-wrap:anywhere;
+}
+#universe-scan-results>small.empty-inline{
+  display:block;
+  border-left:2px solid #3c83c9;
+  padding:8px 10px;
+  background:#0b192a;
+  border-radius:0 6px 6px 0;
+}
+@media(max-width:700px){
+  .chart-area{
+    height:min(60dvh,640px);
+    min-height:350px;
+    max-height:640px;
+    padding:3px;
+  }
+  .chart-tools{align-items:flex-start}
+  .chart-gesture-hint{max-width:100%;text-align:left}
+  #universe-scan-results>details,
+  #universe-scan-results details{padding:8px}
+  #universe-scan-results summary{font-size:10px;line-height:1.6}
+  #universe-scan-results .strategy-ledger-row small,
+  #universe-scan-results .empty-inline{font-size:10px;line-height:1.55}
+}
+@media(max-width:380px){
+  .chart-area{min-height:330px}
+}
+
+
+/* Responsive contract: phone, tablet, laptop and wide desktop */
+html,body{width:100%;max-width:100%;overflow-x:hidden}
+main,header,.panel,.indices,.chart,.options,.bottom,.account-grid,
+.research-results,.fno-search-results{min-width:0;max-width:100%}
+img,svg,canvas,video{max-width:100%}
+input,select,button{font:inherit}
+button,a,input,select{touch-action:manipulation}
+.mover-strip{overscroll-behavior-x:contain}
+@media(min-width:701px) and (max-width:1199px){
+  main{padding:clamp(12px,1.8vw,20px)}
+  .indices{gap:clamp(7px,1vw,12px)}
+  .indices article{min-width:0;padding:clamp(10px,1.3vw,14px)}
+  .indices strong{font-size:clamp(19px,2.4vw,27px)}
+  .panel{padding:clamp(12px,1.5vw,17px)}
+  .chart-area{
+    height:clamp(390px,58vh,650px);
+    min-height:390px;
+  }
+  .research-results{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .account-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .fno-search-results{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .levels{gap:clamp(12px,2vw,24px)}
+}
+@media(min-width:1101px) and (max-width:1199px){
+  main{padding-left:22px;padding-right:22px}
+  .chart-area{height:min(62vh,700px);min-height:460px}
+}
+@media(min-width:1200px){
+  main{padding-left:clamp(22px,2vw,36px);padding-right:clamp(22px,2vw,36px)}
+  .chart-area{height:min(70vh,820px);min-height:540px}
+  .research-results{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .fno-search-results{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:700px){
+  html,body{overflow-x:hidden}
+  header{gap:8px}
+  .brand{min-width:0;overflow-wrap:anywhere}
+  .head-actions{min-width:0}
+  .connect{white-space:nowrap}
+  main{width:100%;padding-left:8px;padding-right:8px}
+  .indices article{overflow:hidden}
+  .mover-strip{max-width:100%}
+  .chart-area{width:100%;min-width:0}
+  .chart-area svg{width:100%;height:100%}
+  .fno-search-results{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .research-results,.account-grid{grid-template-columns:minmax(0,1fr)}
+  .option-row,.option-field,.option-choice{min-width:0}
+}
+@media(orientation:landscape) and (max-height:520px){
+  .chart-area{height:68vh;min-height:260px;max-height:none}
+  header{position:relative}
+}

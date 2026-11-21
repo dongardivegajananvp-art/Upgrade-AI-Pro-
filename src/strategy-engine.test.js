@@ -197,6 +197,47 @@ test('top-gainer breakout can be evaluated with its own two-candle window withou
 });
 
 
+test('top-gainer scanner fails closed on a gap, duplicate, or reversed completed 5-minute window', () => {
+  const now=1800000900000;
+  const base=1800000000;
+  const first={time:base,open:99.5,high:101,low:99,close:100,volume:100};
+  const second={time:base+300,open:100,high:103,low:99.8,close:102,volume:250};
+  const tick={symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now};
+  const variants=[
+    [first,{...second,time:base+600}],
+    [first,{...second,time:base}],
+    [second,first]
+  ];
+  for(const underlyingCandles of variants){
+    const result=detectNineStrategySetup({underlyingCandles,underlyingTick:tick,isTopGainer:true,researchEnabled:false,now});
+    assert.notEqual(result.status,'UNDERLYING_SETUP_CONFIRMED');
+    assert.ok(result.status==='DATA_UNAVAILABLE_NO_TRADE'||result.status==='NO_TRADE');
+  }
+});
+
+test('option premium gate rejects a missing 5-minute candle even when the latest quote is fresh', () => {
+  const now=1800001200000;
+  const underlyingCandles=[
+    {time:1800000000,open:99.5,high:101,low:99,close:100,volume:100},
+    {time:1800000300,open:100,high:103,low:99.8,close:102,volume:250}
+  ];
+  const optionCandles=[
+    {time:1800000000,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:1800000300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:1800000900,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,
+    optionTick:{symbol:contract.symbol,price:106.1,exchangeTime:now/1000,receivedAt:now},
+    contract,isTopGainer:true,researchEnabled:false,now
+  });
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(result.reason,/3 contiguous completed 5-minute candles/i);
+});
+
 test('opening-range setup waits for the actual completed breakout candle before pressure and volume confirmation', () => {
   const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
   const first={time:start,open:100,high:101,low:99,close:100,volume:100};

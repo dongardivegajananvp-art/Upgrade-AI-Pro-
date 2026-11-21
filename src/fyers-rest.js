@@ -16,6 +16,7 @@ let lastRestError = null;
 let lastRestMeta = { retryAfter: null, cfRay: null, server: null, contentType: null };
 let lastRequestPath = null;
 let lastRateLimitAt = null;
+let lastRequestPriority = null;
 
 export function validateNseSymbol(symbol) {
   return typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]{1,48}$/.test(symbol);
@@ -65,6 +66,7 @@ async function drainRestQueue() {
       const job = restQueue.shift();
       if (!job) continue;
       lastRequestPath = job.url.pathname;
+      lastRequestPriority = job.priority;
       try {
         const response = await fetch(job.url, { ...job.options, signal: AbortSignal.timeout(12000) });
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
@@ -158,7 +160,7 @@ export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
 }
 
 const fiveMinuteCache = new Map();
-export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = 0) {
+export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = 50) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   const date = istDate(now);
   const cached = fiveMinuteCache.get(symbol);
@@ -194,7 +196,7 @@ export function filterFiveMinuteCandlesToNseSession(candles, now = Date.now()) {
   return (Array.isArray(candles) ? candles : []).filter(candle => Number(candle?.time) >= sessionStart);
 }
 const fiveMinuteSessionCache = new Map();
-export async function getFiveMinuteSessionHistory(symbol, now = Date.now()) {
+export async function getFiveMinuteSessionHistory(symbol, now = Date.now(), priority = 50) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   const date = istDate(now);
   const cached = fiveMinuteSessionCache.get(symbol);
@@ -247,7 +249,7 @@ export async function getFyersQuotes(symbols) {
   if (!Array.isArray(symbols) || symbols.length < 1 || symbols.length > 50 || !symbols.every(validateNseSymbol)) {
     throw new Error('Quotes require 1 to 50 valid NSE symbols per request');
   }
-  return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') });
+  return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') }, 50);
 }
 export function normalizeDailyCandles(rows, now = Date.now()) {
   if (!Array.isArray(rows)) return [];
@@ -287,8 +289,8 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
   if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error('Option-chain strike count must be from 1 to 50');
   return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' }, 100);
 }
-export async function getFyersPositions() { return fyersGet(API_BASE, '/positions'); }
-export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders'); }
+export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, 50); }
+export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, 50); }
 export function getRestDiagnostics(now = Date.now()) {
   return {
     status: lastRestStatus,
@@ -299,6 +301,11 @@ export function getRestDiagnostics(now = Date.now()) {
     minGapMs: MIN_REST_GAP_MS,
     queueDepth: restQueue.length,
     queueCapacity: MAX_REST_QUEUE_SIZE,
+    interactiveQueueDepth: restQueue.filter(job => job.priority >= 50).length,
+    standardQueueDepth: restQueue.filter(job => job.priority >= 0 && job.priority < 50).length,
+    backgroundQueueDepth: restQueue.filter(job => job.priority < 0).length,
+    queueDrainActive: drainingRestQueue,
+    lastRequestPriority,
     cooldownActive: now < cooldownUntil,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
     cooldownPersistence: 'PROCESS_LOCAL_ONLY',

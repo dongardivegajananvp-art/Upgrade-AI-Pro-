@@ -40,7 +40,7 @@ function pressureVolumeRows(side='LONG') {
     : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
   return rows;
 }
-test('common confirmation requires strong bullish pressure and at least 1.5x prior-20-candle volume', () => {
+test('common confirmation requires strong bullish pressure and at least 1.5x available prior same-session volume', () => {
   const rows=pressureVolumeRows('LONG');
   const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows.at(-1).time);
   assert.equal(result.ok,true);
@@ -48,7 +48,7 @@ test('common confirmation requires strong bullish pressure and at least 1.5x pri
   assert.equal(result.relativeVolume,1.6);
   assert.ok(result.bodyStrength>=0.55);
 });
-test('common confirmation requires strong bearish pressure and at least 1.5x prior-20-candle volume', () => {
+test('common confirmation requires strong bearish pressure and at least 1.5x available prior same-session volume', () => {
   const rows=pressureVolumeRows('SHORT');
   const result=confirmBreakoutPressureVolume(rows,'SHORT',99,rows.at(-1).time);
   assert.equal(result.ok,true);
@@ -62,16 +62,40 @@ test('common confirmation rejects weak body pressure even when volume is high', 
   assert.equal(result.ok,false);
   assert.match(result.reason,/Buying pressure is weak/);
 });
-test('common confirmation rejects volume below 1.5x the prior 20-candle average', () => {
+test('common confirmation rejects volume below 1.5x the available prior same-session average', () => {
   const rows=pressureVolumeRows('LONG');
   rows[20]={...rows[20],volume:149};
   const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time);
   assert.equal(result.ok,false);
   assert.match(result.reason,/1.5x/);
 });
-test('common confirmation rejects insufficient prior volume history', () => {
-  const rows=pressureVolumeRows('LONG').slice(-2);
-  assert.equal(confirmBreakoutPressureVolume(rows,'LONG',101,rows.at(-1).time).ok,false);
+test('common confirmation accepts the opening 5-minute breakout with one valid same-session volume reference', () => {
+  const rows=[
+    {time:1800000000,open:100,high:101,low:99,close:100,volume:100},
+    {time:1800000300,open:100,high:103,low:99.5,close:102.8,volume:160}
+  ];
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[1].time);
+  assert.equal(result.ok,true);
+  assert.equal(result.relativeVolume,1.6);
+  assert.equal(result.averagePriorVolume,100);
+  assert.equal(result.baselineCandleCount,1);
+});
+
+test('common confirmation rejects a missing same-session volume reference instead of inventing one', () => {
+  const rows=pressureVolumeRows('LONG').slice(-1);
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[0].time);
+  assert.equal(result.ok,false);
+  assert.match(result.reason,/At least one immediately preceding same-session/);
+});
+
+test('relative-volume baseline never crosses an overnight/session boundary', () => {
+  const rows=[
+    {time:1800000000,open:100,high:101,low:99,close:100,volume:100},
+    {time:1800086700,open:100,high:103,low:99.5,close:102.8,volume:200}
+  ];
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[1].time);
+  assert.equal(result.ok,false);
+  assert.match(result.reason,/same-session/);
 });
 test('retest cannot substitute its candle when original level cross is missing', () => {
   const rows = [
@@ -182,10 +206,10 @@ test('non-retest strategies validate pressure on the trigger candle, not an olde
 });
 
 
-test('top-gainer breakout can be evaluated with its own two-candle window without waiting for unrelated EMA/daily history', () => {
+test('top-gainer breakout uses two contiguous candles and no fixed 20-candle volume warm-up', () => {
   const now=1800006901000;
-  const start=Math.floor(now/1000)-21*300;
-  const underlyingCandles=Array.from({length:21},(_,i)=>i===20
+  const start=Math.floor(now/1000)-2*300;
+  const underlyingCandles=Array.from({length:2},(_,i)=>i===1
     ? {time:start+i*300,open:100,high:103,low:99.8,close:102.5,volume:250}
     : {time:start+i*300,open:100,high:101,low:99,close:100,volume:100});
   const result=detectNineStrategySetup({
@@ -204,13 +228,13 @@ test('top-gainer breakout can be evaluated with its own two-candle window withou
 
 test('top-gainer scanner fails closed on a gap, duplicate, or reversed completed 5-minute window', () => {
   const now=1800006900000;
-  const base=Math.floor(now/1000)-21*300;
-  const baseline=Array.from({length:20},(_,i)=>({time:base+i*300,open:100,high:101,low:99,close:100,volume:100}));
-  const breakout={time:base+20*300,open:100,high:103,low:99.8,close:102,volume:250};
+  const base=Math.floor(now/1000)-2*300;
+  const baseline=[{time:base,open:100,high:101,low:99,close:100,volume:100}];
+  const breakout={time:base+300,open:100,high:103,low:99.8,close:102,volume:250};
   const tick={symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now};
   const variants=[
-    [...baseline.slice(0,19),{...baseline[19],time:base+20*300},breakout],
-    [...baseline.slice(0,19),{...baseline[19],time:base+18*300},breakout],
+    [{...baseline[0],time:base+300},breakout],
+    [{...baseline[0],time:base-300},breakout],
     [breakout,...baseline]
   ];
   for(const underlyingCandles of variants){
@@ -242,10 +266,10 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
   assert.match(result.reason,/3 contiguous completed 5-minute candles/i);
 });
 
-test('opening-range setup waits for the actual completed breakout candle before pressure and volume confirmation', () => {
+test('opening-range setup confirms first breakout after the opening candle without a 20-candle warm-up', () => {
   const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
-  const baseline=Array.from({length:20},(_,i)=>({time:start+i*300,open:100,high:i===0?101:100.5,low:i===0?99:99.5,close:100,volume:100}));
-  const breakout={time:start+20*300,open:100,high:103,low:99.5,close:102.5,volume:200};
+  const baseline=[{time:start,open:100,high:101,low:99,close:100,volume:100}];
+  const breakout={time:start+300,open:100,high:103,low:99.5,close:102.5,volume:200};
   const setup=detectOpeningRange([...baseline,breakout],555,103);
   assert.equal(setup.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(setup.side,'LONG');
@@ -254,6 +278,7 @@ test('opening-range setup waits for the actual completed breakout candle before 
   assert.equal(confirmation.pressure,'BUYING');
   assert.equal(confirmation.breakoutVolume,200);
   assert.equal(confirmation.relativeVolume,2);
+  assert.equal(confirmation.baselineCandleCount,1);
 });
 
 test('breakout candle confirmation enforces directional pressure and relative volume', () => {

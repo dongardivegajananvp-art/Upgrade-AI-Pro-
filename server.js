@@ -266,6 +266,32 @@ const server = http.createServer(async (req,res) => {
         const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol),getFifteenMinuteHistory(symbol)]);
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
+      if (url.pathname === '/api/research/historical-universe') {
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',mode:'HISTORICAL_ONLY',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,candidates:[],reason:'Current-session official FYERS NSE F&O master is not verified'});
+        const snapshot=getFnoUniverseSnapshot();
+        const histories=getCachedResearchHistories();
+        const candidates=[],evaluations=[];
+        for (const item of snapshot.universe||[]) {
+          const history=histories.fiveMinute.get(item.symbol);
+          if (!history?.candles?.length) {
+            evaluations.push({symbol:item.symbol,status:'BLOCKED',reason:'No cached verified FYERS 5-minute history for this underlying'});
+            continue;
+          }
+          const last=history.candles.at(-1);
+          const historicalAsOf=Number(last?.time)+300;
+          const result=detectNineStrategySetup({
+            underlyingCandles:history.candles,underlyingTick:null,
+            dailyCandles:histories.daily.get(item.symbol)?.candles||[],
+            fifteenMinuteCandles:histories.fifteenMinute.get(item.symbol)?.candles||[],
+            isTopGainer:false,researchEnabled:false,now:Date.now(),historicalAsOf
+          });
+          const row={symbol:item.symbol,name:item.name||item.underlying||item.symbol,status:result.status,reason:result.reason||null,strategyLedger:result.strategyLedger||[],strategy:result.strategy||null,side:result.side||null,breakoutLevel:result.breakoutLevel||null,confirmedAt:result.confirmedAt||null,underlyingPrice:result.underlyingPrice||null,asOfCandleTime:last.time,source:'FYERS_VERIFIED_COMPLETED_5M_HISTORY'};
+          evaluations.push(row);
+          if(result.status==='UNDERLYING_SETUP_CONFIRMED') candidates.push({...row,status:'HISTORICAL_RESEARCH_CANDIDATE'});
+        }
+        candidates.sort((a,b)=>Number(b.confirmedAt||0)-Number(a.confirmedAt||0));
+        return send(res,200,{status:candidates.length?'HISTORICAL_CANDIDATES_AVAILABLE':'NO_HISTORICAL_CANDIDATE',mode:'HISTORICAL_ONLY_NOT_LIVE',universeCount:snapshot.universe?.length||0,evaluatedCount:evaluations.filter(row=>row.status!=='BLOCKED').length,blockedCount:evaluations.filter(row=>row.status==='BLOCKED').length,candidateCount:candidates.length,candidates:candidates.slice(0,20),evaluations,note:'Historical FYERS completed candles only. No live tick, option quote, option candle, entry, stop or target is inferred. This list is research-only and cannot authorize a trade.'});
+      }
       if (url.pathname === '/api/research/universe') {
         if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:4,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
         const snapshot=getFnoUniverseSnapshot();

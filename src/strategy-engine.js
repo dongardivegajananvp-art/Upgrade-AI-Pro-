@@ -236,7 +236,7 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
   const candle = rows[breakoutIndex];
   if (!validOhlcv(candle)) return { ok: false, reason: 'Original breakout/breakdown candle OHLC is missing or invalid' };
   const baseline = rows.slice(Math.max(0, breakoutIndex - 20), breakoutIndex);
-  if (baseline.length !== 20 || !baseline.every((row, index) =>
+  if (baseline.length !== 20 || number(candle.time) - number(baseline.at(-1)?.time) !== INTERVAL_SECONDS || !baseline.every((row, index) =>
     validOhlcv(row) && number(row.volume) > 0 &&
     (index === 0 || number(row.time) - number(baseline[index - 1].time) === INTERVAL_SECONDS))) {
     return { ok: false, reason: 'Twenty contiguous completed 5-minute candles with valid positive volume are required for relative-volume confirmation' };
@@ -478,10 +478,10 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w50=contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute);
   const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
-  const w2=contiguousWindow(rows,21,sessionStartMinute,sessionCloseMinute);
+  const w21=contiguousWindow(rows,21,sessionStartMinute,sessionCloseMinute);
   const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now);
   consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires 21 contiguous completed 5-minute candles (20-candle relative-volume baseline plus breakout candle)','Latest completed 5-minute close did not break the previous completed candle high');
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w21,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires 21 contiguous completed 5-minute candles (20-candle relative-volume baseline plus breakout candle)','Latest completed 5-minute close did not break the previous completed candle high');
   consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed FYERS daily candles with the latest completed session within five calendar days','Daily and 5-minute EMA20/EMA50 alignment, EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);

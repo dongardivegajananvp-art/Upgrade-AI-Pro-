@@ -124,3 +124,13 @@ test('multi-timeframe research rejects stale completed daily context', () => {
   assert.equal(result.status,'UNAVAILABLE');
   assert.match(result.reason,/daily candle is stale/i);
 });
+
+
+test('fixed premium plan rejects a structural stop that rounds to zero or negative premium', () => {
+  const zeroStop=buildFixedPremiumPlan({breakoutLevel:0.10,tickSize:0.05,livePremium:0.15,swingLow:0.05,targetR:2});
+  const negativeStop=buildFixedPremiumPlan({breakoutLevel:0.10,tickSize:0.05,livePremium:0.15,swingLow:0.01,targetR:2});
+  assert.equal(zeroStop.status,'NO_TRADE');
+  assert.match(zeroStop.reason,/non-positive option premium/i);
+  assert.equal(negativeStop.status,'NO_TRADE');
+  assert.match(negativeStop.reason,/non-positive option premium/i);
+});

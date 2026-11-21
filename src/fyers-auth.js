@@ -64,7 +64,9 @@ export function restoreSessionCookie(value, { appId, appSecret, now = Date.now()
   }
   try {
     const packed = Buffer.from(value, 'base64url');
-    if (packed.length < 29) return false;
+    // Buffer's base64url decoder accepts non-canonical trailing-bit variants.
+    // Require a byte-for-byte canonical round trip before decrypting the cookie.
+    if (packed.toString('base64url') !== value || packed.length < 29) return false;
     const iv = packed.subarray(0, 12);
     const tag = packed.subarray(12, 28);
     const encrypted = packed.subarray(28);

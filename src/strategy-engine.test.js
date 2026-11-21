@@ -69,6 +69,19 @@ test('common confirmation rejects volume below 1.5x the available prior same-ses
   assert.equal(result.ok,false);
   assert.match(result.reason,/1.5x/);
 });
+test('relative-volume baseline has no 20-candle cap and uses all prior contiguous same-session candles', () => {
+  const start=1800000000;
+  const rows=Array.from({length:31},(_,i)=>({
+    time:start+i*300,open:100,high:101,low:99,close:100,volume:100
+  }));
+  rows[30]={time:start+30*300,open:100,high:103,low:99.5,close:102.8,volume:160};
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[30].time);
+  assert.equal(result.ok,true);
+  assert.equal(result.baselineCandleCount,30);
+  assert.equal(result.averagePriorVolume,100);
+  assert.equal(result.relativeVolume,1.6);
+});
+
 test('common confirmation accepts the opening 5-minute breakout with one valid same-session volume reference', () => {
   const rows=[
     {time:1800000000,open:100,high:101,low:99,close:100,volume:100},

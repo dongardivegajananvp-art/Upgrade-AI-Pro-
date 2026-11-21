@@ -235,13 +235,13 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
   if (requireLevelCross && !levelCrossFound) return { ok: false, reason: 'Original breakout/breakdown candle could not be verified; retest candle cannot substitute' };
   const candle = rows[breakoutIndex];
   if (!validOhlcv(candle)) return { ok: false, reason: 'Original breakout/breakdown candle OHLC is missing or invalid' };
-  // Use the available, immediately preceding same-session candles (up to 20)
-  // as the relative-volume baseline. The opening-range breakout can therefore
-  // qualify with only the first 09:15 candle as its volume reference; no fixed
-  // 20-candle warm-up is imposed. A gap, session boundary, or invalid volume
-  // stops the baseline rather than silently reaching across missing data.
+  // Use every available immediately preceding contiguous candle from the
+  // same trading session as the relative-volume baseline. There is no candle
+  // count cap or warm-up threshold; the opening breakout can use the opening
+  // candle as its first reference. Stop at gaps, session boundaries, or invalid
+  // volume rather than silently reaching across missing data.
   const baseline = [];
-  for (let i = breakoutIndex - 1; i >= 0 && baseline.length < 20; i--) {
+  for (let i = breakoutIndex - 1; i >= 0; i--) {
     const row = rows[i], next = baseline[0] || candle;
     if (!validOhlcv(row) || !finite(row.volume) || number(row.volume) <= 0 ||
         number(next.time) - number(row.time) !== INTERVAL_SECONDS ||
@@ -264,7 +264,7 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
     bodyStrength, closeLocation };
   const averagePriorVolume = baseline.reduce((sum, row) => sum + number(row.volume), 0) / baseline.length;
   const relativeVolume = number(candle.volume) / averagePriorVolume;
-  if (!(relativeVolume >= 1.5)) return { ok: false, reason: 'Breakout/breakdown volume must be at least 1.5x the average of the available prior contiguous same-session 5-minute candles (up to 20)', averagePriorVolume, relativeVolume };
+  if (!(relativeVolume >= 1.5)) return { ok: false, reason: 'Breakout/breakdown volume must be at least 1.5x the average of all available prior contiguous same-session 5-minute candles', averagePriorVolume, relativeVolume };
   return {
     ok: true,
     reason: side === 'LONG' ? 'Strong buying pressure and 1.5x relative breakout volume confirmed' : 'Strong selling pressure and 1.5x relative breakdown volume confirmed',

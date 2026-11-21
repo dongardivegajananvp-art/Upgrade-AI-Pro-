@@ -303,11 +303,12 @@ async function refresh() {
     }
     const ws = md.socketDiagnostics || {};
     const tickAge = ws.lastTickAgeSeconds !== null && ws.lastTickAgeSeconds !== undefined && Number.isFinite(Number(ws.lastTickAgeSeconds)) ? ws.lastTickAgeSeconds + 's AGO' : 'NEVER';
+    const exchangeTickAge = ws.lastTickExchangeAgeSeconds !== null && ws.lastTickExchangeAgeSeconds !== undefined && Number.isFinite(Number(ws.lastTickExchangeAgeSeconds)) ? ws.lastTickExchangeAgeSeconds + 's' : 'UNKNOWN';
     feed.textContent += ' · WS ' + (md.socketStatus || 'UNKNOWN') +
       ' · RECONNECTS ' + (ws.reconnectCount || 0) +
       ' · CLOSES ' + (ws.closeCount || 0) +
       ' · ERRORS ' + (ws.errorCount || 0) +
-      ' · LAST TICK ' + tickAge;
+      ' · LAST TICK RX ' + tickAge + ' · EXCHANGE AGE ' + exchangeTickAge;
     feed.title = 'WebSocket last connected: ' + (ws.lastConnectedAt || 'unknown') +
       ' · last closed: ' + (ws.lastClosedAt || 'unknown') +
       ' · last message: ' + (ws.lastMessageAt || 'unknown') +

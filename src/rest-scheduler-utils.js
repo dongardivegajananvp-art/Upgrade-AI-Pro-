@@ -43,3 +43,26 @@ export function canCompleteSocketRateLimitRecovery({ recoveryPending, pendingCou
 export function sortRestQueue(jobs = []) {
   return [...jobs].sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0) || Number(a.sequence || 0) - Number(b.sequence || 0));
 }
+
+// Bound pending work so slow upstream responses cannot grow memory indefinitely.
+// Higher-priority requests may displace the newest job at the lowest priority;
+// equal-priority arrivals preserve FIFO and are rejected when the queue is full.
+export function admitRestJob(jobs = [], job, maxSize = 100) {
+  const queue = [...jobs];
+  const limit = Math.max(1, Math.floor(Number(maxSize) || 100));
+  if (queue.length < limit) return { accepted: true, queue: [...queue, job], dropped: null };
+  const incomingPriority = Number(job?.priority || 0);
+  const lowestPriority = Math.min(...queue.map(item => Number(item?.priority || 0)));
+  if (incomingPriority <= lowestPriority) return { accepted: false, queue, dropped: job };
+  let dropIndex = -1;
+  for (let index = queue.length - 1; index >= 0; index -= 1) {
+    if (Number(queue[index]?.priority || 0) === lowestPriority) {
+      dropIndex = index;
+      break;
+    }
+  }
+  if (dropIndex < 0) return { accepted: false, queue, dropped: job };
+  const [dropped] = queue.splice(dropIndex, 1);
+  queue.push(job);
+  return { accepted: true, queue, dropped };
+}

@@ -23,3 +23,13 @@ export function buildDesiredSocketSubscriptions(indexSymbols = [], activeSymbols
   const option = typeof selectedOptionSymbol === 'string' && selectedOptionSymbol ? [selectedOptionSymbol] : [];
   return [...new Set([...indices, ...active, ...option].filter(symbol => typeof symbol === 'string' && symbol))];
 }
+
+// Keep index subscriptions available off-session, but only subscribe rotating
+// underlyings and the selected option when the NSE session/feed is confirmed.
+export function buildSessionSocketSubscriptions(indexSymbols = [], activeSymbols = [], selectedOptionSymbol = null, sessionReady = false) {
+  return buildDesiredSocketSubscriptions(
+    indexSymbols,
+    sessionReady ? activeSymbols : [],
+    sessionReady ? selectedOptionSymbol : null
+  );
+}

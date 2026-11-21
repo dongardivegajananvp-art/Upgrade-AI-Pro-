@@ -111,6 +111,32 @@ async function refreshUniverseScan() {
       diagnostics.append(group);
     }
     container.append(diagnostics);
+    const coverage=data.coverageSummary||{};
+    const coverageAudit=document.createElement('details');
+    const coverageTitle=document.createElement('summary');
+    coverageTitle.textContent='FULL F&O ROTATION AUDIT · SCANNED '+(coverage.scannedCount||0)+'/'+(coverage.universeCount||0)+' · FRESH TICKS '+(coverage.freshTickCount||0)+' · STALE '+(coverage.staleTickCount||0)+' · NO TICK '+(coverage.noTickCount||0);
+    coverageAudit.append(coverageTitle);
+    const coverageNote=document.createElement('small');coverageNote.className='empty-inline';
+    coverageNote.textContent='Per-symbol rolling observations only; not simultaneous. A scan attempt is not proof of a fresh tick or an actionable setup.';
+    coverageAudit.append(coverageNote);
+    for(const stock of data.symbolCoverage||[]) {
+      const group=document.createElement('details');
+      const summary=document.createElement('summary');
+      summary.textContent=stock.symbol+' · '+stock.scanStatus+' · TICK '+stock.tickStatus+' · '+stock.scanAttempts+' SCANS';
+      group.append(summary);
+      const detail=document.createElement('small');detail.className='empty-inline';
+      detail.textContent='Last scan: '+(stock.lastScanAt||'Never')+' · Tick age: '+(stock.tickAgeSeconds===null?'Unknown':stock.tickAgeSeconds+'s')+' · Exchange time: '+(stock.tickExchangeTime||'Missing')+' · Completed 5m candles: '+(stock.candleCount||0)+' · Last candle: '+(stock.lastCompletedCandleTime||'Missing');
+      group.append(detail);
+      if(stock.scanReason) {const reason=document.createElement('small');reason.className='empty-inline';reason.textContent='Scan reason: '+stock.scanReason;group.append(reason);}
+      for(const item of stock.strategyLedger||[]) {
+        const row=document.createElement('div');row.className='strategy-ledger-row';
+        const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+        const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+        row.append(label,reason);group.append(row);
+      }
+      coverageAudit.append(group);
+    }
+    container.append(coverageAudit);
     if(!isNseRegularSession(Date.now())) {
       const historicalHeading=document.createElement('div');historicalHeading.className='empty-inline';
       historicalHeading.textContent='LAST SESSION HISTORICAL RESEARCH · NOT LIVE · NOT ACTIONABLE';

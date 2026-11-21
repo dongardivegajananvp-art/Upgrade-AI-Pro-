@@ -196,7 +196,8 @@ function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = n
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
   }
-  const exchangeTime = Number.isFinite(Number(historicalAsOf)) ? Number(historicalAsOf) : tick?.exchangeTime;
+  const hasHistoricalAnchor = historicalAsOf !== null && historicalAsOf !== undefined && Number.isFinite(Number(historicalAsOf));
+  const exchangeTime = hasHistoricalAnchor ? Number(historicalAsOf) : tick?.exchangeTime;
   const window = getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds);
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
   if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
@@ -430,7 +431,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   const historicalRows=Array.isArray(underlyingCandles)?underlyingCandles:[];
   const lastHistoricalTime=Number(historicalRows.at(-1)?.time);
-  const historicalMode=Number.isFinite(Number(historicalAsOf))&&Number(historicalAsOf)===lastHistoricalTime+300;
+  const historicalMode=historicalAsOf!==null&&historicalAsOf!==undefined&&Number.isFinite(Number(historicalAsOf))&&Number(historicalAsOf)===lastHistoricalTime+300;
   if(!historicalMode&&!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
   const u=completed(underlyingCandles,underlyingTick,'Underlying',maxCandleAgeSeconds,historicalMode?historicalAsOf:null);
   if(u.error)return fail(u.error);

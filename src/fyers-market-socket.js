@@ -51,6 +51,7 @@ let socketLastConnectedAt = null;
 let socketLastClosedAt = null;
 let socketLastMessageAt = null;
 let socketLastTickAt = null;
+let socketLastTickExchangeTime = null;
 let socketLastErrorAt = null;
 let socketReconnectCount = 0;
 let socketCloseCount = 0;
@@ -183,6 +184,7 @@ function accept(item) {
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
   socketLastTickAt = tick.receivedAt;
+  socketLastTickExchangeTime = tick.exchangeTime;
   if (symbol === selectedOptionSymbol) {
     optionSubscriptionStatus = 'TICK_RECEIVED';
     optionSubscriptionError = null;
@@ -441,7 +443,9 @@ export function getMarketData(now = Date.now()) {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,
       lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt,
       lastMessageAt: socketLastMessageAt, lastTickAt: socketLastTickAt,
+      lastTickExchangeTime: socketLastTickExchangeTime,
       lastTickAgeSeconds: socketLastTickAt ? Math.max(0, Math.floor((now - socketLastTickAt) / 1000)) : null,
+      lastTickExchangeAgeSeconds: socketLastTickExchangeTime ? Math.max(0, Math.floor(now / 1000 - socketLastTickExchangeTime)) : null,
       lastErrorAt: socketLastErrorAt, reconnectCount: socketReconnectCount,
       closeCount: socketCloseCount, errorCount: socketErrorCount
     },

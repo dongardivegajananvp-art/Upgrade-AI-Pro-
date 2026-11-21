@@ -1076,3 +1076,68 @@ document.querySelector('#strike-select').addEventListener('change',event=>select
 document.querySelector('#expiry-select').addEventListener('change',()=>{
   if (selectedSymbol && document.querySelector('#expiry-select').value) loadOptionChain(selectedSymbol,selectedUnderlyingPrice,document.querySelector('#expiry-select').value);
 });
+
+
+// Search the complete official F&O master, not only the currently rotating socket slice.
+const fnoSearchInput=document.querySelector('#fno-search-input');
+const fnoSearchResults=document.querySelector('#fno-search-results');
+const fnoSearchStatus=document.querySelector('#fno-search-status');
+let fnoSearchSequence=0;
+let fnoSearchDebounce=null;
+function renderFnoSearchResults(payload, sequence) {
+  if(sequence!==fnoSearchSequence)return;
+  fnoSearchResults.replaceChildren();
+  if(!payload.results?.length) {
+    const empty=document.createElement('div');empty.className='empty-inline';
+    empty.textContent=payload.status==='SYMBOL_MASTER_NOT_LOADED'
+      ? 'Official FYERS F&O master is not ready. Search is temporarily unavailable.'
+      : 'No matching active NSE F&O underlying found in the official FYERS master.';
+    fnoSearchResults.append(empty);return;
+  }
+  for(const item of payload.results) {
+    const button=document.createElement('button');button.type='button';button.className='fno-search-result';
+    const name=document.createElement('strong');name.textContent=String(item.name||item.underlying||item.symbol);
+    const symbol=document.createElement('small');symbol.textContent=item.symbol+' · OFFICIAL F&O MASTER';
+    button.append(name,symbol);
+    button.addEventListener('click',()=>{
+      fnoSearchInput.value=String(item.underlying||item.symbol).replace(/^NSE:/,'').replace(/-EQ$/,'');
+      fnoSearchResults.replaceChildren();
+      const note=document.createElement('div');note.className='empty-inline';note.textContent='Selected '+item.symbol+' · loading verified chart and option chain…';
+      fnoSearchResults.append(note);
+      selectSymbol(item.symbol);
+    });
+    fnoSearchResults.append(button);
+  }
+}
+async function runFnoSymbolSearch() {
+  const query=fnoSearchInput.value.trim();
+  const sequence=++fnoSearchSequence;
+  if(query.length<2) {
+    fnoSearchStatus.textContent='TYPE AT LEAST 2 CHARACTERS';
+    fnoSearchResults.replaceChildren();
+    const note=document.createElement('div');note.className='empty-inline';note.textContent='Enter a symbol or company name to search the complete official F&O universe.';
+    fnoSearchResults.append(note);return;
+  }
+  fnoSearchStatus.textContent='SEARCHING OFFICIAL FYERS F&O MASTER…';
+  try {
+    const response=await fetch('/api/fno/search?q='+encodeURIComponent(query),{cache:'no-store'});
+    const payload=await readJsonResponse(response,'OFFICIAL F&O SYMBOL SEARCH');
+    if(!response.ok)throw new Error(payload.reason||'Official F&O search unavailable');
+    if(sequence!==fnoSearchSequence)return;
+    fnoSearchStatus.textContent=(payload.resultCount||0)+' MATCHES · '+(payload.universeCount||0)+' OFFICIAL UNDERLYINGS';
+    renderFnoSearchResults(payload,sequence);
+  } catch(error) {
+    if(sequence!==fnoSearchSequence)return;
+    fnoSearchStatus.textContent='SEARCH UNAVAILABLE';
+    fnoSearchResults.replaceChildren();
+    const note=document.createElement('div');note.className='empty-inline';note.textContent=String(error.message||'F&O search unavailable')+' · NO SYMBOL ASSUMED';
+    fnoSearchResults.append(note);
+  }
+}
+fnoSearchInput.addEventListener('input',()=>{
+  clearTimeout(fnoSearchDebounce);
+  fnoSearchDebounce=setTimeout(runFnoSymbolSearch,250);
+});
+fnoSearchInput.addEventListener('keydown',event=>{
+  if(event.key==='Enter'){clearTimeout(fnoSearchDebounce);runFnoSymbolSearch();}
+});

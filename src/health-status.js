@@ -52,6 +52,8 @@ export function buildHealthStatus({
     },
     rest: {
       minGapMs: Number.isFinite(Number(rest.minGapMs)) ? Number(rest.minGapMs) : null,
+      queueDepth: Number.isFinite(Number(rest.queueDepth)) ? Number(rest.queueDepth) : null,
+      queueCapacity: Number.isFinite(Number(rest.queueCapacity)) ? Number(rest.queueCapacity) : null,
       cooldownActive: Boolean(rest.cooldownActive),
       cooldownUntil: rest.cooldownUntil || null
     },

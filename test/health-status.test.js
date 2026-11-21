@@ -50,7 +50,7 @@ test('health endpoint exposes scanner progress, F&O coverage, REST cooldown and 
     scanner: { status: 'RUNNING', scannedCount: 22, sliceScannedCount: 11, lastSymbol: 'NSE:ABC-EQ', lastStatus: 'NO_TRADE', warmupStatus: 'VERIFIED_DAILY_15M_CACHED', warmupQueueDepth: 2, warmupCompletedCount: 4, warmupRetryCount: 1, warmupRejectedCount: 0 },
     scanPerSlice: 11,
     rotationIntervalMs: 60000,
-    rest: { minGapMs: 4000, cooldownActive: true, cooldownUntil: '2026-11-20T11:00:00.000Z' },
+    rest: { minGapMs: 4000, queueDepth: 7, queueCapacity: 100, cooldownActive: true, cooldownUntil: '2026-11-20T11:00:00.000Z' },
     runtimeMemory: { rss: 400000000, heapUsed: 100000000, heapTotal: 200000000, external: 10000000 },
     ordersEnabled: false
   });
@@ -61,6 +61,8 @@ test('health endpoint exposes scanner progress, F&O coverage, REST cooldown and 
   assert.equal(status.fno.topGainersFreshCount, 1);
   assert.equal(status.option.tickFresh, false);
   assert.equal(status.rest.cooldownActive, true);
+  assert.equal(status.rest.queueDepth, 7);
+  assert.equal(status.rest.queueCapacity, 100);
   assert.equal(status.runtimeMemory.rssBytes, 400000000);
   assert.equal(status.orders, 'DISABLED');
 });

@@ -228,6 +228,9 @@ function ensureFyersMarketStarted() {
     fnoUniverseLoadPromise = loadFnoEquityUniverse().then(({ date, universe, diagnostics }) => {
       if (date !== getNseSessionDate()) throw new Error('Official symbol master completed for a different IST session; current-session ranking remains blocked');
       const coverage = setFnoUniverse(universe);
+      // A new official NSE session starts a new audit ledger; yesterday's scan
+      // results must never appear as today's coverage.
+      fnoSymbolScanLedger.clear();
       const selectedUnderlying = getMarketData().selectedUnderlying?.symbol;
       if (selectedUnderlying && !universe.some(item => item.symbol === selectedUnderlying)) {
         setSelectedUnderlyingSymbol(null);

@@ -94,3 +94,28 @@ test('full queue of interactive requests does not evict existing user work', asy
   assert.equal(result.dropped.id, 'option-3');
   assert.deepEqual(result.queue.map(job=>job.id), ['option-1','option-2']);
 });
+
+
+test('selected chart and option research work outranks background F&O scans', async () => {
+  const { sortRestQueue, admitRestJob } = await import('../src/rest-scheduler-utils.js');
+  const jobs = [
+    { id:'background-scan', priority:-10, sequence:1 },
+    { id:'standard-history', priority:0, sequence:2 },
+    { id:'selected-chart', priority:50, sequence:3 },
+    { id:'option-chain', priority:100, sequence:4 }
+  ];
+  assert.deepEqual(sortRestQueue(jobs).map(job=>job.id),[
+    'option-chain','selected-chart','standard-history','background-scan'
+  ]);
+  const full = [
+    { id:'background-1', priority:-10, sequence:1 },
+    { id:'background-2', priority:-10, sequence:2 },
+    { id:'standard', priority:0, sequence:3 }
+  ];
+  const admitted = admitRestJob(full,{id:'selected-option-history',priority:50,sequence:4},3);
+  assert.equal(admitted.accepted,true);
+  assert.equal(admitted.dropped.id,'background-2');
+  assert.deepEqual(sortRestQueue(admitted.queue).map(job=>job.id),[
+    'selected-option-history','standard','background-1'
+  ]);
+});

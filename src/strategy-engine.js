@@ -192,11 +192,13 @@ function currentSessionRows(rows) {
   const key = istDayKey(number(rows.at(-1).time));
   return rows.filter(candle => istDayKey(number(candle.time)) === key);
 }
-function completed(candles, tick, label, maxAgeSeconds = 600) {
+function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = null) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
   }
-  const window = getCompletedCandleWindow(candles, tick.exchangeTime, maxAgeSeconds);
+  const hasHistoricalAnchor = historicalAsOf !== null && historicalAsOf !== undefined && Number.isFinite(Number(historicalAsOf));
+  const exchangeTime = hasHistoricalAnchor ? Number(historicalAsOf) : tick?.exchangeTime;
+  const window = getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds);
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
   if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
   return { rows: window.completed, last: window.lastClosed };
@@ -424,11 +426,14 @@ export function detectDailyTrendPullback(rows, dailyCandles=[], now=Date.now()) 
   return null;
 }
 
-export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
+export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600, historicalAsOf=null }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason,strategyLedger:STRATEGIES.map(strategy=>({strategy,status:'BLOCKED',reason}))});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
-  if(!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
-  const u=completed(underlyingCandles,underlyingTick,'Underlying',maxCandleAgeSeconds);
+  const historicalRows=Array.isArray(underlyingCandles)?underlyingCandles:[];
+  const lastHistoricalTime=Number(historicalRows.at(-1)?.time);
+  const historicalMode=historicalAsOf!==null&&historicalAsOf!==undefined&&Number.isFinite(Number(historicalAsOf))&&Number(historicalAsOf)===lastHistoricalTime+300;
+  if(!historicalMode&&!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
+  const u=completed(underlyingCandles,underlyingTick,'Underlying',maxCandleAgeSeconds,historicalMode?historicalAsOf:null);
   if(u.error)return fail(u.error);
   const rows=u.rows,last=u.last;
   const candidates=[], evaluated=[], blocked=[], strategyLedger=[];
@@ -506,7 +511,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     evidence:item.research.evidence,timeframes:item.research.timeframes,
     invalidation:item.research.invalidation
   })):[];
-  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,strategyLedger,underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
+  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,strategyLedger,underlyingPrice:number(underlyingTick?.price??last.close),underlyingCandleTime:last.time, ...(historicalMode?{dataMode:'HISTORICAL_CANDLES_ONLY'}:{})};
 }
 
 export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {

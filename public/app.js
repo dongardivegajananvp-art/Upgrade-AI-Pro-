@@ -111,6 +111,84 @@ async function refreshUniverseScan() {
       diagnostics.append(group);
     }
     container.append(diagnostics);
+    const coverage=data.coverageSummary||{};
+    const coverageAudit=document.createElement('details');
+    const coverageTitle=document.createElement('summary');
+    coverageTitle.textContent='FULL F&O ROTATION AUDIT · SCANNED '+(coverage.scannedCount||0)+'/'+(coverage.universeCount||0)+' · FRESH TICKS '+(coverage.freshTickCount||0)+' · STALE '+(coverage.staleTickCount||0)+' · NO TICK '+(coverage.noTickCount||0);
+    coverageAudit.append(coverageTitle);
+    const coverageNote=document.createElement('small');coverageNote.className='empty-inline';
+    coverageNote.textContent='Per-symbol rolling observations only; not simultaneous. A scan attempt is not proof of a fresh tick or an actionable setup.';
+    coverageAudit.append(coverageNote);
+    for(const stock of data.symbolCoverage||[]) {
+      const group=document.createElement('details');
+      const summary=document.createElement('summary');
+      summary.textContent=stock.symbol+' · '+stock.scanStatus+' · TICK '+stock.tickStatus+' · '+stock.scanAttempts+' SCANS';
+      group.append(summary);
+      const detail=document.createElement('small');detail.className='empty-inline';
+      detail.textContent='Last scan: '+(stock.lastScanAt||'Never')+' · Tick age: '+(stock.tickAgeSeconds===null?'Unknown':stock.tickAgeSeconds+'s')+' · Exchange time: '+(stock.tickExchangeTime||'Missing')+' · Completed 5m candles: '+(stock.candleCount||0)+' · Last candle: '+(stock.lastCompletedCandleTime||'Missing');
+      group.append(detail);
+      if(stock.scanReason) {const reason=document.createElement('small');reason.className='empty-inline';reason.textContent='Scan reason: '+stock.scanReason;group.append(reason);}
+      for(const item of stock.strategyLedger||[]) {
+        const row=document.createElement('div');row.className='strategy-ledger-row';
+        const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+        const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+        row.append(label,reason);group.append(row);
+      }
+      coverageAudit.append(group);
+    }
+    container.append(coverageAudit);
+    if(!isNseRegularSession(Date.now())) {
+      const historicalHeading=document.createElement('div');historicalHeading.className='empty-inline';
+      historicalHeading.textContent='LAST SESSION HISTORICAL RESEARCH · NOT LIVE · NOT ACTIONABLE';
+      container.append(historicalHeading);
+      const historicalResponse=await fetch('/api/research/historical-universe',{cache:'no-store'});
+      const historical=await readJsonResponse(historicalResponse,'HISTORICAL F&O RESEARCH');
+      if(!historicalResponse.ok)throw new Error(historical.reason||'Historical research unavailable');
+      const historicalStatus=document.createElement('small');
+      historicalStatus.className='empty-inline';
+      historicalStatus.textContent=(historical.candidateCount||0)+' HISTORICAL CANDIDATES · '+(historical.evaluatedCount||0)+' CANDLE SETS EVALUATED · '+(historical.blockedCount||0)+' MISSING HISTORY · '+(historical.universeCount||0)+' OFFICIAL F&O';
+      container.append(historicalStatus);
+      for(const item of historical.candidates||[]) {
+        const card=document.createElement('button');card.type='button';card.className='research-card historical-research-card';
+        const head=document.createElement('div');head.className='research-card-head';
+        const title=document.createElement('strong');title.textContent=item.symbol+' · '+item.strategy+' · '+item.side;
+        const state=document.createElement('b');state.textContent='HISTORICAL';
+        head.append(title,state);
+        const details=document.createElement('small');
+        details.textContent='Last verified 5m candle: '+new Date((Number(item.asOfCandleTime)+19800)*1000).toISOString().replace('T',' ').slice(0,16)+' IST · Underlying close ₹'+showNumber(item.underlyingPrice)+' · Breakout level ₹'+showNumber(item.breakoutLevel);
+        const disclaimer=document.createElement('small');
+        disclaimer.textContent='Research candidate only. No live underlying tick, option quote, option candles, Entry, SL or Target verified. NO TRADE until live gates pass.';
+        card.append(head,details,disclaimer);
+        card.addEventListener('click',()=>selectSymbol(item.symbol));
+        container.append(card);
+      }
+      if(!(historical.candidates||[]).length) {
+        const empty=document.createElement('small');empty.className='empty-inline';
+        empty.textContent='No historical candidate is currently proven from cached verified candles. Missing history is counted as blocked; no sample setup is shown.';
+        container.append(empty);
+      }
+      const historicalAudit=document.createElement('details');
+      const auditTitle=document.createElement('summary');
+      auditTitle.textContent='HISTORICAL F&O COVERAGE AUDIT · '+(historical.evaluations||[]).length+' SYMBOLS';
+      historicalAudit.append(auditTitle);
+      for(const stock of historical.evaluations||[]) {
+        const group=document.createElement('details');
+        const summary=document.createElement('summary');
+        summary.textContent=stock.symbol+' · '+stock.status+' · '+(stock.strategy||'NO CONFIRMED PATTERN');
+        group.append(summary);
+        if(stock.reason) {
+          const reason=document.createElement('small');reason.className='empty-inline';reason.textContent=stock.reason;group.append(reason);
+        }
+        for(const item of stock.strategyLedger||[]) {
+          const row=document.createElement('div');row.className='strategy-ledger-row';
+          const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+          const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+          row.append(label,reason);group.append(row);
+        }
+        historicalAudit.append(group);
+      }
+      container.append(historicalAudit);
+    }
   } catch(error) {
     status.textContent='UNIVERSE SCAN UNAVAILABLE';
     container.textContent=String(error.message||'Cached FYERS universe evaluation unavailable');
@@ -1075,4 +1153,69 @@ document.querySelector('#pe-select').addEventListener('click',()=>{
 document.querySelector('#strike-select').addEventListener('change',event=>selectOptionContract(event.target.value));
 document.querySelector('#expiry-select').addEventListener('change',()=>{
   if (selectedSymbol && document.querySelector('#expiry-select').value) loadOptionChain(selectedSymbol,selectedUnderlyingPrice,document.querySelector('#expiry-select').value);
+});
+
+
+// Search the complete official F&O master, not only the currently rotating socket slice.
+const fnoSearchInput=document.querySelector('#fno-search-input');
+const fnoSearchResults=document.querySelector('#fno-search-results');
+const fnoSearchStatus=document.querySelector('#fno-search-status');
+let fnoSearchSequence=0;
+let fnoSearchDebounce=null;
+function renderFnoSearchResults(payload, sequence) {
+  if(sequence!==fnoSearchSequence)return;
+  fnoSearchResults.replaceChildren();
+  if(!payload.results?.length) {
+    const empty=document.createElement('div');empty.className='empty-inline';
+    empty.textContent=payload.status==='SYMBOL_MASTER_NOT_LOADED'
+      ? 'Official FYERS F&O master is not ready. Search is temporarily unavailable.'
+      : 'No matching active NSE F&O underlying found in the official FYERS master.';
+    fnoSearchResults.append(empty);return;
+  }
+  for(const item of payload.results) {
+    const button=document.createElement('button');button.type='button';button.className='fno-search-result';
+    const name=document.createElement('strong');name.textContent=String(item.name||item.underlying||item.symbol);
+    const symbol=document.createElement('small');symbol.textContent=item.symbol+' · OFFICIAL F&O MASTER';
+    button.append(name,symbol);
+    button.addEventListener('click',()=>{
+      fnoSearchInput.value=String(item.underlying||item.symbol).replace(/^NSE:/,'').replace(/-EQ$/,'');
+      fnoSearchResults.replaceChildren();
+      const note=document.createElement('div');note.className='empty-inline';note.textContent='Selected '+item.symbol+' · loading verified chart and option chain…';
+      fnoSearchResults.append(note);
+      selectSymbol(item.symbol);
+    });
+    fnoSearchResults.append(button);
+  }
+}
+async function runFnoSymbolSearch() {
+  const query=fnoSearchInput.value.trim();
+  const sequence=++fnoSearchSequence;
+  if(query.length<2) {
+    fnoSearchStatus.textContent='TYPE AT LEAST 2 CHARACTERS';
+    fnoSearchResults.replaceChildren();
+    const note=document.createElement('div');note.className='empty-inline';note.textContent='Enter a symbol or company name to search the complete official F&O universe.';
+    fnoSearchResults.append(note);return;
+  }
+  fnoSearchStatus.textContent='SEARCHING OFFICIAL FYERS F&O MASTER…';
+  try {
+    const response=await fetch('/api/fno/search?q='+encodeURIComponent(query),{cache:'no-store'});
+    const payload=await readJsonResponse(response,'OFFICIAL F&O SYMBOL SEARCH');
+    if(!response.ok)throw new Error(payload.reason||'Official F&O search unavailable');
+    if(sequence!==fnoSearchSequence)return;
+    fnoSearchStatus.textContent=(payload.resultCount||0)+' MATCHES · '+(payload.universeCount||0)+' OFFICIAL UNDERLYINGS';
+    renderFnoSearchResults(payload,sequence);
+  } catch(error) {
+    if(sequence!==fnoSearchSequence)return;
+    fnoSearchStatus.textContent='SEARCH UNAVAILABLE';
+    fnoSearchResults.replaceChildren();
+    const note=document.createElement('div');note.className='empty-inline';note.textContent=String(error.message||'F&O search unavailable')+' · NO SYMBOL ASSUMED';
+    fnoSearchResults.append(note);
+  }
+}
+fnoSearchInput.addEventListener('input',()=>{
+  clearTimeout(fnoSearchDebounce);
+  fnoSearchDebounce=setTimeout(runFnoSymbolSearch,250);
+});
+fnoSearchInput.addEventListener('keydown',event=>{
+  if(event.key==='Enter'){clearTimeout(fnoSearchDebounce);runFnoSymbolSearch();}
 });

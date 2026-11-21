@@ -37,3 +37,9 @@ export function canCompleteSocketRateLimitRecovery({ recoveryPending, pendingCou
   return Boolean(recoveryPending) && Number(pendingCount) === 0 &&
     Boolean(socketConnected) && Number(now) >= Number(cooldownUntil);
 }
+
+// Stable priority ordering: interactive work can move ahead of queued background scans,
+// while equal-priority requests retain FIFO order.
+export function sortRestQueue(jobs = []) {
+  return [...jobs].sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0) || Number(a.sequence || 0) - Number(b.sequence || 0));
+}

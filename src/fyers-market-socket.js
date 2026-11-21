@@ -46,6 +46,15 @@ let socketRateLimitUntil = 0;
 let socketRateLimitRecoveryTimer = null;
 let socketTransportConnected = false;
 let resetRateLimitAfterSubscriptionFlush = false;
+let socketConnectedAt = null;
+let socketLastConnectedAt = null;
+let socketLastClosedAt = null;
+let socketLastMessageAt = null;
+let socketLastTickAt = null;
+let socketLastErrorAt = null;
+let socketReconnectCount = 0;
+let socketCloseCount = 0;
+let socketErrorCount = 0;
 
 function sessionFeedReady(now = Date.now()) {
   return isNseRegularSession(now) && INDEX_SYMBOLS.some(symbol => isFresh(ticks.get(symbol), now));
@@ -157,6 +166,7 @@ function acceptedSymbols() {
 function accept(item) {
   if (Array.isArray(item)) { for (const child of item) accept(child); return; }
   if (!item || typeof item !== 'object') return;
+  socketLastMessageAt = Date.now();
   const symbol = String(item.symbol || item.n || '');
   if (!acceptedSymbols().has(symbol)) return;
   const price = Number(item.ltp ?? item.lp);
@@ -172,6 +182,7 @@ function accept(item) {
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
+  socketLastTickAt = tick.receivedAt;
   if (symbol === selectedOptionSymbol) {
     optionSubscriptionStatus = 'TICK_RECEIVED';
     optionSubscriptionError = null;
@@ -310,6 +321,9 @@ export function startMarketSocket() {
     lastError = null;
     socket = FyersDataSocket.getInstance(`${process.env.FYERS_APP_ID}:${token}`, '', true);
     socket.on('connect', () => {
+      if (socketHasConnected) socketReconnectCount++;
+      socketConnectedAt = Date.now();
+      socketLastConnectedAt = new Date(socketConnectedAt).toISOString();
       socketTransportConnected = true;
       const subscriptions = desiredSocketSubscriptions();
       const waitMs = Math.max(0, socketRateLimitUntil - Date.now());
@@ -367,6 +381,8 @@ export function startMarketSocket() {
     });
     socket.on('message', message => accept(decode(message)));
     socket.on('error', error => {
+      socketErrorCount++;
+      socketLastErrorAt = new Date().toISOString();
       lastError = safeError(error || 'FYERS data socket error');
       socketStatus = /1015|too many requests|rate.?limit/i.test(lastError) ? 'RATE_LIMITED' : 'ERROR';
       if (socketStatus === 'RATE_LIMITED') {
@@ -390,6 +406,9 @@ export function startMarketSocket() {
       console.error('[FYERS_DATA] socket error:', lastError);
     });
     socket.on('close', () => {
+      socketCloseCount++;
+      socketLastClosedAt = new Date().toISOString();
+      socketConnectedAt = null;
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
       // Do not assume the SDK retained server-side subscriptions across a transport
@@ -417,7 +436,16 @@ export function getMarketData(now = Date.now()) {
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   return {
-    socketStatus, lastError, socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil }, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
+    socketStatus, lastError, socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
+    socketDiagnostics: {
+      connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,
+      lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt,
+      lastMessageAt: socketLastMessageAt, lastTickAt: socketLastTickAt,
+      lastTickAgeSeconds: socketLastTickAt ? Math.max(0, Math.floor((now - socketLastTickAt) / 1000)) : null,
+      lastErrorAt: socketLastErrorAt, reconnectCount: socketReconnectCount,
+      closeCount: socketCloseCount, errorCount: socketErrorCount
+    },
+    selectedUnderlyingSymbol, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
     optionSubscription: {
       status: optionSubscriptionStatus,
       symbol: selectedOptionSymbol,

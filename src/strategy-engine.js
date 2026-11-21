@@ -235,14 +235,34 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
   if (requireLevelCross && !levelCrossFound) return { ok: false, reason: 'Original breakout/breakdown candle could not be verified; retest candle cannot substitute' };
   const candle = rows[breakoutIndex];
   if (!validOhlcv(candle)) return { ok: false, reason: 'Original breakout/breakdown candle OHLC is missing or invalid' };
+  const baseline = rows.slice(Math.max(0, breakoutIndex - 20), breakoutIndex);
+  if (baseline.length !== 20 || number(candle.time) - number(baseline.at(-1)?.time) !== INTERVAL_SECONDS || !baseline.every((row, index) =>
+    validOhlcv(row) && number(row.volume) > 0 &&
+    (index === 0 || number(row.time) - number(baseline[index - 1].time) === INTERVAL_SECONDS))) {
+    return { ok: false, reason: 'Twenty contiguous completed 5-minute candles with valid positive volume are required for relative-volume confirmation' };
+  }
   if (!finite(candle.volume) || number(candle.volume) <= 0) return { ok: false, reason: 'Original breakout/breakdown candle volume is missing or invalid' };
+  const range = number(candle.high) - number(candle.low);
+  if (!(range > 0)) return { ok: false, reason: 'Breakout/breakdown candle has no measurable range' };
   const body = number(candle.close) - number(candle.open);
-  const pressureOk = side === 'LONG' ? body > 0 : body < 0;
-  if (!pressureOk) return { ok: false, reason: side === 'LONG' ? 'Buying pressure is absent on the breakout candle' : 'Selling pressure is absent on the breakdown candle' };
+  const bodyStrength = Math.abs(body) / range;
+  const closeLocation = (number(candle.close) - number(candle.low)) / range;
+  const pressureOk = side === 'LONG'
+    ? body > 0 && bodyStrength >= 0.55 && closeLocation >= 0.70
+    : body < 0 && bodyStrength >= 0.55 && closeLocation <= 0.30;
+  if (!pressureOk) return { ok: false, reason: side === 'LONG'
+    ? 'Buying pressure is weak: candle body must be at least 55% of range and close in the top 30%'
+    : 'Selling pressure is weak: candle body must be at least 55% of range and close in the bottom 30%',
+    bodyStrength, closeLocation };
+  const averagePriorVolume = baseline.reduce((sum, row) => sum + number(row.volume), 0) / baseline.length;
+  const relativeVolume = number(candle.volume) / averagePriorVolume;
+  if (!(relativeVolume >= 1.5)) return { ok: false, reason: 'Breakout/breakdown volume must be at least 1.5x the average of the prior 20 completed 5-minute candles', averagePriorVolume, relativeVolume };
   return {
     ok: true,
-    reason: side === 'LONG' ? 'Buying pressure and verified breakout-candle volume confirmed' : 'Selling pressure and verified breakdown-candle volume confirmed',
-    candleTime: number(candle.time), breakoutVolume: number(candle.volume),
+    reason: side === 'LONG' ? 'Strong buying pressure and 1.5x relative breakout volume confirmed' : 'Strong selling pressure and 1.5x relative breakdown volume confirmed',
+    candleTime: number(candle.time), breakoutVolume: number(candle.volume), averagePriorVolume,
+    relativeVolume: Number(relativeVolume.toFixed(2)), bodyStrength: Number(bodyStrength.toFixed(2)),
+    closeLocation: Number(closeLocation.toFixed(2)),
     pressure: side === 'LONG' ? 'BUYING' : 'SELLING'
   };
 }
@@ -458,10 +478,10 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w50=contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute);
   const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
-  const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
+  const w21=contiguousWindow(rows,21,sessionStartMinute,sessionCloseMinute);
   const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now);
   consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles','Latest completed 5-minute close did not break the previous completed candle high');
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w21,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires 21 contiguous completed 5-minute candles (20-candle relative-volume baseline plus breakout candle)','Latest completed 5-minute close did not break the previous completed candle high');
   consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed FYERS daily candles with the latest completed session within five calendar days','Daily and 5-minute EMA20/EMA50 alignment, EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);

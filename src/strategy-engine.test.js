@@ -33,38 +33,45 @@ test('duplicate active underlying or option contract is rejected', () => {
 });
 
 
-test('common confirmation accepts a bullish breakout candle with verified volume', () => {
-  const rows = [
-    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
-    { time: 1800000300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 1 }
-  ];
-  const result = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[1].time);
-  assert.equal(result.ok, true);
-  assert.equal(result.pressure, 'BUYING');
-  assert.equal(result.breakoutVolume, 1);
+function pressureVolumeRows(side='LONG') {
+  const rows=Array.from({length:21},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  rows[20]=side==='LONG'
+    ? {time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:160}
+    : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
+  return rows;
+}
+test('common confirmation requires strong bullish pressure and at least 1.5x prior-20-candle volume', () => {
+  const rows=pressureVolumeRows('LONG');
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows.at(-1).time);
+  assert.equal(result.ok,true);
+  assert.equal(result.pressure,'BUYING');
+  assert.equal(result.relativeVolume,1.6);
+  assert.ok(result.bodyStrength>=0.55);
 });
-test('common confirmation accepts a bearish breakdown candle with verified volume', () => {
-  const rows = [
-    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
-    { time: 1800000300, open: 100, high: 100.5, low: 97, close: 97.2, volume: 1 }
-  ];
-  const result = confirmBreakoutPressureVolume(rows, 'SHORT', 99, rows[1].time);
-  assert.equal(result.ok, true);
-  assert.equal(result.pressure, 'SELLING');
+test('common confirmation requires strong bearish pressure and at least 1.5x prior-20-candle volume', () => {
+  const rows=pressureVolumeRows('SHORT');
+  const result=confirmBreakoutPressureVolume(rows,'SHORT',99,rows.at(-1).time);
+  assert.equal(result.ok,true);
+  assert.equal(result.pressure,'SELLING');
+  assert.equal(result.relativeVolume,1.6);
 });
-test('common confirmation rejects a wick-only breakout without directional pressure', () => {
-  const rows = [
-    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
-    { time: 1800000300, open: 100, high: 103, low: 99.5, close: 100, volume: 200 }
-  ];
-  assert.equal(confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[1].time).ok, false);
+test('common confirmation rejects weak body pressure even when volume is high', () => {
+  const rows=pressureVolumeRows('LONG');
+  rows[20]={...rows[20],open:100,high:104,low:99,close:101.5,volume:500};
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time);
+  assert.equal(result.ok,false);
+  assert.match(result.reason,/Buying pressure is weak/);
 });
-test('common confirmation rejects missing or zero breakout-candle volume', () => {
-  const rows = [
-    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
-    { time: 1800000300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 0 }
-  ];
-  assert.equal(confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[1].time).ok, false);
+test('common confirmation rejects volume below 1.5x the prior 20-candle average', () => {
+  const rows=pressureVolumeRows('LONG');
+  rows[20]={...rows[20],volume:149};
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time);
+  assert.equal(result.ok,false);
+  assert.match(result.reason,/1.5x/);
+});
+test('common confirmation rejects insufficient prior volume history', () => {
+  const rows=pressureVolumeRows('LONG').slice(-2);
+  assert.equal(confirmBreakoutPressureVolume(rows,'LONG',101,rows.at(-1).time).ok,false);
 });
 test('retest cannot substitute its candle when original level cross is missing', () => {
   const rows = [
@@ -141,8 +148,8 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
   const now=Date.parse('2026-11-19T08:00:00Z');
   const start=Date.parse('2026-11-19T03:45:00Z')/1000;
   const underlyingCandles=Array.from({length:50},(_,i)=>{
-    const open=100+i,close=open+.8;
-    return {time:start+i*300,open,high:close+.4,low:open-.4,close,volume:1000+i,completed:true};
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i,completed:true};
   });
   const optionCandles=Array.from({length:3},(_,i)=>({
     time:start+(47+i)*300,open:103+i,high:104+i,low:102+i,close:103.5+i,volume:500+i,completed:true
@@ -162,27 +169,25 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
 });
 
 test('non-retest strategies validate pressure on the trigger candle, not an older level cross', () => {
-  const rows = [
-    { time: 1800000000, open: 100, high: 101, low: 99, close: 100, volume: 50 },
-    { time: 1800000300, open: 100, high: 103, low: 99.5, close: 102.8, volume: 200 },
-    { time: 1800000600, open: 103, high: 103.5, low: 102, close: 102.5, volume: 150 }
-  ];
-  const nonRetest = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[2].time, false);
-  assert.equal(nonRetest.ok, false);
-  assert.match(nonRetest.reason, /Buying pressure is absent/);
+  const rows=Array.from({length:22},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  rows[20]={time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:200};
+  rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:150};
+  const nonRetest=confirmBreakoutPressureVolume(rows,'LONG',101,rows[21].time,false);
+  assert.equal(nonRetest.ok,false);
+  assert.match(nonRetest.reason,/Buying pressure is weak/);
 
-  const retest = confirmBreakoutPressureVolume(rows, 'LONG', 101, rows[2].time, true);
-  assert.equal(retest.ok, true);
-  assert.equal(retest.candleTime, rows[1].time);
+  const retest=confirmBreakoutPressureVolume(rows,'LONG',101,rows[21].time,true);
+  assert.equal(retest.ok,true);
+  assert.equal(retest.candleTime,rows[20].time);
 });
 
 
 test('top-gainer breakout can be evaluated with its own two-candle window without waiting for unrelated EMA/daily history', () => {
-  const now=1800000601000;
-  const underlyingCandles=[
-    {time:1800000000,open:99.5,high:101,low:99,close:100,volume:100},
-    {time:1800000300,open:100,high:103,low:99.8,close:102,volume:250}
-  ];
+  const now=1800006901000;
+  const start=Math.floor(now/1000)-21*300;
+  const underlyingCandles=Array.from({length:21},(_,i)=>i===20
+    ? {time:start+i*300,open:100,high:103,low:99.8,close:102.5,volume:250}
+    : {time:start+i*300,open:100,high:101,low:99,close:100,volume:100});
   const result=detectNineStrategySetup({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
@@ -198,15 +203,15 @@ test('top-gainer breakout can be evaluated with its own two-candle window withou
 
 
 test('top-gainer scanner fails closed on a gap, duplicate, or reversed completed 5-minute window', () => {
-  const now=1800000900000;
-  const base=1800000000;
-  const first={time:base,open:99.5,high:101,low:99,close:100,volume:100};
-  const second={time:base+300,open:100,high:103,low:99.8,close:102,volume:250};
+  const now=1800006900000;
+  const base=Math.floor(now/1000)-21*300;
+  const baseline=Array.from({length:20},(_,i)=>({time:base+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  const breakout={time:base+20*300,open:100,high:103,low:99.8,close:102,volume:250};
   const tick={symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now};
   const variants=[
-    [first,{...second,time:base+600}],
-    [first,{...second,time:base}],
-    [second,first]
+    [...baseline.slice(0,19),{...baseline[19],time:base+20*300},breakout],
+    [...baseline.slice(0,19),{...baseline[19],time:base+18*300},breakout],
+    [breakout,...baseline]
   ];
   for(const underlyingCandles of variants){
     const result=detectNineStrategySetup({underlyingCandles,underlyingTick:tick,isTopGainer:true,researchEnabled:false,now});
@@ -216,15 +221,14 @@ test('top-gainer scanner fails closed on a gap, duplicate, or reversed completed
 });
 
 test('option premium gate rejects a missing 5-minute candle even when the latest quote is fresh', () => {
-  const now=1800001200000;
-  const underlyingCandles=[
-    {time:1800000000,open:99.5,high:101,low:99,close:100,volume:100},
-    {time:1800000300,open:100,high:103,low:99.8,close:102,volume:250}
-  ];
+  const now=1800006300000;
+  const underlyingCandles=Array.from({length:21},(_,i)=>i===20
+    ? {time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:250}
+    : {time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100});
   const optionCandles=[
-    {time:1800000000,open:103,high:104,low:102,close:103.5,volume:500},
-    {time:1800000300,open:104,high:105,low:103,close:104.5,volume:510},
-    {time:1800000900,open:105,high:106,low:104,close:105.5,volume:520}
+    {time:1800005100,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:1800005400,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:1800006000,open:105,high:106,low:104,close:105.5,volume:520}
   ];
   const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
   const result=evaluateNineStrategies({
@@ -240,26 +244,25 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
 
 test('opening-range setup waits for the actual completed breakout candle before pressure and volume confirmation', () => {
   const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
-  const first={time:start,open:100,high:101,low:99,close:100,volume:100};
-  const second={time:start+300,open:100,high:103,low:99.5,close:100.5,volume:250};
-  // Even a live price above the opening range cannot borrow the prior candle's pressure/volume.
-  assert.equal(detectOpeningRange([first,second],555,103),null);
-  const breakout={...second,close:102.5};
-  const setup=detectOpeningRange([first,breakout],555,103);
+  const baseline=Array.from({length:20},(_,i)=>({time:start+i*300,open:100,high:i===0?101:100.5,low:i===0?99:99.5,close:100,volume:100}));
+  const breakout={time:start+20*300,open:100,high:103,low:99.5,close:102.5,volume:200};
+  const setup=detectOpeningRange([...baseline,breakout],555,103);
   assert.equal(setup.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(setup.side,'LONG');
-  const confirmation=confirmBreakoutPressureVolume([first,breakout],'LONG',101,breakout.time);
+  const confirmation=confirmBreakoutPressureVolume([...baseline,breakout],'LONG',101,breakout.time);
   assert.equal(confirmation.ok,true);
   assert.equal(confirmation.pressure,'BUYING');
-  assert.equal(confirmation.breakoutVolume,250);
+  assert.equal(confirmation.breakoutVolume,200);
+  assert.equal(confirmation.relativeVolume,2);
 });
 
-test('breakout candle confirmation requires directional body and positive candle volume only on that candle', () => {
-  const prior={time:1800000000,open:100,high:101,low:99,close:100,volume:500};
-  const bullish={time:1800000300,open:100,high:103,low:99.5,close:102,volume:10};
-  const bearish={time:1800000300,open:102,high:102.5,low:97,close:98,volume:10};
-  assert.equal(confirmBreakoutPressureVolume([prior,bullish],'LONG',101,bullish.time).ok,true);
-  assert.equal(confirmBreakoutPressureVolume([prior,bearish],'SHORT',99,bearish.time).ok,true);
-  assert.equal(confirmBreakoutPressureVolume([prior,{...bullish,volume:0}],'LONG',101,bullish.time).ok,false);
-  assert.equal(confirmBreakoutPressureVolume([prior,{...bullish,close:100}],'LONG',101,bullish.time).ok,false);
+test('breakout candle confirmation enforces directional pressure and relative volume', () => {
+  const bullishRows=pressureVolumeRows('LONG');
+  const bearishRows=pressureVolumeRows('SHORT');
+  assert.equal(confirmBreakoutPressureVolume(bullishRows,'LONG',101,bullishRows.at(-1).time).ok,true);
+  assert.equal(confirmBreakoutPressureVolume(bearishRows,'SHORT',99,bearishRows.at(-1).time).ok,true);
+  const noVolume=pressureVolumeRows('LONG'); noVolume[20]={...noVolume[20],volume:0};
+  assert.equal(confirmBreakoutPressureVolume(noVolume,'LONG',101,noVolume[20].time).ok,false);
+  const weak=pressureVolumeRows('LONG'); weak[20]={...weak[20],close:100.5};
+  assert.equal(confirmBreakoutPressureVolume(weak,'LONG',101,weak[20].time).ok,false);
 });

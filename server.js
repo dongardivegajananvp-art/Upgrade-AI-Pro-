@@ -245,6 +245,17 @@ const server = http.createServer(async (req,res) => {
   if (requiresFyersSession(url.pathname) && !hasFyersSession) {
     return send(res,401,{status:'AUTHENTICATION_REQUIRED',reason:'A valid Upgrade AI Pro FYERS session is required for this endpoint'});
   }
+  if (req.method === 'GET' && url.pathname === '/api/fno/search') {
+    if (!isFnoMasterCurrent()) return send(res,503,{status:'SYMBOL_MASTER_NOT_LOADED',results:[],reason:'Current-session official FYERS NSE F&O master is not verified'});
+    const query=String(url.searchParams.get('q')||'').trim().toUpperCase().slice(0,40);
+    if (query.length < 2) return send(res,200,{status:'QUERY_TOO_SHORT',query,results:[]});
+    const snapshot=getFnoUniverseSnapshot();
+    const results=(snapshot.universe||[])
+      .filter(item=>String(item.symbol||'').toUpperCase().includes(query)||String(item.name||'').toUpperCase().includes(query)||String(item.underlying||'').toUpperCase().includes(query))
+      .slice(0,20)
+      .map(item=>({symbol:item.symbol,name:item.name||item.underlying||item.symbol,underlying:item.underlying}));
+    return send(res,200,{status:'OFFICIAL_FNO_MASTER_MATCHES',query,universeCount:snapshot.universe?.length||0,resultCount:results.length,results});
+  }
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {

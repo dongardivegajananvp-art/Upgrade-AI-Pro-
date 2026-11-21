@@ -1,10 +1,11 @@
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRestQueue } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
 const MIN_REST_GAP_MS = 4000;
 const RATE_LIMIT_COOLDOWN_MS = 60 * 60 * 1000;
+const MAX_REST_QUEUE_SIZE = 100;
 let nextRequestAt = 0;
 let cooldownUntil = 0;
 const restQueue = [];
@@ -115,7 +116,16 @@ async function drainRestQueue() {
 }
 function scheduledFetch(url, options, priority = 0) {
   return new Promise((resolve, reject) => {
-    restQueue.push({ url, options, priority: Number(priority) || 0, sequence: ++restQueueSequence, resolve, reject });
+    const job = { url, options, priority: Number(priority) || 0, sequence: ++restQueueSequence, resolve, reject };
+    const admission = admitRestJob(restQueue, job, MAX_REST_QUEUE_SIZE);
+    if (!admission.accepted) {
+      reject(new Error('FYERS REST queue is full; request was rejected before upstream submission'));
+      return;
+    }
+    restQueue.splice(0, restQueue.length, ...admission.queue);
+    if (admission.dropped) {
+      admission.dropped.reject(new Error('FYERS REST queue capacity reached; lower-priority request was displaced before upstream submission'));
+    }
     void drainRestQueue();
   });
 }
@@ -287,6 +297,8 @@ export function getRestDiagnostics(now = Date.now()) {
     lastRequestPath,
     lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
+    queueDepth: restQueue.length,
+    queueCapacity: MAX_REST_QUEUE_SIZE,
     cooldownActive: now < cooldownUntil,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
     cooldownPersistence: 'PROCESS_LOCAL_ONLY',

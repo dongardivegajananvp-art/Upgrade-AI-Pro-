@@ -226,9 +226,9 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
     ? {time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:250}
     : {time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100});
   const optionCandles=[
-    {time:1800000000,open:103,high:104,low:102,close:103.5,volume:500},
-    {time:1800000300,open:104,high:105,low:103,close:104.5,volume:510},
-    {time:1800000900,open:105,high:106,low:104,close:105.5,volume:520}
+    {time:1800005100,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:1800005400,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:1800006000,open:105,high:106,low:104,close:105.5,volume:520}
   ];
   const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
   const result=evaluateNineStrategies({

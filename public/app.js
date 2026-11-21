@@ -302,7 +302,7 @@ async function refresh() {
       feed.dataset.state = 'disconnected';
     }
     const ws = md.socketDiagnostics || {};
-    const tickAge = Number.isFinite(Number(ws.lastTickAgeSeconds)) ? ws.lastTickAgeSeconds + 's AGO' : 'NEVER';
+    const tickAge = ws.lastTickAgeSeconds !== null && ws.lastTickAgeSeconds !== undefined && Number.isFinite(Number(ws.lastTickAgeSeconds)) ? ws.lastTickAgeSeconds + 's AGO' : 'NEVER';
     feed.textContent += ' · WS ' + (md.socketStatus || 'UNKNOWN') +
       ' · RECONNECTS ' + (ws.reconnectCount || 0) +
       ' · CLOSES ' + (ws.closeCount || 0) +

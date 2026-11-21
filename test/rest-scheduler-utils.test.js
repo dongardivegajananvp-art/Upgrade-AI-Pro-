@@ -57,3 +57,40 @@ test('interactive FYERS requests are ordered ahead of background scans with stab
   ]);
   assert.deepEqual(jobs.map(job=>job.id),['scan-a','chart','option-chain','scan-b','user-history']);
 });
+
+test('bounded REST queue rejects excess equal/lower-priority work without reordering FIFO', async () => {
+  const { admitRestJob } = await import('../src/rest-scheduler-utils.js');
+  const jobs = [
+    { id:'chart-1', priority:0, sequence:1 },
+    { id:'chart-2', priority:0, sequence:2 }
+  ];
+  const rejected = admitRestJob(jobs, { id:'chart-3', priority:0, sequence:3 }, 2);
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.dropped.id, 'chart-3');
+  assert.deepEqual(rejected.queue.map(job=>job.id), ['chart-1','chart-2']);
+});
+
+test('interactive request can displace newest lowest-priority background work at capacity', async () => {
+  const { admitRestJob } = await import('../src/rest-scheduler-utils.js');
+  const jobs = [
+    { id:'scan-1', priority:-10, sequence:1 },
+    { id:'scan-2', priority:-10, sequence:2 },
+    { id:'chart', priority:0, sequence:3 }
+  ];
+  const result = admitRestJob(jobs, { id:'option-chain', priority:100, sequence:4 }, 3);
+  assert.equal(result.accepted, true);
+  assert.equal(result.dropped.id, 'scan-2');
+  assert.deepEqual(result.queue.map(job=>job.id), ['scan-1','chart','option-chain']);
+});
+
+test('full queue of interactive requests does not evict existing user work', async () => {
+  const { admitRestJob } = await import('../src/rest-scheduler-utils.js');
+  const jobs = [
+    { id:'option-1', priority:100, sequence:1 },
+    { id:'option-2', priority:100, sequence:2 }
+  ];
+  const result = admitRestJob(jobs, { id:'option-3', priority:100, sequence:3 }, 2);
+  assert.equal(result.accepted, false);
+  assert.equal(result.dropped.id, 'option-3');
+  assert.deepEqual(result.queue.map(job=>job.id), ['option-1','option-2']);
+});

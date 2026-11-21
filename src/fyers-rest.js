@@ -204,7 +204,7 @@ export async function getFiveMinuteSessionHistory(symbol, now = Date.now(), prio
   const range = getFiveMinuteHistoryRange(now, 20);
   const body = await fyersGet(DATA_BASE, '/history', {
     symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
-  });
+  }, priority);
   if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified ten-session 5-minute history');
   const candles = filterLastNseTradingSessions(normalizeFiveMinuteCandles(body.candles, now), 10);
   if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the last ten NSE sessions');

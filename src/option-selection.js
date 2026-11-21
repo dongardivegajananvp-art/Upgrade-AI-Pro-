@@ -26,6 +26,18 @@ export function chooseDirectionalOption({ optionsChain = [], underlyingPrice, si
   };
 }
 
+export function verifyOptionContractUnderlying(contract, selectedUnderlyingSymbol) {
+  const expected = String(selectedUnderlyingSymbol || '').trim().toUpperCase()
+    .replace(/^NSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '');
+  if (!expected) {
+    return { status: 'UNDERLYING_NOT_SELECTED', reason: 'Select an official NSE F&O underlying before selecting an option contract' };
+  }
+  if (!contract || String(contract.underlying || '').trim().toUpperCase() !== expected) {
+    return { status: 'UNDERLYING_MISMATCH', reason: 'Official FYERS option contract underlying does not match the selected NSE F&O underlying' };
+  }
+  return { status: 'CONTRACT_IDENTITY_VERIFIED', underlying: expected };
+}
+
 export function normalizeExpiryTimestamp(value) {
   const raw=Number(value);
   if(!Number.isFinite(raw)||raw<=0)return null;

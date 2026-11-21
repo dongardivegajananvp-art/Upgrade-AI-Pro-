@@ -38,6 +38,19 @@ test('historical-only evaluation can inspect completed FYERS candles without inv
   assert.ok(['NO_TRADE', 'UNDERLYING_SETUP_CONFIRMED'].includes(result.status));
 });
 
+test('live evaluation continues to use the actual exchange timestamp when historical mode is omitted', () => {
+  const exchangeTime = candles.at(-1).time + 300;
+  const liveNow = exchangeTime * 1000 + 5000;
+  const result = detectNineStrategySetup({
+    underlyingCandles: candles,
+    underlyingTick: { price: 100, exchangeTime, receivedAt: liveNow },
+    now: liveNow,
+    researchEnabled: false
+  });
+  assert.ok(['NO_TRADE', 'UNDERLYING_SETUP_CONFIRMED'].includes(result.status));
+  assert.notEqual(result.status, 'DATA_UNAVAILABLE_NO_TRADE');
+});
+
 test('historical-only mode rejects an arbitrary timestamp that is not the last candle close', () => {
   const result = detectNineStrategySetup({
     underlyingCandles: candles,

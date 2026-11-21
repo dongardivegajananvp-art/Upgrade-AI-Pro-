@@ -246,3 +246,57 @@ button.research-card:focus-visible{outline:2px solid #63b3ff;outline-offset:2px}
 @media(max-width:380px){
   .chart-area{min-height:330px}
 }
+
+
+/* Responsive contract: phone, tablet, laptop and wide desktop */
+html,body{width:100%;max-width:100%;overflow-x:hidden}
+main,header,.panel,.indices,.chart,.options,.bottom,.account-grid,
+.research-results,.fno-search-results{min-width:0;max-width:100%}
+img,svg,canvas,video{max-width:100%}
+input,select,button{font:inherit}
+button,a,input,select{touch-action:manipulation}
+.mover-strip{overscroll-behavior-x:contain}
+@media(min-width:701px) and (max-width:1199px){
+  main{padding:clamp(12px,1.8vw,20px)}
+  .indices{gap:clamp(7px,1vw,12px)}
+  .indices article{min-width:0;padding:clamp(10px,1.3vw,14px)}
+  .indices strong{font-size:clamp(19px,2.4vw,27px)}
+  .panel{padding:clamp(12px,1.5vw,17px)}
+  .chart-area{
+    height:clamp(390px,58vh,650px);
+    min-height:390px;
+  }
+  .research-results{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .account-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .fno-search-results{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .levels{gap:clamp(12px,2vw,24px)}
+}
+@media(min-width:1101px) and (max-width:1199px){
+  main{padding-left:22px;padding-right:22px}
+  .chart-area{height:min(62vh,700px);min-height:460px}
+}
+@media(min-width:1200px){
+  main{padding-left:clamp(22px,2vw,36px);padding-right:clamp(22px,2vw,36px)}
+  .chart-area{height:min(70vh,820px);min-height:540px}
+  .research-results{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .fno-search-results{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:700px){
+  html,body{overflow-x:hidden}
+  header{gap:8px}
+  .brand{min-width:0;overflow-wrap:anywhere}
+  .head-actions{min-width:0}
+  .connect{white-space:nowrap}
+  main{width:100%;padding-left:8px;padding-right:8px}
+  .indices article{overflow:hidden}
+  .mover-strip{max-width:100%}
+  .chart-area{width:100%;min-width:0}
+  .chart-area svg{width:100%;height:100%}
+  .fno-search-results{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .research-results,.account-grid{grid-template-columns:minmax(0,1fr)}
+  .option-row,.option-field,.option-choice{min-width:0}
+}
+@media(orientation:landscape) and (max-height:520px){
+  .chart-area{height:68vh;min-height:260px;max-height:none}
+  header{position:relative}
+}

@@ -60,6 +60,7 @@ async function drainRestQueue() {
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
+      restQueue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
       const job = restQueue.shift();
       if (!job) continue;
       lastRequestPath = job.url.pathname;
@@ -101,6 +102,7 @@ async function drainRestQueue() {
         lastRestError = null;
         job.resolve(body);
       } catch (error) {
+        nextRequestAt = Date.now() + MIN_REST_GAP_MS;
         lastRestStatus = 'ERROR';
         lastRestError = String(error?.message || 'FYERS REST request failed').slice(0,180);
         job.reject(error);

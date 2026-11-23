@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -322,7 +322,9 @@ async function drainRestQueue() {
 function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
   return new Promise((resolve, reject) => {
     const normalizedPriority = Number(priority) || 0;
-    const coalesceKey = String(options?.method || 'GET').toUpperCase() + ':' + url.href;
+    const requestMethod=String(options?.method||'GET').toUpperCase();
+    const authorization=new Headers(options?.headers||{}).get('authorization')||'';
+    const coalesceKey=buildRestCoalesceKey({method:requestMethod,url:url.href,authorization});
     const duplicateIndex = findRestQueueDuplicate(restQueue, coalesceKey);
     if (duplicateIndex >= 0) {
       const existing = restQueue[duplicateIndex];

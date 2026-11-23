@@ -65,3 +65,8 @@ test('session-ready socket plan includes active F&O and selected option', async 
   const { buildSessionSocketSubscriptions } = await import('../src/socket-subscription-utils.js');
   assert.deepEqual(buildSessionSocketSubscriptions(['IDX-A'],['NSE:ABC-EQ'],'NSE:ABC26NOV100CE',true),['IDX-A','NSE:ABC-EQ','NSE:ABC26NOV100CE']);
 });
+
+
+test('one-symbol subscription pacing can serialize newly added symbols safely', () => {
+  assert.deepEqual(splitSubscriptionBatches(['A','B','C'], 1), [['A'], ['B'], ['C']]);
+});

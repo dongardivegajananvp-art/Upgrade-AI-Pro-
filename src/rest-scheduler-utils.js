@@ -165,3 +165,49 @@ export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), m
   if (recent.length < limit) return 0;
   return Math.max(0, recent[0] + window - current);
 }
+
+
+// Select background work fairly inside the conservative shared REST budget.
+// Interactive jobs retain strict priority; background classes share service so
+// research/context cannot permanently outrank Account Feed or the F&O scanner.
+export function getRestRequestClass(job = {}) {
+  const priority = Number(job.priority) || 0;
+  if (priority >= REST_PRIORITY.CHART) return 'INTERACTIVE';
+  if (priority === REST_PRIORITY.ACCOUNT) return 'ACCOUNT';
+  if (priority === REST_PRIORITY.SCANNER) return 'SCANNER';
+  return 'RESEARCH';
+}
+
+export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Date.now(), isEligible = () => true, windowMs = 60_000) {
+  const eligible = jobs.map((job, index) => ({ job, index }))
+    .filter(({ job }) => Boolean(isEligible(job)));
+  if (!eligible.length) return -1;
+  const interactive = eligible.filter(({ job }) => getRestRequestClass(job) === 'INTERACTIVE');
+  if (interactive.length) {
+    interactive.sort((a, b) => Number(b.job.priority || 0) - Number(a.job.priority || 0) ||
+      Number(a.job.sequence || 0) - Number(b.job.sequence || 0));
+    return interactive[0].index;
+  }
+  const current = Number(now);
+  const stats = new Map();
+  for (const request of recentRequests) {
+    const at = Date.parse(request?.at);
+    if (!Number.isFinite(at) || at > current || current - at >= windowMs) continue;
+    const requestClass = getRestRequestClass({ priority: request?.priority });
+    if (requestClass === 'INTERACTIVE') continue;
+    const row = stats.get(requestClass) || { count: 0, lastAt: 0 };
+    row.count += 1;
+    row.lastAt = Math.max(row.lastAt, at);
+    stats.set(requestClass, row);
+  }
+  eligible.sort((a, b) => {
+    const aClass = getRestRequestClass(a.job);
+    const bClass = getRestRequestClass(b.job);
+    const aStats = stats.get(aClass) || { count: 0, lastAt: 0 };
+    const bStats = stats.get(bClass) || { count: 0, lastAt: 0 };
+    return aStats.count - bStats.count || aStats.lastAt - bStats.lastAt ||
+      Number(b.job.priority || 0) - Number(a.job.priority || 0) ||
+      Number(a.job.sequence || 0) - Number(b.job.sequence || 0);
+  });
+  return eligible[0].index;
+}

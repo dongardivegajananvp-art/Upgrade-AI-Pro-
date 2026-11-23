@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -215,6 +215,8 @@ async function drainRestQueue() {
         let body = {};
         try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
         lastRestMeta.responseCode = body.code ?? null;
+        requestRecord.responseCode = lastRestMeta.responseCode;
+        requestRecord.apiStatus = body.s || null;
         lastRestMeta.responseMessage = String(body.message || body.error || '').slice(0, 160) || null;
         console.info('[FYERS_REST] upstream response:', JSON.stringify({
           path: job.url.pathname, source: job.source, priority: job.priority,
@@ -497,6 +499,7 @@ export function getRestDiagnostics(now = Date.now()) {
     lastRequestSource,
     requestSources:[...requestSourceStats.values()].map(item=>({...item})).sort((a,b)=>b.requestsToday-a.requestsToday),
     recentRequests:recentUpstreamRequests.slice(-20).map(item=>({...item})),
+    endpointHealth: buildRestEndpointHealth(recentUpstreamRequests, now),
     lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
     rollingWindowLimitPerMinute: 6,

@@ -131,7 +131,7 @@ async function drainRestQueue() {
       if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
         const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
-        for (const job of restQueue.splice(0)) job.reject(error);
+        for (const job of restQueue.splice(0)) settleRestJob(job, false, error);
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
@@ -142,7 +142,7 @@ async function drainRestQueue() {
       if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
         const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
-        for (const job of restQueue.splice(0)) job.reject(error);
+        for (const job of restQueue.splice(0)) settleRestJob(job, false, error);
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
@@ -285,9 +285,9 @@ async function drainRestQueue() {
             ...requestContext,
             cooldownUntil: new Date(cooldownUntil).toISOString()
           }));
-          job.reject(new Error(lastRestError));
+          settleRestJob(job, false, new Error(lastRestError));
           const queuedError = new Error('FYERS REST cooldown active; queued request was not sent upstream');
-          for (const pending of restQueue.splice(0)) pending.reject(queuedError);
+          for (const pending of restQueue.splice(0)) settleRestJob(pending, false, queuedError);
           break;
         }
         if (!response.ok || body.s === 'error' || Number(body.code) < 0 || (recoveryProbeRequired && body.s !== 'ok')) {

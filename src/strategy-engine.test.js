@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch, detectOpeningRange } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagVolume, detectDailyTrendPullback } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -358,4 +358,83 @@ test('breakout candle confirmation enforces directional pressure and relative vo
   assert.equal(confirmBreakoutPressureVolume(noVolume,'LONG',101,noVolume[20].time).ok,false);
   const weak=pressureVolumeRows('LONG'); weak[20]={...weak[20],close:100.5};
   assert.equal(confirmBreakoutPressureVolume(weak,'LONG',101,weak[20].time).ok,false);
+});
+
+
+// Direct detector fixtures supplement the aggregate ledger tests. These
+// fixtures exercise representative positive and negative paths without
+// relaxing the common freshness, candle-continuity or option-entry gates.
+test('EMA20/EMA50 detector accepts aligned bullish trend and rejects flat history', () => {
+  const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
+  assert.equal(detectEmaTrend(rows)?.side,'LONG');
+  const flat=rows.map(c=>({...c,open:100,high:101,low:99,close:100}));
+  assert.equal(detectEmaTrend(flat),null);
+});
+
+test('Top Gainer detector requires verified leaderboard membership and completed-candle breakout', () => {
+  const rows=[
+    {time:1800000000,open:100,high:101,low:99,close:100,volume:100},
+    {time:1800000300,open:100,high:103,low:99.5,close:102,volume:200}
+  ];
+  assert.equal(detectTopGainerMomentum(rows,false),null);
+  assert.equal(detectTopGainerMomentum(rows,true)?.side,'LONG');
+  assert.equal(detectTopGainerMomentum(rows.slice(0,1),true),null);
+});
+
+test('day high/low retest detector confirms only after a close-through and retest hold', () => {
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+300,open:100.5,high:102,low:100,close:101.5,volume:160},
+    {time:start+600,open:101.5,high:103,low:101,close:102.5,volume:170},
+    {time:start+900,open:101.2,high:102,low:100.9,close:101.7,volume:180}
+  ];
+  assert.equal(detectDayHighLowRetest(rows)?.side,'LONG');
+  assert.equal(detectDayHighLowRetest(rows.slice(0,3)),null);
+});
+
+test('double top/bottom detector rejects flat and incomplete swing structures', () => {
+  const rows=Array.from({length:48},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  assert.equal(detectDoublePattern(rows),null);
+  assert.equal(detectDoublePattern(rows.slice(0,20)),null);
+});
+
+test('bullish and bearish continuation detectors require impulse, consolidation and breakout', () => {
+  const make=(side)=>{
+    const rows=[];
+    for(let i=0;i<17;i++){
+      const close=side==='LONG'?100+i:120-i;
+      rows.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:200});
+    }
+    for(let i=0;i<12;i++){
+      const base=side==='LONG'?116:104;
+      rows.push({time:1800005100+i*300,open:base,high:base+.5,low:base-.5,close:base+.1,volume:100});
+    }
+    const base=side==='LONG'?116:104;
+    rows.push(side==='LONG'
+      ?{time:1800008700,open:base+.5,high:base+2,low:base+.4,close:base+1.5,volume:250}
+      :{time:1800008700,open:base-.5,high:base-.4,low:base-2,close:base-1.5,volume:250});
+    return rows;
+  };
+  assert.equal(detectContinuation(make('LONG'),'LONG')?.side,'LONG');
+  assert.equal(detectContinuation(make('SHORT'),'SHORT')?.side,'SHORT');
+  const flat=make('LONG').map(c=>({...c,open:100,high:101,low:99,close:100}));
+  assert.equal(detectContinuation(flat,'LONG'),null);
+});
+
+test('flag-volume detector requires contracting flag volume and a high-volume breakout', () => {
+  const rows=[];
+  for(let i=0;i<17;i++){
+    const close=100+i;
+    rows.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:200});
+  }
+  for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:100});
+  rows.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:200});
+  assert.equal(detectFlagVolume(rows)?.side,'LONG');
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:200}))),null);
+});
+
+test('daily-trend pullback detector blocks missing or stale daily context', () => {
+  const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
+  assert.equal(detectDailyTrendPullback(rows,[],1800000000000),null);
 });

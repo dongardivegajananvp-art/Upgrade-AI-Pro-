@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -224,4 +224,20 @@ test('queued REST requests expire at the exact age boundary and reject invalid t
   assert.equal(isRestQueueExpired(1000, 11000, 10_000), true);
   assert.equal(isRestQueueExpired(Number.NaN, 11000, 10_000), true);
   assert.equal(isRestQueueExpired(1000, 11000, 0), true);
+});
+
+
+test('endpoint health is based on real HTTP and FYERS API responses, never connection state', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const health = buildRestEndpointHealth([
+    {path:'/options-chain-v3',status:200,apiStatus:'ok',responseCode:200,at:new Date(now-1000).toISOString(),durationMs:240,source:'option-chain-panel'},
+    {path:'/api/v3/positions',status:429,apiStatus:'error',responseCode:1015,at:new Date(now-2000).toISOString(),durationMs:90,source:'account-positions'}
+  ], now);
+  assert.equal(health.optionChain.status,'SUCCESS');
+  assert.equal(health.optionChain.ok,true);
+  assert.equal(health.optionChain.ageMs,1000);
+  assert.equal(health.positions.status,'ERROR');
+  assert.equal(health.positions.httpStatus,429);
+  assert.equal(health.orderbook.status,'NOT_VERIFIED');
+  assert.equal(health.orderbook.ok,false);
 });

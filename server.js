@@ -167,6 +167,7 @@ function startFnoStrategyScanner() {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
       }
       const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'fno-scanner-5m');
+      const websocketObservation=latest.websocketCandles?.get(symbol)||null;
       const tick=scanTick;
       const market=getMarketData();
       const research=detectNineStrategySetup({
@@ -188,7 +189,8 @@ function startFnoStrategyScanner() {
         tickFresh:Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&Date.now()/1000-Number(tick.exchangeTime)>=-3&&Date.now()/1000-Number(tick.exchangeTime)<=10),
         tickExchangeTime:tick?.exchangeTime||null,tickReceivedAt:tick?.receivedAt||null,
         candleCount:history.candles.length,lastCompletedCandleTime:history.candles.at(-1)?.time||null,
-        source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[]
+        source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[],
+        websocketObservation:{status:websocketObservation?.status||'NO_OBSERVATIONS',completedCount:websocketObservation?.completedCandles?.length||0,contiguousCompletedCount:websocketObservation?.contiguousCompletedCount||0,volumeVerified:Boolean(websocketObservation?.volumeVerified),actionable:Boolean(websocketObservation?.actionable)}
       });
       if(research.status==='UNDERLYING_SETUP_CONFIRMED') {
         const queued=fnoResearchWarmupQueue.enqueue(symbol);
@@ -236,6 +238,7 @@ function startFnoStrategyScanner() {
         tickFresh:scanRecord.tickFresh??false,
         tickExchangeTime:scanRecord.tickExchangeTime||null,
         lastCompletedCandleTime:scanRecord.lastCompletedCandleTime||null,
+        websocketObservation:scanRecord.websocketObservation||null,
         candleCount:scanRecord.candleCount||0,
         evaluatedStrategyCount:Array.isArray(scanRecord.strategyLedger)?scanRecord.strategyLedger.filter(row=>row.status!=='BLOCKED').length:0,
         blockedStrategyCount:Array.isArray(scanRecord.strategyLedger)?scanRecord.strategyLedger.filter(row=>row.status==='BLOCKED').length:0,

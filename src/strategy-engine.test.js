@@ -658,3 +658,82 @@ test('end-to-end opening-range first-candle breakout passes only with completed 
   assert.equal(result.underlyingSide,'LONG');
   assert.ok(result.rr>=2);
 });
+
+
+function evaluateUnderlyingFixture(underlyingCandles, side='LONG', extra={}) {
+  const lastTime=underlyingCandles.at(-1).time;
+  const now=(lastTime+360)*1000;
+  const optionStart=lastTime-600;
+  const option=makeOptionPipelineFields(optionStart,side==='LONG'?'CE':'PE');
+  option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
+  return evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:underlyingCandles.at(-1).close,exchangeTime:now/1000,receivedAt:now},
+    ...option,now,researchEnabled:false,...extra
+  });
+}
+
+test('end-to-end bullish continuation validates the complete LONG→CE→risk-plan pipeline',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
+  for(let i=0;i<17;i++){const close=100+i;rows.push({time:start+i*300,open:close-.2,high:close+.3,low:close-.3,close,volume:200});}
+  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:107.2,high:108,low:106,close:107.2,volume:100});
+  rows.push({time:start+29*300,open:108.2,high:109.5,low:108.1,close:109,volume:200});
+  const result=evaluateUnderlyingFixture(rows,'LONG');
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'BULLISH_CONTINUATION');
+  assert.equal(result.underlyingSide,'LONG');
+  assert.equal(result.optionSide,'CE');
+  assert.ok(result.rr>=2);
+});
+
+test('end-to-end bearish continuation validates the complete SHORT→PE→risk-plan pipeline',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
+  for(let i=0;i<17;i++){const close=120-i;rows.push({time:start+i*300,open:close+.2,high:close+.3,low:close-.3,close,volume:200});}
+  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:104,high:104.5,low:103.5,close:104,volume:100});
+  rows.push({time:start+29*300,open:103.4,high:103.6,low:101,close:101.5,volume:200});
+  const result=evaluateUnderlyingFixture(rows,'SHORT');
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'BEARISH_CONTINUATION');
+  assert.equal(result.underlyingSide,'SHORT');
+  assert.equal(result.optionSide,'PE');
+  assert.ok(result.rr>=2);
+});
+
+test('end-to-end flag-volume breakout is independently selectable when continuation impulse threshold is not met',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
+  for(let i=0;i<17;i++){const close=100+i*.6;rows.push({time:start+i*300,open:close-.2,high:close+.3,low:close-.3,close,volume:200});}
+  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:108,high:112,low:104,close:108,volume:100});
+  rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:200});
+  const result=evaluateUnderlyingFixture(rows,'LONG');
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'FLAG_BREAKOUT_VOLUME');
+  assert.equal(result.optionSide,'CE');
+  assert.ok(result.rr>=2);
+});
+
+test('end-to-end daily-trend pullback requires fresh daily context and completes the SHORT/PE risk plan',()=>{
+  const now=Date.parse('2026-11-23T12:00:00Z'), start=Math.floor(now/1000)-60*300;
+  const rows=Array.from({length:60},(_,i)=>{
+    const close=200-i*.2;
+    return{time:start+i*300,open:close+.05,high:close+.1,low:close-.1,close,volume:100};
+  });
+  rows[58]={time:start+58*300,open:190,high:190.2,low:189.9,close:190.05,volume:120};
+  rows[59]={time:start+59*300,open:189.8,high:189.85,low:189.2,close:189.3,volume:220};
+  const dailyStart=Math.floor(now/1000)-60*86400;
+  const daily=Array.from({length:60},(_,i)=>{
+    const close=300-i;
+    return{time:dailyStart+i*86400,open:close+.2,high:close+.5,low:close-.5,close,volume:1000};
+  });
+  const lastTime=rows.at(-1).time, evaluationNow=(lastTime+360)*1000;
+  const option=makeOptionPipelineFields(lastTime-600,'PE');
+  option.optionTick={...option.optionTick,exchangeTime:evaluationNow/1000,receivedAt:evaluationNow};
+  const base={underlyingCandles:rows,underlyingTick:{symbol:'NSE:ABC-EQ',price:189.3,exchangeTime:evaluationNow/1000,receivedAt:evaluationNow},...option,dailyCandles:daily,now:evaluationNow,researchEnabled:false};
+  const result=evaluateNineStrategies(base);
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(result.underlyingSide,'SHORT');
+  assert.equal(result.optionSide,'PE');
+  assert.ok(result.rr>=2);
+  const missingDaily=evaluateNineStrategies({...base,dailyCandles:[]});
+  assert.notEqual(missingDaily.status,'SETUP_CONFIRMED');
+});

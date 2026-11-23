@@ -438,3 +438,29 @@ test('daily-trend pullback detector blocks missing or stale daily context', () =
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
   assert.equal(detectDailyTrendPullback(rows,[],1800000000000),null);
 });
+
+
+test('double-top and double-bottom detectors require a neckline break followed by a retest',()=>{
+  const start=1800000000;
+  const top=Array.from({length:20},(_,i)=>({time:start+i*300,open:100,high:101,low:100,close:100,volume:100}));
+  top[5]={...top[5],open:108,high:110,low:105,close:109};
+  top[12]={...top[12],open:108,high:110,low:105,close:109};
+  top[15]={...top[15],close:99.5};
+  top[17]={...top[17],close:99.6};
+  top[18]={...top[18],close:99.5};
+  top[19]={...top[19],high:100.2,low:98.8,close:99.5};
+  const doubleTop=detectDoublePattern(top);
+  assert.equal(doubleTop?.side,'SHORT');
+  assert.equal(doubleTop?.pattern,'DOUBLE_TOP');
+
+  const bottom=Array.from({length:20},(_,i)=>({time:start+i*300,open:100,high:100,low:99,close:100,volume:100}));
+  bottom[5]={...bottom[5],open:92,high:95,low:90,close:91};
+  bottom[12]={...bottom[12],open:92,high:95,low:90,close:91};
+  bottom[15]={...bottom[15],close:100.5};
+  bottom[17]={...bottom[17],close:100.6};
+  bottom[18]={...bottom[18],close:100.5};
+  bottom[19]={...bottom[19],high:101.2,low:99.8,close:100.5};
+  const doubleBottom=detectDoublePattern(bottom);
+  assert.equal(doubleBottom?.side,'LONG');
+  assert.equal(doubleBottom?.pattern,'DOUBLE_BOTTOM');
+});

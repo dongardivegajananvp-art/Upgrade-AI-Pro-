@@ -167,3 +167,20 @@ test('global FYERS REST budget counts every endpoint and preserves interactive h
   assert.ok(getRestRequestWindowWaitMs(requests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART-1) > 0);
   assert.equal(getRestRequestWindowWaitMs(requests.slice(0,5), now, 6), 0);
 });
+
+
+test('global REST budget reserves two background slots for the paired Account Feed and limits scanner/research to one', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const accountRequests = [
+    {at:new Date(now-20_000).toISOString(),path:'/api/v3/positions',source:'account-positions',priority:REST_PRIORITY.ACCOUNT},
+    {at:new Date(now-10_000).toISOString(),path:'/api/v3/orders',source:'account-orderbook',priority:REST_PRIORITY.ACCOUNT}
+  ];
+  assert.ok(getRestRequestWindowWaitMs(accountRequests, now, 2, 60_000, REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT) > 0);
+  assert.equal(getRestRequestWindowWaitMs(accountRequests.slice(0,1), now, 2, 60_000, REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT), 0);
+
+  const backgroundRequests = [
+    {at:new Date(now-15_000).toISOString(),path:'/history',source:'fno-scanner-5m',priority:REST_PRIORITY.SCANNER}
+  ];
+  assert.ok(getRestRequestWindowWaitMs(backgroundRequests, now, 1, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.INTERACTIVE-1) > 0);
+  assert.equal(getRestRequestWindowWaitMs(backgroundRequests, now, 1, 60_000, REST_PRIORITY.CHART, Number.POSITIVE_INFINITY), 0);
+});

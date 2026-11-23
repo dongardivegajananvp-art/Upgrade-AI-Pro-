@@ -185,7 +185,12 @@ function accept(item) {
   const changePercent = reportedPercent !== undefined && reportedPercent !== null && Number.isFinite(Number(reportedPercent)) ? Number(reportedPercent) : fallbackPercent;
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
+  const sessionWasReady = sessionFeedReady(tick.receivedAt);
   ticks.set(symbol, tick);
+  if (!sessionWasReady && universe.length && sessionFeedReady(tick.receivedAt)) {
+    console.info('[FYERS_DATA] fresh index feed restored; activating first F&O slice immediately');
+    applyFnoRotation(false);
+  }
   if (universe.some(item => item.symbol === symbol) || symbol === selectedOptionSymbol) {
     const previousLogAt = tickTelemetryLoggedAt.get(symbol) || 0;
     if (!previousLogAt || tick.receivedAt - previousLogAt >= 60_000) {

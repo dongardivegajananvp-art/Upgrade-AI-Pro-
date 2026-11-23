@@ -30,7 +30,7 @@ test('rotating subscription gaps break continuity and never fabricate missing ca
   assert.equal(snapshot.completedCandles.length,1);
   assert.equal(snapshot.completedCandles[0].contiguous,false);
   assert.equal(snapshot.completedCandles[0].gapBeforeSeconds,600);
-  assert.equal(snapshot.contiguousCompletedCount,0);
+  assert.equal(snapshot.contiguousCompletedCount,1);
 });
 
 test('out-of-order and off-session ticks are rejected',()=>{

@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -134,25 +134,43 @@ async function drainRestQueue() {
       // A Cloudflare 1015 was observed after 11 /data/history calls in one
       // minute. Cap this endpoint at 8 per rolling minute, while allowing
       // higher/lower-priority non-history REST work to proceed independently.
+      // Cloudflare 1015 was observed on mixed traffic (history, option-chain,
+      // positions and orderbook) at eight upstream requests/minute. Guard the
+      // entire FYERS REST origin, while reserving half the conservative budget
+      // for selected chart/option/Entry work. Account, scanner, research and
+      // warmup remain lower priority and cannot consume those interactive slots.
       const eligibleIndex = restQueue.findIndex(job => {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
-        if (job.url.pathname !== '/history') return true;
-        const totalWindowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
-        // Keep four of the eight observed-safe history slots available for selected
-        // chart/option/Entry work. Scanner, warmup and research cannot consume them.
+        const totalWindowWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
         const backgroundWindowWait = job.priority < REST_PRIORITY.CHART
-          ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
           : 0;
-        return totalWindowWait === 0 && backgroundWindowWait === 0;
+        if (totalWindowWait > 0 || backgroundWindowWait > 0) return false;
+        // Keep the stricter existing /history-specific background protection as
+        // a second guard; global request pacing applies to every REST path.
+        if (job.url.pathname === '/history') {
+          const historyWindowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
+          const historyBackgroundWait = job.priority < REST_PRIORITY.CHART
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+            : 0;
+          return historyWindowWait === 0 && historyBackgroundWait === 0;
+        }
+        return true;
       });
       if (eligibleIndex < 0) {
-        const waits = restQueue.filter(job => job.url.pathname === '/history').flatMap(job => {
-          const totalWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
+        const waits = restQueue.map(job => {
+          const totalWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
           const backgroundWait = job.priority < REST_PRIORITY.CHART
-            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
             : 0;
-          return [totalWait, backgroundWait].filter(value => value > 0);
-        });
+          const historyWait = job.url.pathname === '/history'
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8)
+            : 0;
+          const historyBackgroundWait = job.url.pathname === '/history' && job.priority < REST_PRIORITY.CHART
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+            : 0;
+          return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait);
+        }).filter(value => value > 0);
         await wait(Math.max(1, waits.length ? Math.min(...waits) : 1));
         continue;
       }
@@ -454,6 +472,9 @@ export function getRestDiagnostics(now = Date.now()) {
     recentRequests:recentUpstreamRequests.slice(-20).map(item=>({...item})),
     lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
+    rollingWindowLimitPerMinute: 6,
+    backgroundRollingWindowLimitPerMinute: 3,
+    rollingWindowScope: 'ALL_FYERS_REST_ENDPOINTS_PROCESS_LOCAL',
     queueDepth: restQueue.length,
     queueCapacity: MAX_REST_QUEUE_SIZE,
     interactiveQueueDepth: restQueue.filter(job => job.priority >= 50).length,

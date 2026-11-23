@@ -141,12 +141,14 @@ function startFnoStrategyScanner() {
     if(!symbol) return;
     let scanTick=snapshot.ticks.get(symbol)||null;
     if(!isFreshFnoTick(scanTick,Date.now())) {
+      fnoStrategyScanRetrySymbol=symbol;
       fnoStrategyScanStats.status='WAITING_FOR_FRESH_FNO_TICK';
       fnoStrategyScanStats.lastReason='Fresh FYERS underlying/futures tick is required; history request not queued';
       return;
     }
     const dispatchGate=getRestDispatchReadiness(REST_PRIORITY.SCANNER,'/history');
     if(!dispatchGate.ready) {
+      fnoStrategyScanRetrySymbol=symbol;
       fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET';
       fnoStrategyScanStats.lastReason='Scanner request held before queue admission: '+dispatchGate.blockers.join(',');
       return;

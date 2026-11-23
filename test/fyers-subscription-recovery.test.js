@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -23,4 +23,18 @@ test('FYERS subscription reconciliation deduplicates symbols and preserves the 2
   assert.equal(new Set([...desired]).size, 24);
   assert.equal(delta.added.length, 21);
   assert.deepEqual(delta.removed, ['NSE:ABC-EQ']);
+});
+
+
+test('WebSocket diagnostics distinguish desired symbols, SDK sends and pending subscriptions', () => {
+  const state = buildSocketSubscriptionDiagnostics({
+    desired:['NSE:NIFTY50-INDEX','NSE:ABC-EQ','NSE:ABC-EQ'],
+    sentToSdk:['NSE:NIFTY50-INDEX'],
+    pending:['NSE:ABC-EQ','NSE:ABC-EQ']
+  });
+  assert.equal(state.desiredCount,2);
+  assert.equal(state.sentToSdkCount,1);
+  assert.equal(state.pendingCount,1);
+  assert.deepEqual(state.pendingSymbols,['NSE:ABC-EQ']);
+  assert.equal(state.confirmation,'SDK_SEND_STATE_ONLY');
 });

@@ -29,7 +29,10 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
     universeCount: symbols.length,
     coverageComplete: symbols.length > 0 && observed.length === symbols.length,
     maxObservationAgeSeconds,
-    topGainers: observed.slice(0, Math.max(1, limit))
+    observations: observed.slice(0, Math.max(1, limit)),
+    // The live Top Gainers list must never promote stale rolling observations.
+    // Keep stale rows separately for coverage diagnostics and age visibility.
+    topGainers: freshObserved.slice(0, Math.max(1, limit))
   };
 }
 

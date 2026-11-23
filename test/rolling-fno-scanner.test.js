@@ -24,9 +24,10 @@ test('keeps current-session rolling observations visible with explicit stale age
   const result=buildRollingFnoLeaderboard({universe,ticks,now,slotCount:20,rotationIntervalMs:60000});
   assert.equal(result.observedCount,1);
   assert.equal(result.freshCount,0);
-  assert.equal(result.topGainers.length,1);
-  assert.equal(result.topGainers[0].fresh,false);
-  assert.equal(result.topGainers[0].ageSeconds,90);
+  assert.equal(result.observations.length,1);
+  assert.equal(result.observations[0].fresh,false);
+  assert.equal(result.observations[0].ageSeconds,90);
+  assert.equal(result.topGainers.length,0);
 });
 test('reports complete coverage only after every current-session symbol was observed', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];

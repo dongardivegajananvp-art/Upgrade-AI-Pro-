@@ -443,7 +443,7 @@ const server = http.createServer(async (req,res) => {
     const market = getSessionMarketData();
     return send(res,200,buildHealthStatus({
       market, masterCurrent:isFnoMasterCurrent(), sessionDate:getNseSessionDate(),
-      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(),
+      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(), authStatus:getAuthStatus(),
       scanner:fnoStrategyScanStats, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
       rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
       rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()

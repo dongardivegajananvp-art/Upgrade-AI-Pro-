@@ -279,7 +279,7 @@ function ensureFyersMarketStarted() {
       fnoUniverseLoadedDate = date;
       fnoUniverseLoadRetryAt = 0;
       startFnoStrategyScanner();
-      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12, 'master date:', requestedDate);
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 1, 'master date:', requestedDate);
       return true;
     }).catch(error => {
       fnoUniverseLoadRetryAt = Date.now() + 30_000;
@@ -352,7 +352,7 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:candidates.length?'HISTORICAL_CANDIDATES_AVAILABLE':'NO_HISTORICAL_CANDIDATE',mode:'HISTORICAL_ONLY_NOT_LIVE',universeCount:snapshot.universe?.length||0,evaluatedCount:evaluations.filter(row=>row.status!=='BLOCKED').length,blockedCount:evaluations.filter(row=>row.status==='BLOCKED').length,candidateCount:candidates.length,candidates:candidates.slice(0,20),evaluations,note:'Historical FYERS completed candles only. No live tick, option quote, option candle, entry, stop or target is inferred. This list is research-only and cannot authorize a trade.'});
       }
       if (url.pathname === '/api/research/universe') {
-        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',marketSession:isNseRegularSession(Date.now())?'OPEN':'CLOSED',scannerStatus:'WAITING_FOR_OFFICIAL_MASTER',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:4,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',marketSession:isNseRegularSession(Date.now())?'OPEN':'CLOSED',scannerStatus:'WAITING_FOR_OFFICIAL_MASTER',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:1,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();

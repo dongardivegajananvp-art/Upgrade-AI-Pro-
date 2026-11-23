@@ -211,3 +211,16 @@ export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Dat
   });
   return eligible[0].index;
 }
+
+
+// Queue age limits prevent requests whose UI/market context has expired from
+// being submitted upstream after a long rate-governor wait.
+export function getRestQueueMaxAgeMs(priority = 0) {
+  const value = Number(priority) || 0;
+  if (value >= REST_PRIORITY.ENTRY) return 10_000;
+  if (value >= REST_PRIORITY.OPTION_CHAIN) return 15_000;
+  if (value >= REST_PRIORITY.CHART) return 30_000;
+  if (value >= REST_PRIORITY.ACCOUNT) return 30_000;
+  if (value >= REST_PRIORITY.SCANNER) return 10_000;
+  return 120_000;
+}

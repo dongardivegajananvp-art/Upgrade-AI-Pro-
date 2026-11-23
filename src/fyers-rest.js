@@ -11,6 +11,9 @@ let cooldownUntil = 0;
 // Process-local cooldown timestamps disappear on restart. Start in a conservative
 // recovery state so background scanner traffic cannot immediately hit the edge.
 let recoveryProbeRequired = REST_RECOVERY_REQUIRED_ON_START;
+// One recovery probe is permitted after startup or a 429 cooldown. A failed
+// probe stays closed; no queued interactive request may turn into a retry storm.
+let recoveryProbeAttempted = false;
 const restQueue = [];
 let restQueueSequence = 0;
 let drainingRestQueue = false;
@@ -120,7 +123,7 @@ async function drainRestQueue() {
       }
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
       if (recoveryProbeRequired) {
-        const recoveryIndex = restQueue.findIndex(job => canRunRestRecoveryProbe({ recoveryProbeRequired, priority: job.priority }));
+        const recoveryIndex = restQueue.findIndex(job => canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority }));
         if (recoveryIndex < 0) {
           const error = new Error('FYERS REST recovery probe required; background request was held before upstream submission');
           for (const pending of restQueue.splice(0)) pending.reject(error);
@@ -132,7 +135,7 @@ async function drainRestQueue() {
       // minute. Cap this endpoint at 8 per rolling minute, while allowing
       // higher/lower-priority non-history REST work to proceed independently.
       const eligibleIndex = restQueue.findIndex(job =>
-        (!recoveryProbeRequired || canRunRestRecoveryProbe({ recoveryProbeRequired, priority: job.priority })) &&
+        (!recoveryProbeRequired || canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) &&
         (job.url.pathname !== '/history' ||
           getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now()) === 0)
       );
@@ -146,6 +149,7 @@ async function drainRestQueue() {
       lastRequestPath = job.url.pathname;
       lastRequestPriority = job.priority;
       const requestStartedAt = Date.now();
+      if (recoveryProbeRequired) recoveryProbeAttempted = true;
       const requestRecord = recordUpstreamRequest(requestStartedAt, job.source, job.url.pathname, job.priority);
       try {
         const response = await fetch(job.url, { ...job.options, signal: AbortSignal.timeout(12000) });
@@ -184,6 +188,8 @@ async function drainRestQueue() {
             cooldownUntil = getUnknownRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, cooldownAttempt);
           }
           recoveryProbeRequired = true;
+          // The next single probe is permitted only after this cooldown expires.
+          recoveryProbeAttempted = false;
           lastRestStatus = 'RATE_LIMITED';
           const markers = [
             lastRestMeta.retryAfter !== null ? 'Retry-After=' + lastRestMeta.retryAfter : null,
@@ -229,6 +235,7 @@ async function drainRestQueue() {
         lastRestStatus = 'OK';
         lastRestError = null;
         recoveryProbeRequired = false;
+        recoveryProbeAttempted = false;
         job.resolve(body);
       } catch (error) {
         requestRecord.status = 'NETWORK_ERROR';
@@ -452,6 +459,8 @@ export function getRestDiagnostics(now = Date.now()) {
     cooldownStrategy: 'FYERS_PLAN_LIMIT_60S_120S_240S_THEN_IST_DAY_BLOCK; CLOUDFLARE_1015_30S_EXPONENTIAL; UNKNOWN_429_BOUNDED',
     cooldownActive: now < cooldownUntil,
     recoveryProbeRequired,
+    recoveryProbeAttempted,
+    recoveryProbePolicy: 'ONE_PROBE_PER_START_OR_429_COOLDOWN; FAILED_PROBE_REQUIRES_OPERATOR_RESTART',
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
     cooldownPersistence: 'PROCESS_LOCAL_ONLY',
     restartSafe: false

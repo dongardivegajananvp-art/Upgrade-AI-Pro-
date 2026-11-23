@@ -523,7 +523,7 @@ export function getRestDispatchReadiness(priority = REST_PRIORITY.SCANNER, path 
     recoveryProbeRequired,
     recoveryProbeAllowed,
     priority,
-    queueDepth: restQueue.length,
+    queueDepth: restQueue.length + (drainingRestQueue ? 1 : 0),
     minGapWaitMs: getRestWaitMs(now, nextRequestAt),
     totalWindowWaitMs: getRestRequestWindowWaitMs(recentUpstreamRequests, now, 6),
     backgroundWindowWaitMs: background

@@ -569,7 +569,7 @@ export function getFnoUniverseSnapshot() {
   return {
     universe: universe.map(item => ({ ...item })),
     ticks: new Map(universe.map(item => [item.symbol, ticks.get(item.symbol)]).filter(([, tick]) => Boolean(tick))),
-    websocketCandles: new Map(universe.map(item=>[item.symbol,fnoWebsocketCandles.snapshot(item.symbol)])),
+    websocketCandles: new Map(activeFnoSymbols.map(symbol=>[symbol,fnoWebsocketCandles.snapshot(symbol)])),
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,

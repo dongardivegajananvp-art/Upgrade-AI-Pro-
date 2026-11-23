@@ -14,6 +14,7 @@ import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
 import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
+import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
@@ -129,10 +130,17 @@ function startFnoStrategyScanner() {
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
+    let scanTick=null;
     try {
-      const history=await getFiveMinuteHistory(symbol,Date.now(),-10);
+      // Do not spend a FYERS History REST request when this underlying has no
+      // fresh exchange tick. Missing/stale live data remains fail-closed NO TRADE.
       const latest=getFnoUniverseSnapshot();
-      const tick=latest.ticks.get(symbol);
+      scanTick=latest.ticks.get(symbol)||null;
+      if(!isFreshFnoTick(scanTick,Date.now())) {
+        throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
+      }
+      const history=await getFiveMinuteHistory(symbol,Date.now(),-10);
+      const tick=scanTick;
       const market=getMarketData();
       const research=detectNineStrategySetup({
         underlyingCandles:history.candles,underlyingTick:tick,
@@ -174,7 +182,9 @@ function startFnoStrategyScanner() {
         symbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:fnoStrategyScanStats.lastReason,
         attemptedAt:new Date(scanStartedAt).toISOString(),scannedAt:fnoStrategyScanStats.lastScanAt,
         attemptCount:fnoSymbolScanLedger.get(symbol)?.attemptCount||1,
-        tickFresh:false,source:'FYERS_SCAN_BLOCKED'
+        tickFresh:isFreshFnoTick(scanTick,Date.now()),
+        tickExchangeTime:scanTick?.exchangeTime||null,
+        source:isFreshFnoTick(scanTick,Date.now())?'FYERS_HISTORY_BLOCKED':'FYERS_SCAN_BLOCKED'
       });
     } finally {
       fnoStrategyScanBusy=false;

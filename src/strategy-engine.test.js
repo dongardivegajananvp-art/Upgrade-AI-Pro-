@@ -611,3 +611,49 @@ test('end-to-end Top Gainer pipeline waits below premium trigger and blocks chas
   assert.equal(chased.status,'NO_TRADE');
   assert.match(chased.reason,/more than 0.5R/);
 });
+
+
+function makeOptionPipelineFields(start, side='CE') {
+  const symbol='NSE:ABC26NOV150'+side;
+  const contract={symbol,underlying:'ABC',side,tickSize:0.05,
+    expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-'+side+'-150'};
+  const optionCandles=[
+    {time:start,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+600,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  return {contract,optionCandles,optionTick:{symbol,price:106.05,exchangeTime:start/1+900,receivedAt:(start+900)*1000}};
+}
+
+test('end-to-end day-high breakout/retest reaches fixed-risk plan only after original breakout pressure/volume confirms',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000, now=(start+1500)*1000;
+  const underlyingCandles=[
+    {time:start,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+300,open:100,high:102,low:99.5,close:101.8,volume:200},
+    {time:start+600,open:101.5,high:103,low:101,close:102.5,volume:170},
+    {time:start+900,open:101.2,high:102,low:100.9,close:101.7,volume:180}
+  ];
+  const option=makeOptionPipelineFields(start+300,'CE');
+  const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:101.7,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'DAY_HIGH_LOW_BREAK_RETEST');
+  assert.equal(result.underlyingSide,'LONG');
+  assert.equal(result.optionSide,'CE');
+  assert.ok(result.rr>=2);
+});
+
+test('end-to-end opening-range first-candle breakout passes only with completed pressure/volume and option confirmation',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000, now=(start+900)*1000;
+  const underlyingCandles=[
+    {time:start,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:200}
+  ];
+  const option=makeOptionPipelineFields(start-300,'CE');
+  option.optionCandles=option.optionCandles.map((c,i)=>({...c,time:start-300+i*300}));
+  option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result.underlyingSide,'LONG');
+  assert.ok(result.rr>=2);
+});

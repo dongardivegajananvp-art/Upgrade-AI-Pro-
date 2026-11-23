@@ -484,3 +484,34 @@ test('daily-trend 5m pullback detector confirms bullish EMA alignment and resume
   assert.equal(result?.side,'LONG');
   assert.equal(result?.strategy,'DAILY_TREND_5M_PULLBACK');
 });
+
+
+test('confirmed bearish underlying setup validates a PE contract and fixed Entry/SL/Target/RR', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=200-i,close=open-1.2;
+    return {time:start+i*300,open,high:open+.1,low:close-.1,close,volume:i===49?2000:1000+i};
+  });
+  const optionCandles=[
+    {time:start+47*300,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150PE',underlying:'ABC',side:'PE',tickSize:.05};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,
+    optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now
+  });
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.underlyingSide,'SHORT');
+  assert.equal(result.optionSide,'PE');
+  assert.equal(result.contract,contract.symbol);
+  assert.equal(result.entry,106.05);
+  assert.equal(result.stopLoss,103.95);
+  assert.equal(result.rr,2);
+  assert.ok(result.rr>=2);
+});

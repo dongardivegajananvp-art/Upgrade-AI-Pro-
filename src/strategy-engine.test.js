@@ -829,3 +829,41 @@ test('end-to-end nine-strategy negative matrix rejects a fresh, contiguous but p
     assert.ok(row.reason, strategy+' must expose its pattern rejection reason');
   }
 });
+
+test('targeted strategy detector invalidation matrix rejects each missing pattern prerequisite',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const flat=(count)=>Array.from({length:count},(_,i)=>({
+    time:start+i*300,open:100,high:101,low:99,close:100,volume:100
+  }));
+  const rows50=flat(50);
+  const rows48=flat(48);
+  const rows30=flat(30);
+  const rows5=flat(5);
+
+  // EMA20/EMA50: neutral close cannot satisfy either directional stack.
+  assert.equal(detectEmaTrend(rows50),null,'EMA alignment must reject a neutral tape');
+
+  // Top Gainer: both membership and a close above the previous candle high are mandatory.
+  assert.equal(detectTopGainerMomentum(rows5,false),null,'non-member cannot qualify as a Top Gainer');
+  assert.equal(detectTopGainerMomentum(rows5,true),null,'Top Gainer membership without a breakout must reject');
+
+  // Daily pullback: absent verified daily context cannot produce a setup.
+  assert.equal(detectDailyTrendPullback(rows50,[],Date.parse('2026-11-23T12:00:00Z')),null,
+    'daily pullback must reject missing verified daily history');
+
+  // Day high/low retest: no prior level break means no reclaim/rejection setup.
+  assert.equal(detectDayHighLowRetest(rows5),null,'day range without a break/retest must reject');
+
+  // Double pattern: no comparable swing pair / neckline sequence.
+  assert.equal(detectDoublePattern(rows48),null,'no double top/bottom structure must reject');
+
+  // Continuation: flat impulse has no directional displacement or breakout.
+  assert.equal(detectContinuation(rows30,'LONG'),null,'bullish continuation without impulse must reject');
+  assert.equal(detectContinuation(rows30,'SHORT'),null,'bearish continuation without impulse must reject');
+
+  // Flag: equal flag/impulse volume does not meet the required contraction.
+  assert.equal(detectFlagVolume(rows30),null,'flag without volume contraction must reject');
+
+  // Opening range: first candle defines a range, but later closes remain inside it.
+  assert.equal(detectOpeningRange(rows5),null,'opening range without a completed break must reject');
+});

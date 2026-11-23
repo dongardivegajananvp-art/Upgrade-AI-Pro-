@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -148,6 +148,33 @@ test('last observed Top 5 remains visible during session feed failure with an ex
   assert.equal(view.items[0].fresh, false);
 });
 
+test('rolling Top 5 remains visible during the live session when observations age beyond the 10-second tick gate', () => {
+  const fno = {
+    status:'ROTATING_LIVE_COVERAGE', observedCount:18, freshCount:2, universeCount:218,
+    maxObservationAgeSeconds:3360,
+    topGainers:[
+      {symbol:'NSE:AAA-EQ',price:120,changePercent:5.2,fresh:true,ageSeconds:2},
+      {symbol:'NSE:BBB-EQ',price:110,changePercent:4.1,fresh:false,ageSeconds:38}
+    ]
+  };
+  const view = resolveTopGainersView(fno, null, Date.parse('2026-11-20T06:00:00Z'));
+  assert.equal(view.mode,'LIVE');
+  assert.equal(view.items.length,2);
+  assert.equal(view.items[0].fresh,true);
+  assert.equal(view.items[1].fresh,false);
+  assert.match(app,/OBSERVED ' \+ Number\(item\.ageSeconds\)\.toFixed\(0\) \+ 's · NOT ACTIONABLE/);
+});
+
+test('rolling Top 5 rejects observations outside the declared rolling age window', () => {
+  const fno = {
+    status:'ROTATING_LIVE_COVERAGE', observedCount:1, freshCount:0, universeCount:218,
+    maxObservationAgeSeconds:120,
+    topGainers:[{symbol:'NSE:AAA-EQ',price:120,changePercent:5.2,fresh:false,ageSeconds:121}]
+  };
+  const view = resolveTopGainersView(fno, null, Date.parse('2026-11-20T06:00:00Z'));
+  assert.equal(view.mode,'WAITING');
+});
+
 test('NSE regular session uses India time and excludes weekends and 15:30 close', () => {
   assert.equal(isNseRegularSession(Date.parse('2026-11-20T03:45:00Z')), true);
   assert.equal(isNseRegularSession(Date.parse('2026-11-20T10:00:00Z')), false);
@@ -164,7 +191,7 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -213,7 +240,7 @@ test('chart requests ten completed NSE trading sessions and renders day partitio
 test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
   const snapshotSource = app.includes('normalizeChartSnapshot');
   assert.ok(snapshotSource);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
 });
 
 test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {

@@ -27,7 +27,7 @@
 - [x] Positive end-to-end setup fixtures cover all nine strategy IDs with directional CE/PE contract validation and fixed Entry/SL/Target at RR >= 1:2.
 - [x] A stale-option-quote negative end-to-end gate is exercised for all nine strategy IDs; Top Gainer also covers absent option tick, wrong CE/PE side, incomplete option candles, below-trigger wait and >0.5R chase rejection.
 - [x] Added a nine-strategy evaluator-pipeline negative matrix using fresh underlying ticks, contiguous completed 5-minute candles and fresh daily context; every strategy must return an explicit REJECTED ledger reason when its pattern is absent.
-- [ ] Pattern-specific invalidation variants (e.g. EMA alignment failure, missing Top Gainer qualification, failed daily pullback resume, missing retest/neckline, weak continuation impulse, failed flag volume and opening-range non-break) remain to be added individually. The neutral-session matrix is a broad evaluator fail-closed check, not proof of every individual invalidation rule.
+- [x] Added targeted detector-level invalidation checks for EMA alignment, Top Gainer membership/breakout, missing daily pullback context, day-range retest, double-pattern structure, bullish/bearish continuation impulse, flag volume contraction and opening-range breakout. These are direct detector regressions; they are not yet independent full-pipeline E2E negative fixtures for each strategy.
 - [ ] PWA browser update/cache lifecycle verification on real supported browsers.
 - [ ] Manual rollback drill with Render deployment evidence.
 - [ ] Final market-live acceptance; otherwise UI must remain NO TRADE and orders disabled.
@@ -63,3 +63,10 @@ Compatibility is therefore **partially verified, not universally certified**. CI
 - A single full evaluator-pipeline negative fixture now checks all nine strategy ledger rows on a fresh, contiguous, pattern-neutral session and requires REJECTED plus a non-empty reason for every strategy.
 - This complements the existing positive fixture for each strategy and stale-option-quote rejection for all nine.
 - This does not close the remaining pattern-specific negative variants listed above.
+
+
+### Targeted detector invalidation increment
+
+- Direct negative tests now exercise the specific missing prerequisite for each strategy family, including both continuation directions.
+- These complement the full evaluator neutral-session matrix and the all-nine stale-option quote gate.
+- Full-pipeline pattern-specific negative E2E variants remain a separate acceptance item; no claim is made that detector tests alone prove every end-to-end rejection path.

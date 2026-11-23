@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -19,6 +19,9 @@ let lastRateLimitAt = null;
 let lastRequestPriority = null;
 let rateLimitDayKey = null;
 let rateLimitCountToday = 0;
+let cloudflareRateLimitCountToday = 0;
+let unknownRateLimitCountToday = 0;
+let lastRateLimitKind = null;
 let requestMinuteKey = null;
 let requestsThisMinute = 0;
 let requestDayKey = null;
@@ -41,6 +44,8 @@ function refreshRequestCounters(now = Date.now()) {
   if (rateLimitDayKey !== dayKey) {
     rateLimitDayKey = dayKey;
     rateLimitCountToday = 0;
+    cloudflareRateLimitCountToday = 0;
+    unknownRateLimitCountToday = 0;
   }
 }
 function recordUpstreamRequest(now = Date.now()) {
@@ -115,8 +120,24 @@ async function drainRestQueue() {
         lastRestMeta.responseMessage = String(body.message || body.error || '').slice(0, 160) || null;
         if (response.status === 429) {
           refreshRequestCounters(Date.now());
-          rateLimitCountToday++;
-          cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, rateLimitCountToday);
+          lastRateLimitKind = classifyRestRateLimit({
+            status: response.status, code: lastRestMeta.responseCode,
+            server: lastRestMeta.server, cfRay: lastRestMeta.cfRay
+          });
+          let cooldownAttempt = 1;
+          if (lastRateLimitKind === 'FYERS_PLAN_LIMIT') {
+            rateLimitCountToday++;
+            cooldownAttempt = rateLimitCountToday;
+            cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, cooldownAttempt);
+          } else if (lastRateLimitKind === 'CLOUDFLARE_1015') {
+            cloudflareRateLimitCountToday++;
+            cooldownAttempt = cloudflareRateLimitCountToday;
+            cooldownUntil = getCloudflareRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, cooldownAttempt);
+          } else {
+            unknownRateLimitCountToday++;
+            cooldownAttempt = unknownRateLimitCountToday;
+            cooldownUntil = getUnknownRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, cooldownAttempt);
+          }
           lastRestStatus = 'RATE_LIMITED';
           const markers = [
             lastRestMeta.retryAfter !== null ? 'Retry-After=' + lastRestMeta.retryAfter : null,
@@ -125,15 +146,22 @@ async function drainRestQueue() {
             lastRestMeta.server ? 'Server=' + lastRestMeta.server : null
           ].filter(Boolean).join(' · ');
           lastRateLimitAt = new Date().toISOString();
-          const dayBlock = rateLimitCountToday >= 4 ? 'rest-of-IST-day block' : 'exponential backoff ' + rateLimitCountToday + '/3';
-          lastRestError = 'FYERS HTTP 429; ' + dayBlock + ' active until ' + new Date(cooldownUntil).toISOString() +
+          const cooldownLabel = lastRateLimitKind === 'FYERS_PLAN_LIMIT'
+            ? (rateLimitCountToday >= 4 ? 'FYERS plan-limit rest-of-IST-day block' : 'FYERS plan-limit backoff ' + rateLimitCountToday + '/3')
+            : lastRateLimitKind === 'CLOUDFLARE_1015'
+              ? 'Cloudflare 1015 backoff ' + cloudflareRateLimitCountToday
+              : 'Unclassified HTTP 429 backoff ' + unknownRateLimitCountToday;
+          lastRestError = 'Upstream HTTP 429 (' + lastRateLimitKind + '); ' + cooldownLabel +
+            ' active until ' + new Date(cooldownUntil).toISOString() +
             ' (process-local cooldown; no durable store configured)' + (markers ? ' · ' + markers : '');
           console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
             path: lastRequestPath, status: response.status, at: lastRateLimitAt,
-            retryAfter: lastRestMeta.retryAfter, responseCode: lastRestMeta.responseCode,
-            responseMessage: lastRestMeta.responseMessage, cfRay: lastRestMeta.cfRay,
-            server: lastRestMeta.server, requestsThisMinute, requestsToday,
-            rateLimitCountToday, cooldownUntil: new Date(cooldownUntil).toISOString()
+            rateLimitKind: lastRateLimitKind, retryAfter: lastRestMeta.retryAfter,
+            responseCode: lastRestMeta.responseCode, responseMessage: lastRestMeta.responseMessage,
+            cfRay: lastRestMeta.cfRay, server: lastRestMeta.server,
+            requestsThisMinute, requestsToday, rateLimitCountToday,
+            cloudflareRateLimitCountToday, unknownRateLimitCountToday,
+            cooldownUntil: new Date(cooldownUntil).toISOString()
           }));
           job.reject(new Error(lastRestError));
           const queuedError = new Error('FYERS REST cooldown active; queued request was not sent upstream');
@@ -353,7 +381,10 @@ export function getRestDiagnostics(now = Date.now()) {
     requestsToday,
     requestCountersScope: 'PROCESS_LOCAL',
     rateLimitCountToday,
-    cooldownStrategy: '60S_120S_240S_THEN_IST_DAY_BLOCK',
+    cloudflareRateLimitCountToday,
+    unknownRateLimitCountToday,
+    lastRateLimitKind,
+    cooldownStrategy: 'FYERS_PLAN_LIMIT_60S_120S_240S_THEN_IST_DAY_BLOCK; CLOUDFLARE_1015_30S_EXPONENTIAL; UNKNOWN_429_BOUNDED',
     cooldownActive: now < cooldownUntil,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
     cooldownPersistence: 'PROCESS_LOCAL_ONLY',

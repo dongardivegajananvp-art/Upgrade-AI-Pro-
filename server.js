@@ -9,7 +9,7 @@ import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } f
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
-import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
@@ -55,6 +55,8 @@ let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
 let fnoStrategyScanRotation = null;
 let fnoStrategyScanLoggedRotation = null;
+let fnoStrategyScanRetryAt = 0;
+let fnoStrategyScanRetrySymbol = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
 // Per-underlying audit ledger: records actual scan attempts and explicit skips/failures.
 // It is diagnostic only and never upgrades stale/missing data to an actionable setup.
@@ -65,6 +67,7 @@ function startFnoStrategyScanner() {
   fnoStrategyScanStats.status='RUNNING';
   fnoStrategyScanTimer=setInterval(async () => {
     if (fnoStrategyScanBusy) return;
+    if (Date.now() < fnoStrategyScanRetryAt) { fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET'; return; }
     if (!isNseRegularSession(Date.now())) {
       fnoStrategyScanStats.status='OUTSIDE_NSE_SESSION';
       return;
@@ -130,15 +133,30 @@ function startFnoStrategyScanner() {
     }
     if (fnoStrategyScanCursor>=scanLimit) return;
     const scanSymbols=getFnoSliceScanSymbols(active,scanLimit);
-    const symbol=scanSymbols[fnoStrategyScanCursor++];
+    const normalSymbol=scanSymbols[fnoStrategyScanCursor] || null;
+    const retryCandidate=Boolean(fnoStrategyScanRetrySymbol && active.includes(fnoStrategyScanRetrySymbol) &&
+      isFreshFnoTick(snapshot.ticks.get(fnoStrategyScanRetrySymbol),Date.now()));
+    const symbol=retryCandidate ? fnoStrategyScanRetrySymbol : normalSymbol;
+    if(!symbol) return;
+    let scanTick=snapshot.ticks.get(symbol)||null;
+    if(!isFreshFnoTick(scanTick,Date.now())) {
+      fnoStrategyScanStats.status='WAITING_FOR_FRESH_FNO_TICK';
+      fnoStrategyScanStats.lastReason='Fresh FYERS underlying/futures tick is required; history request not queued';
+      return;
+    }
+    const dispatchGate=getRestDispatchReadiness(REST_PRIORITY.SCANNER,'/history');
+    if(!dispatchGate.ready) {
+      fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET';
+      fnoStrategyScanStats.lastReason='Scanner request held before queue admission: '+dispatchGate.blockers.join(',');
+      return;
+    }
+    if(!retryCandidate) fnoStrategyScanCursor++;
     const scanStartedAt=Date.now();
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
-    let scanTick=null;
     try {
-      // Do not spend a FYERS History REST request when this underlying has no
-      // fresh exchange tick. Missing/stale live data remains fail-closed NO TRADE.
+      // Re-read immediately before requesting history; the tick must still be fresh.
       const latest=getFnoUniverseSnapshot();
       scanTick=latest.ticks.get(symbol)||null;
       if(!isFreshFnoTick(scanTick,Date.now())) {
@@ -153,6 +171,7 @@ function startFnoStrategyScanner() {
         researchEnabled:false,now:Date.now()
       });
       fnoStrategyScanStats.scannedCount++;
+      if(retryCandidate) { fnoStrategyScanRetrySymbol=null; fnoStrategyScanRetryAt=0; }
       fnoStrategyScanStats.lastSymbol=symbol;
       fnoStrategyScanStats.lastStatus=research.status;
       fnoStrategyScanStats.lastReason=research.reason||null;
@@ -179,6 +198,17 @@ function startFnoStrategyScanner() {
         }
       }
     } catch(error) {
+      const errorMessage=String(error.message||'F&O history scan failed');
+      const retryable=/queued request expired|queue capacity|queue is full|cooldown active|recovery probe required|429/i.test(errorMessage);
+      if(retryable) {
+        fnoStrategyScanRetrySymbol=symbol;
+        const retryDiagnostics=getRestDiagnostics();
+        fnoStrategyScanRetryAt=retryDiagnostics.cooldownUntil ? Date.parse(retryDiagnostics.cooldownUntil) : Date.now()+10_000;
+        fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET';
+      } else if(retryCandidate) {
+        fnoStrategyScanRetrySymbol=null;
+        fnoStrategyScanRetryAt=0;
+      }
       fnoStrategyScanStats.lastSymbol=symbol;
       fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';
       fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);

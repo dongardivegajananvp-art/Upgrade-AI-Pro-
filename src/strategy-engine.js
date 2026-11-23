@@ -535,6 +535,17 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],researchRanking,strategyLedger,underlyingPrice:number(underlyingTick?.price??last.close),underlyingCandleTime:last.time, ...(historicalMode?{dataMode:'HISTORICAL_CANDLES_ONLY'}:{})};
 }
 
+export function validateStrategyOptionContract({strategy,underlyingSide,contract}={}) {
+  if(!STRATEGIES.includes(strategy))return {ok:false,reason:'A recognized one of nine strategies is required'};
+  if(!['LONG','SHORT'].includes(underlyingSide))return {ok:false,reason:'Confirmed LONG/SHORT underlying direction is required'};
+  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)
+    return {ok:false,reason:'Verified active CE/PE contract and tick size are required'};
+  const expectedSide=underlyingSide==='LONG'?'CE':'PE';
+  if(contract.side!==expectedSide)return {ok:false,reason:'Selected option side does not match the confirmed underlying direction'};
+  if(typeof contract.symbol!=='string'||!/^NSE:/.test(contract.symbol))return {ok:false,reason:'Verified NSE option contract identity is required'};
+  return {ok:true,expectedSide};
+}
+
 export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
   let setup=null;
   const blockDetected=(reason)=>({
@@ -546,12 +557,12 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
   if(!tickFresh(optionTick))return blockDetected('Fresh FYERS option premium tick is required');
-  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return blockDetected('Verified active CE/PE contract and tick size are required');
+  const chosen=setup;
+  const contractGate=validateStrategyOptionContract({strategy:chosen.strategy,underlyingSide:chosen.side,contract});
+  if(!contractGate.ok)return blockDetected(contractGate.reason);
   const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds);
   if(o.error)return blockDetected(o.error);
   if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
-  const chosen=setup;
-  if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return blockDetected('Selected option side does not match the confirmed underlying direction');
   const premiumRows=o.rows,tickSize=number(contract.tickSize);
   // Require an ordered, completed option structure: prior range, bullish breakout
   // close above that range, then a bullish retest/hold. Live ticks cannot replace

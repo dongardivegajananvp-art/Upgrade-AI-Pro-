@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl } from './fyers-rest.js';
+import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
@@ -99,4 +99,12 @@ test('socket rate-limit recovery completes only after all paced batches drain on
   assert.equal(canCompleteSocketRateLimitRecovery({...base,cooldownUntil:5001}),false);
   assert.equal(canCompleteSocketRateLimitRecovery({...base}),true);
   assert.equal(canCompleteSocketRateLimitRecovery({...base,recoveryPending:false}),false);
+});
+
+test('5-minute history cache remains valid only until the next completed candle is available', () => {
+  const bucketStart = Date.UTC(2027, 0, 4, 3, 45); // 09:15 IST
+  assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 1_000), bucketStart + 300_000 + 2_000);
+  assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 299_000), bucketStart + 300_000 + 2_000);
+  assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 300_000), bucketStart + 600_000 + 2_000);
+  assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 301_000, 0), bucketStart + 600_000);
 });

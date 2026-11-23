@@ -33,6 +33,9 @@ let selectedUnderlyingSymbol = null;
 let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
 const ticks = new Map();
+// Bounded, rate-limited observability: first tick per symbol, then at most once/minute.
+const tickTelemetryLoggedAt = new Map();
+let optionFirstTickLoggedFor = null;
 let socketHasConnected = false;
 const socketSubscribedSymbols = new Set();
 let subscriptionOperationSequence = 0;
@@ -183,9 +186,29 @@ function accept(item) {
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   ticks.set(symbol, tick);
+  if (universe.some(item => item.symbol === symbol) || symbol === selectedOptionSymbol) {
+    const previousLogAt = tickTelemetryLoggedAt.get(symbol) || 0;
+    if (!previousLogAt || tick.receivedAt - previousLogAt >= 60_000) {
+      tickTelemetryLoggedAt.set(symbol, tick.receivedAt);
+      console.info('[FYERS_DATA] market tick received:', JSON.stringify({
+        symbol, receivedAt: new Date(tick.receivedAt).toISOString(),
+        exchangeTime: new Date(tick.exchangeTime * 1000).toISOString(),
+        receiveAgeMs: Date.now() - tick.receivedAt, exchangeAgeMs: Math.round((Date.now() / 1000 - tick.exchangeTime) * 1000),
+        fresh: isFresh(tick), selectedUnderlying: symbol === selectedUnderlyingSymbol,
+        selectedOption: symbol === selectedOptionSymbol
+      }));
+    }
+  }
   socketLastTickAt = tick.receivedAt;
   socketLastTickExchangeTime = tick.exchangeTime;
   if (symbol === selectedOptionSymbol) {
+    if (optionFirstTickLoggedFor !== symbol) {
+      optionFirstTickLoggedFor = symbol;
+      console.info('[FYERS_DATA] selected option first tick verified:', JSON.stringify({
+        symbol, receivedAt: new Date(tick.receivedAt).toISOString(),
+        exchangeTime: new Date(tick.exchangeTime * 1000).toISOString(), fresh: isFresh(tick)
+      }));
+    }
     optionSubscriptionStatus = 'TICK_RECEIVED';
     optionSubscriptionError = null;
     optionLastTickAt = tick.receivedAt;
@@ -295,6 +318,7 @@ export function setSelectedOptionSymbol(symbol) {
     return { status: optionSubscriptionStatus, symbol: next, reason: optionSubscriptionError };
   }
   selectedOptionSymbol = next;
+  optionFirstTickLoggedFor = null;
   if (socket && socketStatus === 'CONNECTED') {
     try {
       syncSocketSubscriptions(desiredSocketSubscriptions(), 'selected-option-change');
@@ -437,8 +461,23 @@ export function getMarketData(now = Date.now()) {
   const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: SCAN_PER_SLICE, rotationIntervalMs: ROTATION_INTERVAL_MS });
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
+  const activeFnoTicks = activeFnoSymbols.map(symbol => ({ symbol, tick: ticks.get(symbol) || null }));
+  const fnoTickCoverage = {
+    activeSymbols: activeFnoSymbols.length,
+    withTick: activeFnoTicks.filter(item => item.tick).length,
+    fresh: activeFnoTicks.filter(item => isFresh(item.tick, now)).length,
+    stale: activeFnoTicks.filter(item => item.tick && !isFresh(item.tick, now)).length,
+    noTick: activeFnoTicks.filter(item => !item.tick).length,
+    symbols: activeFnoTicks.map(({ symbol, tick }) => ({
+      symbol, status: !tick ? 'NO_TICK' : isFresh(tick, now) ? 'FRESH' : 'STALE',
+      receivedAt: tick ? new Date(tick.receivedAt).toISOString() : null,
+      exchangeTime: tick ? new Date(tick.exchangeTime * 1000).toISOString() : null,
+      receiveAgeSeconds: tick ? Math.max(0, Math.floor((now - tick.receivedAt) / 1000)) : null,
+      exchangeAgeSeconds: tick ? Math.max(0, Math.floor(now / 1000 - tick.exchangeTime)) : null
+    }))
+  };
   return {
-    socketStatus, lastError, socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
+    socketStatus, lastError, fnoTickCoverage, socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
     socketDiagnostics: {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,
       lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt,

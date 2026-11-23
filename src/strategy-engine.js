@@ -1,3 +1,4 @@
+import { isValidOhlcvCandle, validateSessionCandleWindow, validateFreshDailyCandleWindow } from './candle-validation.js';
 import { buildRiskPlan } from './safety.js';
 // NSE-only nine-strategy engine ported from the previously approved strategy rules.
 // Research enrichment is deliberately unavailable until its separate data sources are implemented.
@@ -134,19 +135,9 @@ const STRATEGY_TIE_PRIORITY = Object.freeze([
 
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
 function number(value) { return Number(value); }
-function validOhlcv(c) {
-  return c && ['time','open','high','low','close'].every(k => finite(c[k])) &&
-    number(c.time) > 0 && number(c.open) > 0 && number(c.high) > 0 && number(c.low) > 0 && number(c.close) > 0 &&
-    number(c.high) >= Math.max(number(c.open), number(c.close), number(c.low)) &&
-    number(c.low) <= Math.min(number(c.open), number(c.close));
-}
+function validOhlcv(c) { return isValidOhlcvCandle(c); }
 function hasFreshCompletedDailyHistory(rows, now = Date.now(), maxAgeSeconds = 5 * 86400) {
-  if (!Array.isArray(rows)) return false;
-  const valid = rows.filter(validOhlcv);
-  if (valid.length < 50) return false;
-  const latestTime = number(valid.at(-1)?.time);
-  const ageSeconds = now / 1000 - latestTime;
-  return Number.isFinite(ageSeconds) && ageSeconds >= 0 && ageSeconds <= maxAgeSeconds;
+  return validateFreshDailyCandleWindow(rows, now, 50, maxAgeSeconds);
 }
 function ema(values, period) {
   if (values.length < period) return NaN;
@@ -168,25 +159,10 @@ function isTradingCandleContiguous(previousTime, currentTime, sessionStartMinute
   return previous.minute === sessionCloseMinute - 5 && current.minute === sessionStartMinute && current.day > previous.day;
 }
 function contiguousWindow(rows, count, sessionStartMinute = 555, sessionCloseMinute = 930) {
-  if (!Array.isArray(rows) || rows.length < count) return false;
-  const required = rows.slice(-count);
-  return required.every((candle, index) => index === 0 ||
-    isTradingCandleContiguous(number(required[index - 1].time), number(candle.time), sessionStartMinute, sessionCloseMinute));
+  return validateSessionCandleWindow(rows, count, INTERVAL_SECONDS, sessionStartMinute, sessionCloseMinute);
 }
 function contiguousFifteenMinuteWindow(rows, count) {
-  if (!Array.isArray(rows) || rows.length < count) return false;
-  const required = rows.slice(-count);
-  const parts = value => {
-    const date = new Date((Number(value) + 19800) * 1000);
-    return { day: date.toISOString().slice(0,10), minute: date.getUTCHours() * 60 + date.getUTCMinutes() };
-  };
-  return required.every((candle,index) => {
-    if (index === 0) return true;
-    const previous = parts(required[index - 1].time);
-    const current = parts(candle.time);
-    return Number(candle.time) - Number(required[index - 1].time) === 900 ||
-      (previous.minute === 915 && current.minute === 555 && current.day > previous.day);
-  });
+  return validateSessionCandleWindow(rows, count, 900, 555, 930);
 }
 function currentSessionRows(rows) {
   if (!Array.isArray(rows) || !rows.length) return [];

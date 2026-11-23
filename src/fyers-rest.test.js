@@ -124,6 +124,8 @@ test('after a 429 cooldown, only a selected chart or higher-priority request may
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.SCANNER}),false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.RESEARCH}),false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.CHART}),true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.CHART}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.ENTRY}),false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.ENTRY}),true);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:false,priority:REST_PRIORITY.SCANNER}),true);
 });
@@ -132,4 +134,5 @@ test('every backend restart starts behind an interactive REST recovery gate', ()
   assert.equal(REST_RECOVERY_REQUIRED_ON_START, true);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:REST_RECOVERY_REQUIRED_ON_START,priority:REST_PRIORITY.SCANNER}), false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:REST_RECOVERY_REQUIRED_ON_START,priority:REST_PRIORITY.CHART}), true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:REST_RECOVERY_REQUIRED_ON_START,recoveryProbeAttempted:true,priority:REST_PRIORITY.CHART}), false);
 });

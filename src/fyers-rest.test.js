@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -66,7 +66,6 @@ test('daily research excludes the current incomplete IST session candle', () => 
 });
 
 
-import { parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery, REST_PRIORITY, canRunRestRecoveryProbe, sortRestQueue } from './rest-scheduler-utils.js';
 
 test('FYERS Retry-After and bounded REST backoff respect provider wait times', () => {
   const now = Date.UTC(2026, 10, 20, 10, 0, 0);

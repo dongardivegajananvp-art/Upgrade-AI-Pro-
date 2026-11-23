@@ -98,8 +98,8 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.warmupSymbol=warmupSymbol;
       fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
       try {
-        await getDailyHistory(warmupSymbol,Date.now(),-10);
-        await getFifteenMinuteHistory(warmupSymbol,Date.now(),-10);
+        await getDailyHistory(warmupSymbol,Date.now(),-10,'scanner-warmup-daily');
+        await getFifteenMinuteHistory(warmupSymbol,Date.now(),-10,'scanner-warmup-15m');
         if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
           throw new Error('Research warmup queue completion state was not registered');
         }
@@ -139,7 +139,7 @@ function startFnoStrategyScanner() {
       if(!isFreshFnoTick(scanTick,Date.now())) {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
       }
-      const history=await getFiveMinuteHistory(symbol,Date.now(),-10);
+      const history=await getFiveMinuteHistory(symbol,Date.now(),-10,'fno-scanner-5m');
       const tick=scanTick;
       const market=getMarketData();
       const research=detectNineStrategySetup({
@@ -313,11 +313,11 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
-      if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol')));
+      if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),50,'chart-history'));
       if (url.pathname === '/api/research-context') {
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
-        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol,Date.now(),50),getFifteenMinuteHistory(symbol,Date.now(),50)]);
+        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol,Date.now(),50,'research-context-daily'),getFifteenMinuteHistory(symbol,Date.now(),50,'research-context-15m')]);
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
       if (url.pathname === '/api/research/historical-universe') {
@@ -395,7 +395,7 @@ const server = http.createServer(async (req,res) => {
           return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Fresh selected-underlying FYERS tick is required for independent research'});
         }
         const [fiveMinute,daily,fifteenMinute] = await Promise.all([
-          getFiveMinuteHistory(symbol,Date.now(),50), getDailyHistory(symbol,Date.now(),50), getFifteenMinuteHistory(symbol,Date.now(),50)
+          getFiveMinuteHistory(symbol,Date.now(),50,'manual-research-5m'), getDailyHistory(symbol,Date.now(),50,'manual-research-daily'), getFifteenMinuteHistory(symbol,Date.now(),50,'manual-research-15m')
         ]);
         const latestMarket = getMarketData();
         const latestUnderlying = latestMarket.selectedUnderlying;
@@ -421,11 +421,11 @@ const server = http.createServer(async (req,res) => {
       }
       if (url.pathname === '/api/quotes') {
         const symbols = (url.searchParams.get('symbols') || '').split(',').filter(Boolean);
-        return send(res,200,await getFyersQuotes(symbols));
+        return send(res,200,await getFyersQuotes(symbols,'quotes-endpoint'));
       }
       if (url.pathname === '/api/option-chain') {
         if (!isFnoMasterCurrent()) return send(res,503,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
-        return send(res,200,await getFyersOptionChain(url.searchParams.get('symbol'),url.searchParams.get('strikecount') || 10,url.searchParams.get('timestamp') || ''));
+        return send(res,200,await getFyersOptionChain(url.searchParams.get('symbol'),url.searchParams.get('strikecount') || 10,url.searchParams.get('timestamp') || '','option-chain-panel'));
       }
       if (url.pathname === '/api/positions') return send(res,200,await getFyersPositions());
       if (url.pathname === '/api/orderbook') return send(res,200,await getFyersOrderbook());
@@ -558,10 +558,10 @@ const server = http.createServer(async (req,res) => {
         const startedAt = Date.now();
         console.info('[SETUP_EVAL] started:',JSON.stringify({underlying:body.underlying,contract:body.contract,contractSide:contract.side,strike:contract.strike,expiry:contract.expiry}));
         const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([
-          getFiveMinuteHistory(body.underlying,Date.now(),50),
-          getFiveMinuteHistory(body.contract,Date.now(),50),
-          getDailyHistory(body.underlying,Date.now(),50),
-          getFifteenMinuteHistory(body.underlying,Date.now(),50)
+          getFiveMinuteHistory(body.underlying,Date.now(),50,'setup-underlying-5m'),
+          getFiveMinuteHistory(body.contract,Date.now(),50,'setup-option-5m'),
+          getDailyHistory(body.underlying,Date.now(),50,'setup-underlying-daily'),
+          getFifteenMinuteHistory(body.underlying,Date.now(),50,'setup-underlying-15m')
         ]);
         console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,
@@ -626,7 +626,7 @@ const server = http.createServer(async (req,res) => {
       if (!beforeChain.selectedUnderlying?.fresh || beforeChain.selectedUnderlying.symbol !== body.underlying) {
         return send(res,200,{status:'AUTO_OPTION_UNAVAILABLE',reason:'Fresh selected-underlying FYERS tick is required before strike selection'});
       }
-      const chainPayload = await getFyersOptionChain(body.underlying,10,body.timestamp || '');
+      const chainPayload = await getFyersOptionChain(body.underlying,10,body.timestamp || '','auto-option-selection');
       const chainData = chainPayload.data || chainPayload;
       const latestUnderlying = getMarketData().selectedUnderlying;
       if (!latestUnderlying?.fresh || latestUnderlying.symbol !== body.underlying) {

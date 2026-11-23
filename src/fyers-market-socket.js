@@ -40,8 +40,9 @@ let optionFirstTickLoggedFor = null;
 let socketHasConnected = false;
 const socketSubscribedSymbols = new Set();
 let subscriptionOperationSequence = 0;
-const SUBSCRIPTION_BATCH_SIZE = 4;
+const SUBSCRIPTION_BATCH_SIZE = 1;
 const SUBSCRIPTION_BATCH_INTERVAL_MS = 1200;
+let lastSentSubscriptionBatch = [];
 let pendingSubscriptionSymbols = [];
 const pendingSubscriptionSet = new Set();
 let subscriptionFlushTimer = null;
@@ -82,9 +83,11 @@ function scheduleSubscriptionFlush(delay = 0) {
         count: batch.length, remaining: pendingSubscriptionSymbols.length,
         batchSize: SUBSCRIPTION_BATCH_SIZE, intervalMs: SUBSCRIPTION_BATCH_INTERVAL_MS
       }));
+      lastSentSubscriptionBatch = [...batch];
       socket.subscribe(batch);
       for (const symbol of batch) socketSubscribedSymbols.add(symbol);
     } catch (error) {
+      lastSentSubscriptionBatch = [];
       pendingSubscriptionSymbols = [...batch, ...pendingSubscriptionSymbols];
       for (const symbol of batch) pendingSubscriptionSet.add(symbol);
       lastError = safeError(error);
@@ -411,7 +414,18 @@ export function startMarketSocket() {
       socket.autoreconnect(10);
       console.info('[FYERS_DATA] connected; subscription reconciliation queued:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
     });
-    socket.on('message', message => accept(decode(message)));
+    socket.on('message', message => {
+      const decoded = decode(message);
+      const acknowledge = item => {
+        if (Array.isArray(item)) { for (const child of item) acknowledge(child); return; }
+        if (item && typeof item === 'object' && item.type === 'sub' && Number(item.code) === 200) {
+          lastSentSubscriptionBatch = [];
+          return;
+        }
+        accept(item);
+      };
+      acknowledge(decoded);
+    });
     socket.on('error', error => {
       socketErrorCount++;
       socketLastErrorAt = new Date().toISOString();
@@ -423,11 +437,15 @@ export function startMarketSocket() {
         socketRateLimitAttempt += 1;
         const backoffMs = getSocketRateLimitBackoffMs(socketRateLimitAttempt);
         socketRateLimitUntil = Date.now() + backoffMs;
-        // Discard locally queued subscription work. The SDK may reconnect on its
-        // own, but this process will not issue another batch before the backoff ends.
-        socketSubscribedSymbols.clear();
-        pendingSubscriptionSymbols = [];
-        pendingSubscriptionSet.clear();
+        // FYERS auto-reconnect restores accepted symbols. Preserve those local
+        // acknowledgements and retry only the batch rejected by the 1015 response.
+        // This avoids duplicating already-active subscriptions after reconnect.
+        const rejectedBatch = [...lastSentSubscriptionBatch];
+        lastSentSubscriptionBatch = [];
+        for (const symbol of rejectedBatch) socketSubscribedSymbols.delete(symbol);
+        const retryBatch = rejectedBatch.filter(symbol => !pendingSubscriptionSet.has(symbol));
+        pendingSubscriptionSymbols = [...retryBatch, ...pendingSubscriptionSymbols];
+        for (const symbol of retryBatch) pendingSubscriptionSet.add(symbol);
         if (socketRateLimitRecoveryTimer) clearTimeout(socketRateLimitRecoveryTimer);
         socketRateLimitRecoveryTimer = null;
         console.warn('[FYERS_DATA] rate-limit backoff armed:', JSON.stringify({
@@ -443,10 +461,9 @@ export function startMarketSocket() {
       socketConnectedAt = null;
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
-      // Do not assume the SDK retained server-side subscriptions across a transport
-      // reconnect. Clear the local acknowledgement set so the next connect event
-      // reconciles the complete current desired set in paced batches.
-      socketSubscribedSymbols.clear();
+      // FYERS Data Socket auto-reconnect automatically restores prior subscriptions.
+      // Keep acknowledged symbols so connect reconciliation adds only genuinely new
+      // symbols; clearing this set would duplicate the SDK's automatic resubscribe.
       console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
     });
     socket.connect();

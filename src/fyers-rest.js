@@ -1,3 +1,4 @@
+import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
 
@@ -160,14 +161,7 @@ export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
 }
 
 const fiveMinuteCache = new Map();
-const historyRequestFlights = new Map();
-async function runHistoryRequestOnce(key, task) {
-  if (historyRequestFlights.has(key)) return historyRequestFlights.get(key);
-  const pending = Promise.resolve().then(task);
-  historyRequestFlights.set(key, pending);
-  try { return await pending; }
-  finally { if (historyRequestFlights.get(key) === pending) historyRequestFlights.delete(key); }
-}
+
 // Scanner and chart share one verified 5-minute cache and one FYERS history read.
 // The shared payload retains the chart's last-ten-NSE-session candle set, which
 // gives scanner research more complete real sessions without synthetic candles.

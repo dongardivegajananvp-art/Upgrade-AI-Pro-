@@ -1,3 +1,4 @@
+import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
 
@@ -160,6 +161,7 @@ export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
 }
 
 const fiveMinuteCache = new Map();
+
 // Scanner and chart share one verified 5-minute cache and one FYERS history read.
 // The shared payload retains the chart's last-ten-NSE-session candle set, which
 // gives scanner research more complete real sessions without synthetic candles.
@@ -188,20 +190,22 @@ export function filterFiveMinuteCandlesToNseSession(candles, now = Date.now()) {
 }
 export async function getFiveMinuteSessionHistory(symbol, now = Date.now(), priority = 50) {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
-  const date = istDate(now);
-  const cached = fiveMinuteCache.get(symbol);
-  if (cached && cached.sessionDate === date && now - cached.savedAt < 20_000) return cached.value;
-  const range = getFiveMinuteHistoryRange(now, 20);
-  const body = await fyersGet(DATA_BASE, '/history', {
-    symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
-  }, priority);
-  if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified ten-session 5-minute history');
-  const candles = filterLastNseTradingSessions(normalizeFiveMinuteCandles(body.candles, now), 10);
-  if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the last ten NSE sessions');
-  const sessions = [...new Set(candles.map(candle => new Date((candle.time + 19800) * 1000).toISOString().slice(0, 10)))];
-  const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, sessions, sessionCount: sessions.length, source: 'FYERS_VERIFIED_5M_HISTORY', range: 'LAST_10_NSE_TRADING_SESSIONS', actionable: true };
-  fiveMinuteCache.set(symbol, { savedAt: now, sessionDate: date, value });
-  return value;
+  return runHistoryRequestOnce('5m:' + symbol, async () => {
+    const date = istDate(now);
+    const cached = fiveMinuteCache.get(symbol);
+    if (cached && cached.sessionDate === date && now - cached.savedAt < 20_000) return cached.value;
+    const range = getFiveMinuteHistoryRange(now, 20);
+    const body = await fyersGet(DATA_BASE, '/history', {
+      symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
+    }, priority);
+    if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified ten-session 5-minute history');
+    const candles = filterLastNseTradingSessions(normalizeFiveMinuteCandles(body.candles, now), 10);
+    if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the last ten NSE sessions');
+    const sessions = [...new Set(candles.map(candle => new Date((candle.time + 19800) * 1000).toISOString().slice(0, 10)))];
+    const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, sessions, sessionCount: sessions.length, source: 'FYERS_VERIFIED_5M_HISTORY', range: 'LAST_10_NSE_TRADING_SESSIONS', actionable: true };
+    fiveMinuteCache.set(symbol, { savedAt: now, sessionDate: date, value });
+    return value;
+  });
 }
 
 export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
@@ -223,17 +227,19 @@ export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
 const fifteenMinuteCache = new Map();
 export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = -10) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
-  const cached=fifteenMinuteCache.get(symbol);
-  if(cached&&now-cached.savedAt<30*60*1000)return cached.value;
-  const to=istDate(now);
-  const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
-  const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority);
-  if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute research candles');
-  const candles=normalizeFifteenMinuteCandles(body.candles,now);
-  if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles for research');
-  const value={symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M'};
-  fifteenMinuteCache.set(symbol,{savedAt:now,value});
-  return value;
+  return runHistoryRequestOnce('15m:' + symbol, async () => {
+    const cached=fifteenMinuteCache.get(symbol);
+    if(cached&&now-cached.savedAt<30*60*1000)return cached.value;
+    const to=istDate(now);
+    const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
+    const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority);
+    if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute research candles');
+    const candles=normalizeFifteenMinuteCandles(body.candles,now);
+    if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles for research');
+    const value={symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M'};
+    fifteenMinuteCache.set(symbol,{savedAt:now,value});
+    return value;
+  });
 }
 export async function getFyersQuotes(symbols) {
   if (!Array.isArray(symbols) || symbols.length < 1 || symbols.length > 50 || !symbols.every(validateNseSymbol)) {
@@ -261,17 +267,19 @@ export function normalizeDailyCandles(rows, now = Date.now()) {
 const dailyCache = new Map();
 export async function getDailyHistory(symbol, now = Date.now(), priority = -10) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
-  const cached = dailyCache.get(symbol);
-  if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
-  const to = istDate(now);
-  const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
-  const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority);
-  if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
-  const candles = normalizeDailyCandles(body.candles, now);
-  if (candles.length < 50) throw new Error('Insufficient completed FYERS daily candles for research');
-  const value={symbol,candles,count:candles.length,source:'FYERS_DAILY_HISTORY'};
-  dailyCache.set(symbol,{savedAt:now,value});
-  return value;
+  return runHistoryRequestOnce('1d:' + symbol, async () => {
+    const cached = dailyCache.get(symbol);
+    if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
+    const to = istDate(now);
+    const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
+    const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority);
+    if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
+    const candles = normalizeDailyCandles(body.candles, now);
+    if (candles.length < 50) throw new Error('Insufficient completed FYERS daily candles for research');
+    const value={symbol,candles,count:candles.length,source:'FYERS_DAILY_HISTORY'};
+    dailyCache.set(symbol,{savedAt:now,value});
+    return value;
+  });
 }
 export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = '') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');

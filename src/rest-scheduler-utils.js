@@ -261,3 +261,24 @@ export function findRestQueueDuplicate(jobs = [], coalesceKey) {
   if (typeof coalesceKey !== 'string' || !coalesceKey) return -1;
   return jobs.findIndex(job => job?.coalesceKey === coalesceKey);
 }
+
+export function buildRestDispatchGate({
+  cooldownActive = false, recoveryProbeRequired = false, priority = 0,
+  recoveryProbeAllowed = true, queueDepth = 0, minGapWaitMs = 0,
+  totalWindowWaitMs = 0, backgroundWindowWaitMs = 0, historyWindowWaitMs = 0
+} = {}) {
+  const blockers = [];
+  if (cooldownActive) blockers.push('COOLDOWN_ACTIVE');
+  if (recoveryProbeRequired && !recoveryProbeAllowed) blockers.push('RECOVERY_PROBE_REQUIRED');
+  if (Number(queueDepth) > 0) blockers.push('QUEUE_NOT_EMPTY');
+  if (Number(minGapWaitMs) > 0) blockers.push('MIN_GAP_WAIT');
+  if (Number(totalWindowWaitMs) > 0) blockers.push('TOTAL_WINDOW_BUDGET_WAIT');
+  if (Number(backgroundWindowWaitMs) > 0) blockers.push('BACKGROUND_WINDOW_BUDGET_WAIT');
+  if (Number(historyWindowWaitMs) > 0) blockers.push('HISTORY_WINDOW_BUDGET_WAIT');
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    waitMs: Math.max(0, Number(minGapWaitMs)||0, Number(totalWindowWaitMs)||0,
+      Number(backgroundWindowWaitMs)||0, Number(historyWindowWaitMs)||0)
+  };
+}

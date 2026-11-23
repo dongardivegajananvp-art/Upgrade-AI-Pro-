@@ -5,7 +5,6 @@ import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, sortRes
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
 const MIN_REST_GAP_MS = 4000;
-const RATE_LIMIT_COOLDOWN_MS = 60 * 60 * 1000;
 const MAX_REST_QUEUE_SIZE = 100;
 let nextRequestAt = 0;
 let cooldownUntil = 0;
@@ -18,6 +17,37 @@ let lastRestMeta = { retryAfter: null, cfRay: null, server: null, contentType: n
 let lastRequestPath = null;
 let lastRateLimitAt = null;
 let lastRequestPriority = null;
+let rateLimitDayKey = null;
+let rateLimitCountToday = 0;
+let requestMinuteKey = null;
+let requestsThisMinute = 0;
+let requestDayKey = null;
+let requestsToday = 0;
+
+function istDayKey(now = Date.now()) {
+  return new Date(Number(now) + 19_800_000).toISOString().slice(0, 10);
+}
+function refreshRequestCounters(now = Date.now()) {
+  const minuteKey = Math.floor(Number(now) / 60_000);
+  if (requestMinuteKey !== minuteKey) {
+    requestMinuteKey = minuteKey;
+    requestsThisMinute = 0;
+  }
+  const dayKey = istDayKey(now);
+  if (requestDayKey !== dayKey) {
+    requestDayKey = dayKey;
+    requestsToday = 0;
+  }
+  if (rateLimitDayKey !== dayKey) {
+    rateLimitDayKey = dayKey;
+    rateLimitCountToday = 0;
+  }
+}
+function recordUpstreamRequest(now = Date.now()) {
+  refreshRequestCounters(now);
+  requestsThisMinute++;
+  requestsToday++;
+}
 
 export function validateNseSymbol(symbol) {
   return typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]{1,48}$/.test(symbol);
@@ -68,6 +98,7 @@ async function drainRestQueue() {
       if (!job) continue;
       lastRequestPath = job.url.pathname;
       lastRequestPriority = job.priority;
+      recordUpstreamRequest(Date.now());
       try {
         const response = await fetch(job.url, { ...job.options, signal: AbortSignal.timeout(12000) });
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
@@ -80,16 +111,29 @@ async function drainRestQueue() {
         const rawBody = await response.text().catch(() => '');
         let body = {};
         try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
+        lastRestMeta.responseCode = body.code ?? null;
+        lastRestMeta.responseMessage = String(body.message || body.error || '').slice(0, 160) || null;
         if (response.status === 429) {
-          cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, RATE_LIMIT_COOLDOWN_MS);
+          refreshRequestCounters(Date.now());
+          rateLimitCountToday++;
+          cooldownUntil = getRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, rateLimitCountToday);
           lastRestStatus = 'RATE_LIMITED';
-          const markers = [lastRestMeta.retryAfter ? 'Retry-After=' + lastRestMeta.retryAfter : null, lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null, lastRestMeta.server ? 'Server=' + lastRestMeta.server : null].filter(Boolean).join(' · ');
+          const markers = [
+            lastRestMeta.retryAfter !== null ? 'Retry-After=' + lastRestMeta.retryAfter : null,
+            lastRestMeta.responseMessage ? 'Message=' + lastRestMeta.responseMessage : null,
+            lastRestMeta.cfRay ? 'CF-Ray=' + lastRestMeta.cfRay : null,
+            lastRestMeta.server ? 'Server=' + lastRestMeta.server : null
+          ].filter(Boolean).join(' · ');
           lastRateLimitAt = new Date().toISOString();
-          lastRestError = 'FYERS HTTP 429; REST cooldown active until ' + new Date(cooldownUntil).toISOString() + ' (process-local; restart persistence requires durable storage)' + (markers ? ' · ' + markers : '');
+          const dayBlock = rateLimitCountToday >= 4 ? 'rest-of-IST-day block' : 'exponential backoff ' + rateLimitCountToday + '/3';
+          lastRestError = 'FYERS HTTP 429; ' + dayBlock + ' active until ' + new Date(cooldownUntil).toISOString() +
+            ' (process-local cooldown; no durable store configured)' + (markers ? ' · ' + markers : '');
           console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
             path: lastRequestPath, status: response.status, at: lastRateLimitAt,
-            retryAfter: lastRestMeta.retryAfter, cfRay: lastRestMeta.cfRay,
-            server: lastRestMeta.server, contentType: lastRestMeta.contentType
+            retryAfter: lastRestMeta.retryAfter, responseCode: lastRestMeta.responseCode,
+            responseMessage: lastRestMeta.responseMessage, cfRay: lastRestMeta.cfRay,
+            server: lastRestMeta.server, requestsThisMinute, requestsToday,
+            rateLimitCountToday, cooldownUntil: new Date(cooldownUntil).toISOString()
           }));
           job.reject(new Error(lastRestError));
           const queuedError = new Error('FYERS REST cooldown active; queued request was not sent upstream');
@@ -290,6 +334,7 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
 export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, 50); }
 export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, 50); }
 export function getRestDiagnostics(now = Date.now()) {
+  refreshRequestCounters(now);
   return {
     status: lastRestStatus,
     lastError: lastRestError,
@@ -304,6 +349,11 @@ export function getRestDiagnostics(now = Date.now()) {
     backgroundQueueDepth: restQueue.filter(job => job.priority < 0).length,
     queueDrainActive: drainingRestQueue,
     lastRequestPriority,
+    requestsThisMinute,
+    requestsToday,
+    requestCountersScope: 'PROCESS_LOCAL',
+    rateLimitCountToday,
+    cooldownStrategy: '60S_120S_240S_THEN_IST_DAY_BLOCK',
     cooldownActive: now < cooldownUntil,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
     cooldownPersistence: 'PROCESS_LOCAL_ONLY',

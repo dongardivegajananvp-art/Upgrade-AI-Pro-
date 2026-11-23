@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -206,4 +206,14 @@ test('fair REST selector never chooses a request rejected by the budget gate', (
   ];
   assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, job => job.id === 'account')].id, 'account');
   assert.equal(findFairRestQueueIndex(jobs, [], now, () => false), -1);
+});
+
+
+test('queued REST work has strict freshness deadlines by request class', () => {
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ENTRY), 10_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.OPTION_CHAIN), 15_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.CHART), 30_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ACCOUNT), 30_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.SCANNER), 10_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.WARMUP), 120_000);
 });

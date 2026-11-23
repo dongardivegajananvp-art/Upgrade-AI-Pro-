@@ -23,7 +23,7 @@
 - [ ] Live-market proof for NIFTY, BANK NIFTY and SENSEX exchange timestamps.
 - [ ] Live selected F&O underlying and selected CE/PE option ticks.
 - [ ] Account positions + orderbook and Option Chain successful response evidence after deployment.
-- [ ] Scanner coverage/latency measurement over a full NSE session; improve throughput only with measured safe capacity or verified WebSocket-built candle architecture.
+- [ ] Scanner coverage/latency measurement over a full NSE session. WebSocket OHLC observations currently remain diagnostic-only; they do not yet replace the 5-minute REST history, daily/15-minute context, or verified volume required by strategy confirmation.
 - [ ] Full nine-strategy CE/PE positive/negative matrix, including completed-candle continuity, expiry/strike identity, stale ticks and fixed Entry/SL/Target with RR >= 1:2.
 - [ ] PWA browser update/cache lifecycle verification on real supported browsers.
 - [ ] Manual rollback drill with Render deployment evidence.

@@ -138,10 +138,10 @@ async function drainRestQueue() {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
         if (job.url.pathname !== '/history') return true;
         const totalWindowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
-        // Keep two of the eight observed-safe history slots available for selected
+        // Keep four of the eight observed-safe history slots available for selected
         // chart/option/Entry work. Scanner, warmup and research cannot consume them.
         const backgroundWindowWait = job.priority < REST_PRIORITY.CHART
-          ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
           : 0;
         return totalWindowWait === 0 && backgroundWindowWait === 0;
       });

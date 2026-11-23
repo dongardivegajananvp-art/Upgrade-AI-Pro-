@@ -256,3 +256,8 @@ export function buildRestEndpointHealth(requests = [], now = Date.now()) {
     orderbook: latest('/api/v3/orders')
   };
 }
+
+export function findRestQueueDuplicate(jobs = [], coalesceKey) {
+  if (typeof coalesceKey !== 'string' || !coalesceKey) return -1;
+  return jobs.findIndex(job => job?.coalesceKey === coalesceKey);
+}

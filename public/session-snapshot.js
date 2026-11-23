@@ -30,7 +30,14 @@ export function normalizeTopGainersSnapshot(value) {
 
 export function resolveTopGainersView(fno = {}, snapshot = null, now = Date.now()) {
   const live = Array.isArray(fno.topGainers) ? fno.topGainers.slice(0, 5) : [];
-  if (isNseRegularSession(now) && fno.status === 'ROTATING_LIVE_COVERAGE' && live.length && live.every(item => item?.fresh === true)) {
+  const maxAge = Number(fno.maxObservationAgeSeconds);
+  const validRollingObservations = live.length > 0 && Number.isFinite(maxAge) && maxAge > 0 &&
+    live.every(item => item && /^NSE:[A-Z0-9&._-]+-EQ$/.test(String(item.symbol || '')) &&
+      Number.isFinite(Number(item.price)) && Number(item.price) > 0 &&
+      Number.isFinite(Number(item.changePercent)) &&
+      Number.isFinite(Number(item.ageSeconds)) && Number(item.ageSeconds) >= 0 &&
+      Number(item.ageSeconds) <= maxAge);
+  if (isNseRegularSession(now) && fno.status === 'ROTATING_LIVE_COVERAGE' && validRollingObservations) {
     return { mode: 'LIVE', items: live };
   }
   const cached = normalizeTopGainersSnapshot(snapshot);

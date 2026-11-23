@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagVolume, detectDailyTrendPullback } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagVolume, detectDailyTrendPullback } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -514,4 +514,24 @@ test('confirmed bearish underlying setup validates a PE contract and fixed Entry
   assert.equal(result.stopLoss,103.95);
   assert.equal(result.rr,2);
   assert.ok(result.rr>=2);
+});
+
+test('all nine strategies enforce the full LONG/CE and SHORT/PE contract-side matrix', () => {
+  for(const strategy of STRATEGIES){
+    const longCe=validateStrategyOptionContract({strategy,underlyingSide:'LONG',contract:{symbol:'NSE:ABC26NOV150CE',side:'CE',tickSize:0.05}});
+    const longPe=validateStrategyOptionContract({strategy,underlyingSide:'LONG',contract:{symbol:'NSE:ABC26NOV150PE',side:'PE',tickSize:0.05}});
+    const shortPe=validateStrategyOptionContract({strategy,underlyingSide:'SHORT',contract:{symbol:'NSE:ABC26NOV150PE',side:'PE',tickSize:0.05}});
+    const shortCe=validateStrategyOptionContract({strategy,underlyingSide:'SHORT',contract:{symbol:'NSE:ABC26NOV150CE',side:'CE',tickSize:0.05}});
+    assert.equal(longCe.ok,true,strategy+' LONG must accept CE');
+    assert.equal(longPe.ok,false,strategy+' LONG must reject PE');
+    assert.equal(shortPe.ok,true,strategy+' SHORT must accept PE');
+    assert.equal(shortCe.ok,false,strategy+' SHORT must reject CE');
+  }
+});
+test('directional contract matrix rejects unknown strategy, absent side, invalid tick size and non-NSE symbol', () => {
+  const valid={symbol:'NSE:ABC26NOV150CE',side:'CE',tickSize:0.05};
+  assert.equal(validateStrategyOptionContract({strategy:'UNKNOWN',underlyingSide:'LONG',contract:valid}).ok,false);
+  assert.equal(validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'FLAT',contract:valid}).ok,false);
+  assert.equal(validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'LONG',contract:{...valid,tickSize:0}}).ok,false);
+  assert.equal(validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'LONG',contract:{...valid,symbol:'BSE:ABC26NOV150CE'}}).ok,false);
 });

@@ -397,7 +397,7 @@ function renderMovers(fno) {
   const status = document.querySelector('#movers-status');
   if (view.mode === 'LIVE') {
     const coverageText = (fno.observedCount ?? 0) + '/' + fno.universeCount + ' OBSERVED';
-    status.textContent = (fno.coverageComplete ? 'ROLLING FULL-UNIVERSE · ' : 'ROLLING PARTIAL · ') + coverageText + ' · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's/SLICE · NON-SIMULTANEOUS · ' + fno.subscriptionCount + '/100 SYMBOLS';
+    status.textContent = (fno.coverageComplete ? 'ROLLING FULL-UNIVERSE · ' : 'ROLLING PARTIAL · ') + coverageText + ' · ' + (fno.freshCount ?? 0) + ' FRESH · ' + Math.round((fno.rotationIntervalMs || 60000) / 1000) + 's/SLICE · NON-SIMULTANEOUS · ' + fno.subscriptionCount + '/100 SYMBOLS';
   } else if (view.mode === 'LAST_SESSION') {
     status.textContent = 'MARKET CLOSED · LAST SESSION TOP 5 · NOT LIVE';
   } else if (view.mode === 'LAST_OBSERVED') {
@@ -428,14 +428,14 @@ function renderMovers(fno) {
     const cardState = view.mode === 'LIVE' && item.fresh ? direction : 'stale';
     button.dataset.state = cardState;
     button.dataset.rank = String(index + 1);
-    button.title = view.mode === 'LIVE' && item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : (view.mode === 'LAST_SESSION' ? 'LAST SESSION SNAPSHOT · NOT LIVE OR ACTIONABLE' : 'LAST OBSERVED SNAPSHOT · NOT LIVE OR ACTIONABLE');
+    button.title = view.mode === 'LIVE' && item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : (view.mode === 'LIVE' ? 'Rolling FYERS session observation · ' + Number(item.ageSeconds).toFixed(0) + 's old · NOT ACTIONABLE' : (view.mode === 'LAST_SESSION' ? 'LAST SESSION SNAPSHOT · NOT LIVE OR ACTIONABLE' : 'LAST OBSERVED SNAPSHOT · NOT LIVE OR ACTIONABLE'));
     button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
     name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
     const price = document.createElement('span');
     price.textContent = `₹${showNumber(item.price)}`;
     const change = document.createElement('span');
-    change.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '% · ' + (view.mode === 'LIVE' && item.fresh ? 'FRESH' : view.mode === 'LAST_SESSION' ? 'LAST SESSION' : 'LAST OBSERVED · NOT LIVE');
+    change.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '% · ' + (view.mode === 'LIVE' && item.fresh ? 'FRESH' : view.mode === 'LIVE' ? 'OBSERVED ' + Number(item.ageSeconds).toFixed(0) + 's · NOT ACTIONABLE' : view.mode === 'LAST_SESSION' ? 'LAST SESSION' : 'LAST OBSERVED · NOT LIVE');
     change.dataset.state = view.mode === 'LIVE' && item.fresh ? direction : 'stale';
     button.append(name, price, change);
     container.append(button);

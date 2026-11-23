@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { isNseRegularSession } from './nse-session.js';
 import { shouldActivateFnoSliceOnFeedRecovery } from './fno-feed-readiness.js';
@@ -68,6 +68,11 @@ function sessionFeedReady(now = Date.now()) {
 
 function desiredSocketSubscriptions() {
   return buildSessionSocketSubscriptions(INDEX_SYMBOLS, activeFnoSymbols, selectedOptionSymbol, sessionFeedReady());
+}
+function pruneSocketSymbolState() {
+  const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol].filter(Boolean);
+  pruneSymbolMap(ticks, allowed, 300);
+  pruneSymbolMap(tickTelemetryLoggedAt, allowed, 300);
 }
 
 function scheduleSubscriptionFlush(delay = 0) {
@@ -301,6 +306,7 @@ export function setFnoUniverse(items) {
     unique.set(item.symbol, item);
   }
   universe = [...unique.values()];
+  pruneSocketSymbolState();
   rotationIndex = 0;
   applyFnoRotation();
   if (rotationTimer) clearInterval(rotationTimer);
@@ -331,6 +337,7 @@ export function setSelectedOptionSymbol(symbol) {
     return { status: optionSubscriptionStatus, symbol: next, reason: optionSubscriptionError };
   }
   selectedOptionSymbol = next;
+  pruneSocketSymbolState();
   optionFirstTickLoggedFor = null;
   if (socket && socketStatus === 'CONNECTED') {
     try {

@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, buildRestEndpointHealth
+  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -230,4 +230,14 @@ test('Option Chain and Account Feed endpoint health requires actual successful r
   assert.equal(health.positions.httpStatus,429);
   assert.equal(health.orderbook.status,'NOT_VERIFIED');
   assert.equal(health.orderbook.ok,false);
+});
+
+test('identical pending FYERS REST requests are discoverable for coalescing', () => {
+  const jobs=[
+    {coalesceKey:'GET:https://api-t1.fyers.in/data/options-chain-v3?symbol=NSE%3AABC'},
+    {coalesceKey:'GET:https://api-t1.fyers.in/api/v3/positions'}
+  ];
+  assert.equal(findRestQueueDuplicate(jobs,jobs[0].coalesceKey),0);
+  assert.equal(findRestQueueDuplicate(jobs,'GET:https://api-t1.fyers.in/data/history'),-1);
+  assert.equal(findRestQueueDuplicate(jobs,''),-1);
 });

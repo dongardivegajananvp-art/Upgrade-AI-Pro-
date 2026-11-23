@@ -24,7 +24,9 @@
 - [ ] Live selected F&O underlying and selected CE/PE option ticks.
 - [ ] Account positions + orderbook and Option Chain successful response evidence after deployment.
 - [ ] Scanner coverage/latency measurement over a full NSE session. WebSocket OHLC observations currently remain diagnostic-only; they do not yet replace the 5-minute REST history, daily/15-minute context, or verified volume required by strategy confirmation.
-- [ ] Full nine-strategy CE/PE positive/negative matrix, including completed-candle continuity, expiry/strike identity, stale ticks and fixed Entry/SL/Target with RR >= 1:2.
+- [x] Positive end-to-end setup fixtures cover all nine strategy IDs with directional CE/PE contract validation and fixed Entry/SL/Target at RR >= 1:2.
+- [x] A stale-option-quote negative end-to-end gate is exercised for all nine strategy IDs; Top Gainer also covers absent option tick, wrong CE/PE side, incomplete option candles, below-trigger wait and >0.5R chase rejection.
+- [ ] Per-pattern negative end-to-end variants for every strategy remain incomplete. Detector-level negative cases exist, but they are not a substitute for full evaluator-pipeline rejection fixtures.
 - [ ] PWA browser update/cache lifecycle verification on real supported browsers.
 - [ ] Manual rollback drill with Render deployment evidence.
 - [ ] Final market-live acceptance; otherwise UI must remain NO TRADE and orders disabled.
@@ -38,3 +40,18 @@
 5. Confirm stale/missing exchange data still results in NO TRADE.
 6. Record rollback deployment ID, source deployment ID, timestamps, health response, and relevant redacted logs.
 7. This drill must be performed in a controlled maintenance window with explicit user approval. Documentation alone is not rollback proof.
+
+## Compatibility verification matrix (PR #89; source branch only, not production)
+
+| Area | Verification performed | Status / boundary |
+|---|---|---|
+| Runtime baseline | CI and Verify install/use Node.js 22; JavaScript syntax checks and production dependency audits pass | PASS for the tested CI environment |
+| Strategy engine | Nine strategy IDs, positive end-to-end fixtures, directional CE/PE mapping, contract identity and fixed-risk RR >= 1:2 | PASS for covered fixtures; full negative pattern matrix remains open |
+| FYERS REST | Fair scheduling, interactive priority, request coalescing, queue expiry, rolling budget/cooldown and endpoint response diagnostics have regression coverage | PASS in automated tests; not a live FYERS quota guarantee |
+| WebSocket candles | Active-slice bounded 5m OHLC observations, gap/out-of-order/off-session handling and completed-bar boundaries | Diagnostic-only; volume is unverified and observations are not actionable |
+| Scanner | Honest one-history-backed-underlying/minute cadence and 20-slot WebSocket rotation | Code-level checks only; full-session throughput/coverage not proven |
+| Account Feed / Option Chain | Endpoint-specific health is tied to actual responses | Live response recovery still needs post-release market evidence |
+| PWA / polling | Static tests cover versioned cache, API/cross-origin bypass, cache eviction, hidden-tab pause and request overlap/single-flight controls | Static regression only; real browser update/cache lifecycle remains open |
+| Restart / rollback | Process-local cooldown limitation documented; rollback procedure documented | Restart-safe cooldown and an executed rollback drill remain open |
+
+Compatibility is therefore **partially verified, not universally certified**. CI passing does not prove browser, broker, market-session, deployment, or restart behavior. No production deployment or Render configuration was changed by this PR.

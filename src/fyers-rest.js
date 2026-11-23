@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -139,7 +139,7 @@ async function drainRestQueue() {
       // entire FYERS REST origin, while reserving half the conservative budget
       // for selected chart/option/Entry work. Account, scanner, research and
       // warmup remain lower priority and cannot consume those interactive slots.
-      const eligibleIndex = restQueue.findIndex(job => {
+      const eligibleIndex = findFairRestQueueIndex(restQueue, recentUpstreamRequests, Date.now(), job => {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
         const totalWindowWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
         const backgroundWindowWait = job.priority < REST_PRIORITY.CHART

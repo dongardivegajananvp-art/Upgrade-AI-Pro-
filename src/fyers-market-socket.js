@@ -178,8 +178,26 @@ function accept(item) {
   const symbol = String(item.symbol || item.n || '');
   if (!acceptedSymbols().has(symbol)) return;
   const price = Number(item.ltp ?? item.lp);
-  const exchangeTime = asEpochSeconds(item.exch_feed_time ?? item.last_traded_time ?? item.timestamp ?? item.tt);
-  if (!Number.isFinite(price) || price <= 0 || !exchangeTime) return;
+  const rawExchangeTime = item.exch_feed_time ?? item.last_traded_time ?? item.timestamp ?? item.tt;
+  const exchangeTime = asEpochSeconds(rawExchangeTime);
+  if (!Number.isFinite(price) || price <= 0 || !exchangeTime) {
+    if (INDEX_SYMBOLS.includes(symbol)) {
+      const previousLogAt = tickTelemetryLoggedAt.get(symbol) || 0;
+      if (!previousLogAt || Date.now() - previousLogAt >= 15_000) {
+        tickTelemetryLoggedAt.set(symbol, Date.now());
+        console.warn('[FYERS_DATA] index update missing usable exchange timestamp:', JSON.stringify({
+          symbol, type: item.type || null,
+          fields: Object.keys(item),
+          exch_feed_time: item.exch_feed_time ?? null,
+          last_traded_time: item.last_traded_time ?? null,
+          timestamp: item.timestamp ?? null,
+          tt: item.tt ?? null,
+          receivedAt: new Date().toISOString()
+        }));
+      }
+    }
+    return;
+  }
   const previousClose = Number(item.prev_close_price ?? item.prev_close ?? item.pc);
   const fallbackChange = Number.isFinite(previousClose) && previousClose > 0 ? price - previousClose : null;
   const fallbackPercent = Number.isFinite(previousClose) && previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null;
@@ -207,6 +225,12 @@ function accept(item) {
         exchangeTime: new Date(tick.exchangeTime * 1000).toISOString(),
         receiveAgeMs: Date.now() - tick.receivedAt, exchangeAgeMs: Math.round((Date.now() / 1000 - tick.exchangeTime) * 1000),
         fresh: isFresh(tick), index: INDEX_SYMBOLS.includes(symbol),
+        timestampFields: INDEX_SYMBOLS.includes(symbol) ? {
+          exch_feed_time: item.exch_feed_time ?? null,
+          last_traded_time: item.last_traded_time ?? null,
+          timestamp: item.timestamp ?? null,
+          tt: item.tt ?? null
+        } : undefined,
         selectedUnderlying: symbol === selectedUnderlyingSymbol,
         selectedOption: symbol === selectedOptionSymbol
       }));

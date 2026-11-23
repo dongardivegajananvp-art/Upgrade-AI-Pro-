@@ -3,6 +3,7 @@ import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
 import { shouldActivateFnoSliceOnFeedRecovery } from './fno-feed-readiness.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
@@ -34,6 +35,7 @@ let selectedUnderlyingSymbol = null;
 let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
 const ticks = new Map();
+const fnoWebsocketCandles = createFnoWebsocketCandleBuilder({maxSymbols:300,maxCandlesPerSymbol:120});
 // Bounded, rate-limited observability: first tick per symbol, then at most once/minute.
 const tickTelemetryLoggedAt = new Map();
 let optionFirstTickLoggedFor = null;
@@ -199,6 +201,7 @@ function accept(item) {
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   const sessionWasReady = sessionFeedReady(tick.receivedAt);
   ticks.set(symbol, tick);
+  if (universe.some(item => item.symbol === symbol)) fnoWebsocketCandles.ingest(symbol,tick);
   if (shouldActivateFnoSliceOnFeedRecovery(sessionWasReady, sessionFeedReady(tick.receivedAt), universe.length)) {
     console.info('[FYERS_DATA] fresh index feed restored; activating first F&O slice immediately');
     applyFnoRotation(false);
@@ -505,6 +508,8 @@ export function getMarketData(now = Date.now()) {
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   const activeFnoTicks = activeFnoSymbols.map(symbol => ({ symbol, tick: ticks.get(symbol) || null }));
+  const activeCandleSnapshots=activeFnoSymbols.map(symbol=>fnoWebsocketCandles.snapshot(symbol));
+  const websocketCandleCoverage={activeSymbols:activeFnoSymbols.length,withObservations:activeCandleSnapshots.filter(item=>item.completedCandles.length||item.liveCandle).length,withCompletedBars:activeCandleSnapshots.filter(item=>item.completedCandles.length>0).length,contiguousBars:activeCandleSnapshots.reduce((sum,item)=>sum+item.contiguousCompletedCount,0),actionable:false,volumeVerified:false};
   const fnoTickCoverage = {
     activeSymbols: activeFnoSymbols.length,
     withTick: activeFnoTicks.filter(item => item.tick).length,
@@ -550,6 +555,7 @@ export function getMarketData(now = Date.now()) {
       status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','RATE_LIMITED_WAIT','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, freshCount: rolling.freshCount, coverageComplete: rolling.coverageComplete,
+      websocketCandleCoverage,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
       rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
       subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
@@ -563,6 +569,7 @@ export function getFnoUniverseSnapshot() {
   return {
     universe: universe.map(item => ({ ...item })),
     ticks: new Map(universe.map(item => [item.symbol, ticks.get(item.symbol)]).filter(([, tick]) => Boolean(tick))),
+    websocketCandles: new Map(universe.map(item=>[item.symbol,fnoWebsocketCandles.snapshot(item.symbol)])),
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,

@@ -142,10 +142,17 @@ async function drainRestQueue() {
       const eligibleIndex = restQueue.findIndex(job => {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
         const totalWindowWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
-        const backgroundWindowWait = job.priority < REST_PRIORITY.CHART
-          ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+        // Reserve two of the three non-interactive slots for the paired Account
+        // Feed reads (positions + orderbook). Scanner/research/warmup share only
+        // one slot so they cannot consume the account refresh budget.
+        const accountWindowWait = job.priority === REST_PRIORITY.ACCOUNT
+          ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 2, 60_000, REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT)
           : 0;
-        if (totalWindowWait > 0 || backgroundWindowWait > 0) return false;
+        const backgroundRequests = recentUpstreamRequests.filter(item => Number(item?.priority || 0) !== REST_PRIORITY.ACCOUNT);
+        const backgroundWindowWait = job.priority < REST_PRIORITY.INTERACTIVE
+          ? getRestRequestWindowWaitMs(backgroundRequests, Date.now(), 1, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.INTERACTIVE - 1)
+          : 0;
+        if (totalWindowWait > 0 || accountWindowWait > 0 || backgroundWindowWait > 0) return false;
         // Keep the stricter existing /history-specific background protection as
         // a second guard; global request pacing applies to every REST path.
         if (job.url.pathname === '/history') {
@@ -160,8 +167,12 @@ async function drainRestQueue() {
       if (eligibleIndex < 0) {
         const waits = restQueue.map(job => {
           const totalWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
-          const backgroundWait = job.priority < REST_PRIORITY.CHART
-            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          const accountWait = job.priority === REST_PRIORITY.ACCOUNT
+            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 2, 60_000, REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT)
+            : 0;
+          const backgroundRequests = recentUpstreamRequests.filter(item => Number(item?.priority || 0) !== REST_PRIORITY.ACCOUNT);
+          const backgroundWait = job.priority < REST_PRIORITY.INTERACTIVE
+            ? getRestRequestWindowWaitMs(backgroundRequests, Date.now(), 1, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.INTERACTIVE - 1)
             : 0;
           const historyWait = job.url.pathname === '/history'
             ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8)
@@ -169,7 +180,7 @@ async function drainRestQueue() {
           const historyBackgroundWait = job.url.pathname === '/history' && job.priority < REST_PRIORITY.CHART
             ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
             : 0;
-          return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait);
+          return Math.max(totalWait, accountWait, backgroundWait, historyWait, historyBackgroundWait);
         }).filter(value => value > 0);
         await wait(Math.max(1, waits.length ? Math.min(...waits) : 1));
         continue;
@@ -474,6 +485,8 @@ export function getRestDiagnostics(now = Date.now()) {
     minGapMs: MIN_REST_GAP_MS,
     rollingWindowLimitPerMinute: 6,
     backgroundRollingWindowLimitPerMinute: 3,
+    accountRollingWindowLimitPerMinute: 2,
+    nonInteractiveBackgroundRollingWindowLimitPerMinute: 1,
     rollingWindowScope: 'ALL_FYERS_REST_ENDPOINTS_PROCESS_LOCAL',
     queueDepth: restQueue.length,
     queueCapacity: MAX_REST_QUEUE_SIZE,

@@ -218,7 +218,7 @@ test('ten-session chart cache preserves up to 800 verified five-minute candles',
 
 test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {
   const start = app.indexOf('async function refresh()');
-  const end = app.indexOf('\\nfunction ', start + 1);
+  const end = app.indexOf('\nfunction ', start + 1);
   assert.ok(start >= 0 && end > start, 'refresh implementation is present');
   const flow = app.slice(start, end);
   const update = flow.indexOf('chartLiveCandle = underlyingTick.liveCandle || null');

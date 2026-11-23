@@ -38,7 +38,10 @@ const ticks = new Map();
 const tickTelemetryLoggedAt = new Map();
 let optionFirstTickLoggedFor = null;
 let socketHasConnected = false;
-const socketSubscribedSymbols = new Set();
+// Local record of symbols sent to the SDK. FYERS emits a generic subscribe ACK,
+// not a symbol-specific confirmation; this set must never be presented as
+// exchange-confirmed subscription state.
+const socketSdkRequestedSymbols = new Set();
 let subscriptionOperationSequence = 0;
 const SUBSCRIPTION_BATCH_SIZE = 1;
 const SUBSCRIPTION_BATCH_INTERVAL_MS = 1200;
@@ -90,7 +93,7 @@ function scheduleSubscriptionFlush(delay = 0) {
       }));
       lastSentSubscriptionBatch = [...batch];
       socket.subscribe(batch);
-      for (const symbol of batch) socketSubscribedSymbols.add(symbol);
+      for (const symbol of batch) socketSdkRequestedSymbols.add(symbol);
     } catch (error) {
       lastSentSubscriptionBatch = [];
       pendingSubscriptionSymbols = [...batch, ...pendingSubscriptionSymbols];
@@ -120,24 +123,24 @@ function scheduleSubscriptionFlush(delay = 0) {
 
 function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
   const desired = [...new Set(desiredSymbols)];
-  const known = [...socketSubscribedSymbols, ...pendingSubscriptionSet];
+  const known = [...socketSdkRequestedSymbols, ...pendingSubscriptionSet];
   const { removed, added } = getSocketSubscriptionDelta(known, desired);
   const operationId = ++subscriptionOperationSequence;
   console.info('[FYERS_DATA] subscription delta:', JSON.stringify({
     operationId, reason, at: new Date().toISOString(),
-    currentCount: socketSubscribedSymbols.size, queuedCount: pendingSubscriptionSet.size,
+    currentCount: socketSdkRequestedSymbols.size, queuedCount: pendingSubscriptionSet.size,
     desiredCount: desired.length, addedCount: added.length, removedCount: removed.length
   }));
   if (removed.length) {
     const removedSet = new Set(removed);
     pendingSubscriptionSymbols = pendingSubscriptionSymbols.filter(symbol => !removedSet.has(symbol));
     for (const symbol of removed) pendingSubscriptionSet.delete(symbol);
-    const activeRemoved = removed.filter(symbol => socketSubscribedSymbols.has(symbol));
+    const activeRemoved = removed.filter(symbol => socketSdkRequestedSymbols.has(symbol));
     if (activeRemoved.length) {
       if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
       console.info('[FYERS_DATA] unsubscribe request:', JSON.stringify({ operationId, count: activeRemoved.length }));
       socket.unsubscribe(activeRemoved);
-      for (const symbol of activeRemoved) socketSubscribedSymbols.delete(symbol);
+      for (const symbol of activeRemoved) socketSdkRequestedSymbols.delete(symbol);
     }
   }
   if (added.length) {
@@ -408,8 +411,9 @@ export function startMarketSocket() {
       }
       const isFirstConnection = !socketHasConnected;
       try {
-        // FYERS auto-reconnect restores the existing subscriptions itself.
-        // Reconcile only symbols changed while disconnected; do not resend the full list.
+        // The FYERS SDK is expected to restore its prior subscriptions on auto-reconnect.
+        // This local set records SDK requests, not exchange-confirmed symbols. Reconcile
+        // only symbols changed while disconnected; freshness remains the proof of feed.
         syncSocketSubscriptions(subscriptions, isFirstConnection ? 'initial-connect' : 'auto-reconnect-reconcile');
         socketHasConnected = true;
       } catch (error) {
@@ -459,7 +463,7 @@ export function startMarketSocket() {
         // This avoids duplicating already-active subscriptions after reconnect.
         const rejectedBatch = [...lastSentSubscriptionBatch];
         lastSentSubscriptionBatch = [];
-        for (const symbol of rejectedBatch) socketSubscribedSymbols.delete(symbol);
+        for (const symbol of rejectedBatch) socketSdkRequestedSymbols.delete(symbol);
         const retryBatch = rejectedBatch.filter(symbol => !pendingSubscriptionSet.has(symbol));
         pendingSubscriptionSymbols = [...retryBatch, ...pendingSubscriptionSymbols];
         for (const symbol of retryBatch) pendingSubscriptionSet.add(symbol);
@@ -478,9 +482,9 @@ export function startMarketSocket() {
       socketConnectedAt = null;
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
-      // FYERS Data Socket auto-reconnect automatically restores prior subscriptions.
-      // Keep acknowledged symbols so connect reconciliation adds only genuinely new
-      // symbols; clearing this set would duplicate the SDK's automatic resubscribe.
+      // FYERS Data Socket auto-reconnect is expected to restore prior SDK requests.
+      // Keep the SDK-requested set to avoid duplicate sends; it is not an exchange ACK.
+      // Per-symbol fresh ticks, not this set, prove that the feed has resumed.
       console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
     });
     socket.connect();
@@ -518,7 +522,7 @@ export function getMarketData(now = Date.now()) {
   };
   return {
     socketStatus, lastError, fnoTickCoverage,
-    subscriptionDiagnostics: buildSocketSubscriptionDiagnostics({ desired:desiredSocketSubscriptions(), sentToSdk:[...socketSubscribedSymbols], pending:pendingSubscriptionSymbols }),
+    subscriptionDiagnostics: buildSocketSubscriptionDiagnostics({ desired:desiredSocketSubscriptions(), sentToSdk:[...socketSdkRequestedSymbols], pending:pendingSubscriptionSymbols }),
     socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
     socketDiagnostics: {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,

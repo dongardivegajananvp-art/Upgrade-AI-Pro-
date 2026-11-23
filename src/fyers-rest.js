@@ -293,7 +293,7 @@ async function drainRestQueue() {
         if (!response.ok || body.s === 'error' || Number(body.code) < 0 || (recoveryProbeRequired && body.s !== 'ok')) {
           lastRestStatus = 'ERROR';
           lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
-          job.reject(new Error(lastRestError));
+          settleRestJob(job, false, new Error(lastRestError));
           continue;
         }
         lastRestStatus = 'OK';
@@ -308,7 +308,7 @@ async function drainRestQueue() {
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
         lastRestStatus = 'ERROR';
         lastRestError = String(error?.message || 'FYERS REST request failed').slice(0,180);
-        job.reject(error);
+        settleRestJob(job, false, error);
       }
     }
   } finally {

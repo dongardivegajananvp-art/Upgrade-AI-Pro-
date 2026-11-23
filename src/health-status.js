@@ -6,6 +6,12 @@ export function buildHealthStatus({
 } = {}) {
   const indices = market.indices && typeof market.indices === 'object' ? Object.values(market.indices) : [];
   const fno = market.fno || {};
+  const endpointHealth = rest.endpointHealth || {};
+  const positions = endpointHealth.positions || { status:'NOT_VERIFIED', ok:false };
+  const orderbook = endpointHealth.orderbook || { status:'NOT_VERIFIED', ok:false };
+  const optionChain = endpointHealth.optionChain || { status:'NOT_VERIFIED', ok:false };
+  const accountFeedStatus = positions.ok && orderbook.ok ? 'VERIFIED'
+    : [positions.status,orderbook.status].some(status=>status==='ERROR') ? 'ERROR' : 'NOT_VERIFIED';
   const blockers = [];
   if (!authStatus.tokenStored) blockers.push('FYERS_AUTH_NOT_READY');
   if (market.socketStatus !== 'CONNECTED') blockers.push('WEBSOCKET_NOT_CONNECTED');
@@ -25,6 +31,13 @@ export function buildHealthStatus({
   return {
     ok: true,
     processLiveness: 'ALIVE',
+    accountFeed: { status:accountFeedStatus, positions, orderbook },
+    optionChain,
+    setupReadiness: {
+      status:'NOT_EVALUATED',
+      blockers:['LIVE_SETUP_EVALUATION_REQUIRED','COMPLETED_OPTION_CANDLES_REQUIRED','ENTRY_SL_TARGET_RR_VALIDATION_REQUIRED'],
+      orders:'DISABLED'
+    },
     marketPipelineReadiness: { status: blockers.length ? 'WAIT' : 'MARKET_DATA_READY', blockers },
     app: 'Upgrade AI Pro',
     mode: 'NSE_ONLY',

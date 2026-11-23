@@ -1,3 +1,4 @@
+import { buildRiskPlan } from './safety.js';
 // NSE-only nine-strategy engine ported from the previously approved strategy rules.
 // Research enrichment is deliberately unavailable until its separate data sources are implemented.
 function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, contiguousCount = 21) {
@@ -434,9 +435,9 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   const rawTarget=entry+risk*number(targetR);
   const targetTicks=Math.ceil(rawTarget/step-1e-9);
   const target=Number((targetTicks*step).toFixed(8));
-  const plannedRr=(target-entry)/risk;
-  if(!(Number.isFinite(plannedRr)&&plannedRr>=2-1e-9))return{status:'NO_TRADE',reason:'Fixed Entry/SL/Target do not preserve the required 1:2 reward/risk'};
-  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk,targetR:number(targetR)};
+  const riskPlan=buildRiskPlan({entry,stopLoss,target,tickSize:step});
+  if(riskPlan.status!=='RISK_PLAN_VALID')return{status:'NO_TRADE',reason:riskPlan.reason||'Canonical Entry/SL/Target risk validation failed'};
+  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:riskPlan.rr,risk:riskPlan.risk,targetR:number(targetR)};
 }
 
 export function detectEmaTrend(rows) {

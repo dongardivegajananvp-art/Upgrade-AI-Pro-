@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { isNseRegularSession } from './nse-session.js';
 import { shouldActivateFnoSliceOnFeedRecovery } from './fno-feed-readiness.js';
@@ -433,12 +433,11 @@ export function startMarketSocket() {
       const decoded = decode(message);
       const acknowledge = item => {
         if (Array.isArray(item)) { for (const child of item) acknowledge(child); return; }
-        if (item && typeof item === 'object' && item.type === 'sub' && Number(item.code) === 200) {
-          const acknowledged = [...lastSentSubscriptionBatch];
-          lastSentSubscriptionBatch = [];
-          console.info('[FYERS_DATA] subscription acknowledged:', JSON.stringify({
-            count: acknowledged.length,
-            symbols: acknowledged,
+        if (isGenericSubscriptionAck(item)) {
+          // This ACK has no symbol identity. Never attribute it to the most
+          // recent local batch; delayed ACKs can arrive after another batch was sent.
+          console.info('[FYERS_DATA] generic subscription ACK received:', JSON.stringify({
+            symbolLevelConfirmation: false,
             at: new Date().toISOString()
           }));
           return;

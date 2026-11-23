@@ -679,7 +679,7 @@ test('end-to-end bullish continuation validates the complete LONG→CE→risk-pl
   for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:107.2,high:108,low:106,close:107.2,volume:100});
   rows.push({time:start+29*300,open:108.2,high:109.5,low:108.1,close:109,volume:400});
   const result=evaluateUnderlyingFixture(rows,'LONG');
-  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
   assert.equal(result.strategy,'BULLISH_CONTINUATION');
   assert.equal(result.underlyingSide,'LONG');
   assert.equal(result.optionSide,'CE');

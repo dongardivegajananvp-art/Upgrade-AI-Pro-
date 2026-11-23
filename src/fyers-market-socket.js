@@ -195,15 +195,19 @@ function accept(item) {
     console.info('[FYERS_DATA] fresh index feed restored; activating first F&O slice immediately');
     applyFnoRotation(false);
   }
-  if (universe.some(item => item.symbol === symbol) || symbol === selectedOptionSymbol) {
+  // Index ticks drive the NSE feed-readiness gate. Log them explicitly so a
+  // connected transport with no accepted index data is distinguishable in prod.
+  if (INDEX_SYMBOLS.includes(symbol) || universe.some(item => item.symbol === symbol) || symbol === selectedOptionSymbol) {
     const previousLogAt = tickTelemetryLoggedAt.get(symbol) || 0;
-    if (!previousLogAt || tick.receivedAt - previousLogAt >= 60_000) {
+    const logIntervalMs = INDEX_SYMBOLS.includes(symbol) ? 15_000 : 60_000;
+    if (!previousLogAt || tick.receivedAt - previousLogAt >= logIntervalMs) {
       tickTelemetryLoggedAt.set(symbol, tick.receivedAt);
       console.info('[FYERS_DATA] market tick received:', JSON.stringify({
         symbol, receivedAt: new Date(tick.receivedAt).toISOString(),
         exchangeTime: new Date(tick.exchangeTime * 1000).toISOString(),
         receiveAgeMs: Date.now() - tick.receivedAt, exchangeAgeMs: Math.round((Date.now() / 1000 - tick.exchangeTime) * 1000),
-        fresh: isFresh(tick), selectedUnderlying: symbol === selectedUnderlyingSymbol,
+        fresh: isFresh(tick), index: INDEX_SYMBOLS.includes(symbol),
+        selectedUnderlying: symbol === selectedUnderlyingSymbol,
         selectedOption: symbol === selectedOptionSymbol
       }));
     }
@@ -419,7 +423,13 @@ export function startMarketSocket() {
       const acknowledge = item => {
         if (Array.isArray(item)) { for (const child of item) acknowledge(child); return; }
         if (item && typeof item === 'object' && item.type === 'sub' && Number(item.code) === 200) {
+          const acknowledged = [...lastSentSubscriptionBatch];
           lastSentSubscriptionBatch = [];
+          console.info('[FYERS_DATA] subscription acknowledged:', JSON.stringify({
+            count: acknowledged.length,
+            symbols: acknowledged,
+            at: new Date().toISOString()
+          }));
           return;
         }
         accept(item);

@@ -64,3 +64,8 @@ export function pruneSymbolMap(map, allowedSymbols = [], maxSize = 300) {
   while (map.size > limit) map.delete(map.keys().next().value);
   return map.size;
 }
+
+// FYERS subscription ACKs are generic; they do not identify accepted symbols.
+export function isGenericSubscriptionAck(item) {
+  return Boolean(item && typeof item === 'object' && !Array.isArray(item) && item.type === 'sub' && Number(item.code) === 200);
+}

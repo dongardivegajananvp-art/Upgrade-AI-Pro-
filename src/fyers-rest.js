@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -515,6 +515,29 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
 }
 export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, REST_PRIORITY.ACCOUNT, 'account-positions'); }
 export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, REST_PRIORITY.ACCOUNT, 'account-orderbook'); }
+export function getRestDispatchReadiness(priority = REST_PRIORITY.SCANNER, path = '/history', now = Date.now()) {
+  const background = Number(priority) < REST_PRIORITY.CHART;
+  const recoveryProbeAllowed = canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority });
+  return buildRestDispatchGate({
+    cooldownActive: isRestCooldownActive(now, cooldownUntil),
+    recoveryProbeRequired,
+    recoveryProbeAllowed,
+    priority,
+    queueDepth: restQueue.length,
+    minGapWaitMs: getRestWaitMs(now, nextRequestAt),
+    totalWindowWaitMs: getRestRequestWindowWaitMs(recentUpstreamRequests, now, 6),
+    backgroundWindowWaitMs: background
+      ? getRestRequestWindowWaitMs(recentUpstreamRequests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+      : 0,
+    historyWindowWaitMs: path === '/history'
+      ? Math.max(
+          getHistoryRequestWindowWaitMs(recentUpstreamRequests, now, 8),
+          background ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) : 0
+        )
+      : 0
+  });
+}
+
 export function getRestDiagnostics(now = Date.now()) {
   refreshRequestCounters(now);
   return {

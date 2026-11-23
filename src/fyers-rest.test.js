@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -65,7 +66,6 @@ test('daily research excludes the current incomplete IST session candle', () => 
 });
 
 
-import { parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 
 test('FYERS Retry-After and bounded REST backoff respect provider wait times', () => {
   const now = Date.UTC(2026, 10, 20, 10, 0, 0);
@@ -107,4 +107,46 @@ test('5-minute history cache remains valid only until the next completed candle 
   assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 299_000), bucketStart + 300_000 + 2_000);
   assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 300_000), bucketStart + 600_000 + 2_000);
   assert.equal(getFiveMinuteCacheValidUntil(bucketStart + 301_000, 0), bucketStart + 600_000);
+});
+
+test('REST priority keeps entry verification ahead of chart, research, scanner and warmup', () => {
+  const jobs = [
+    { id:'warmup', priority:REST_PRIORITY.WARMUP, sequence:1 },
+    { id:'scanner', priority:REST_PRIORITY.SCANNER, sequence:2 },
+    { id:'research', priority:REST_PRIORITY.RESEARCH, sequence:3 },
+    { id:'chart', priority:REST_PRIORITY.CHART, sequence:4 },
+    { id:'entry', priority:REST_PRIORITY.ENTRY, sequence:5 }
+  ];
+  assert.deepEqual(sortRestQueue(jobs).map(job=>job.id), ['entry','chart','research','scanner','warmup']);
+});
+
+test('after a 429 cooldown, only a selected chart or higher-priority request may probe recovery', () => {
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.SCANNER}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.RESEARCH}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.CHART}),true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.CHART}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.ENTRY}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.ENTRY}),true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:false,priority:REST_PRIORITY.SCANNER}),true);
+});
+
+test('every backend restart starts behind an interactive REST recovery gate', () => {
+  assert.equal(REST_RECOVERY_REQUIRED_ON_START, true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:REST_RECOVERY_REQUIRED_ON_START,priority:REST_PRIORITY.SCANNER}), false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:REST_RECOVERY_REQUIRED_ON_START,priority:REST_PRIORITY.CHART}), true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:REST_RECOVERY_REQUIRED_ON_START,recoveryProbeAttempted:true,priority:REST_PRIORITY.CHART}), false);
+});
+
+
+test('background history budget preserves two rolling-window slots for Entry and chart work', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const requests = Array.from({length:4}, (_,index) => ({
+    at:new Date(now - index * 1000).toISOString(), path:'/history',
+    source:'fno-scanner-5m', priority:REST_PRIORITY.SCANNER
+  }));
+  assert.equal(getHistoryRequestWindowWaitMs(requests, now, 8), 0);
+  assert.ok(getHistoryRequestWindowWaitMs(requests, now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) > 0);
+  assert.equal(getHistoryRequestWindowWaitMs(requests.slice(0,3), now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1), 0);
+  const entryRequests = [...requests, {at:new Date(now).toISOString(),path:'/history',source:'entry-option-history',priority:REST_PRIORITY.ENTRY}];
+  assert.equal(getHistoryRequestWindowWaitMs(entryRequests, now, 8), 0);
 });

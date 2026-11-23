@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -191,7 +191,7 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -240,7 +240,7 @@ test('chart requests ten completed NSE trading sessions and renders day partitio
 test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
   const snapshotSource = app.includes('normalizeChartSnapshot');
   assert.ok(snapshotSource);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v15/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
 });
 
 test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {
@@ -276,4 +276,23 @@ test('live F&O scanner keeps the default DOM compact without weakening strategy 
   assert.match(app, /coverage\.noTickCount/);
   assert.match(app, /RESEARCH · /);
   assert.doesNotMatch(app, /warmupLastFailure/);
+});
+
+
+test('status polling is single-flight and paused while the workstation tab is hidden', () => {
+  assert.match(app, /if \(refreshRunning \|\| document\.hidden\) return/);
+  assert.match(app, /refreshRunning = true/);
+  assert.match(app, /finally \{\s*refreshRunning = false;/);
+  assert.match(app, /function startStatusPolling\(\)/);
+  assert.match(app, /function stopStatusPolling\(\)/);
+  assert.match(app, /document\.addEventListener\('visibilitychange'/);
+  assert.match(app, /if \(document\.hidden\) stopStatusPolling\(\);\s*else startStatusPolling\(\);/);
+});
+
+
+test('PWA updates activate the versioned shell, evict old caches and never intercept live APIs', () => {
+  assert.match(serviceWorker, /self\.skipWaiting\(\)/);
+  assert.match(serviceWorker, /self\.clients\.claim\(\)/);
+  assert.match(serviceWorker, /keys\.filter\(k=>k!==CACHE\)/);
+  assert.match(serviceWorker, /u\.pathname\.startsWith\('\/api\/'\)\)return/);
 });

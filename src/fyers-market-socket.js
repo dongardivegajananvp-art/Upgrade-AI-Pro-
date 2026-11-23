@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { isNseRegularSession } from './nse-session.js';
 import { shouldActivateFnoSliceOnFeedRecovery } from './fno-feed-readiness.js';
@@ -38,7 +38,10 @@ const ticks = new Map();
 const tickTelemetryLoggedAt = new Map();
 let optionFirstTickLoggedFor = null;
 let socketHasConnected = false;
-const socketSubscribedSymbols = new Set();
+// Local record of symbols sent to the SDK. FYERS emits a generic subscribe ACK,
+// not a symbol-specific confirmation; this set must never be presented as
+// exchange-confirmed subscription state.
+const socketSdkRequestedSymbols = new Set();
 let subscriptionOperationSequence = 0;
 const SUBSCRIPTION_BATCH_SIZE = 1;
 const SUBSCRIPTION_BATCH_INTERVAL_MS = 1200;
@@ -69,6 +72,11 @@ function sessionFeedReady(now = Date.now()) {
 function desiredSocketSubscriptions() {
   return buildSessionSocketSubscriptions(INDEX_SYMBOLS, activeFnoSymbols, selectedOptionSymbol, sessionFeedReady());
 }
+function pruneSocketSymbolState() {
+  const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol].filter(Boolean);
+  pruneSymbolMap(ticks, allowed, 300);
+  pruneSymbolMap(tickTelemetryLoggedAt, allowed, 300);
+}
 
 function scheduleSubscriptionFlush(delay = 0) {
   if (subscriptionFlushTimer || !pendingSubscriptionSymbols.length) return;
@@ -85,7 +93,7 @@ function scheduleSubscriptionFlush(delay = 0) {
       }));
       lastSentSubscriptionBatch = [...batch];
       socket.subscribe(batch);
-      for (const symbol of batch) socketSubscribedSymbols.add(symbol);
+      for (const symbol of batch) socketSdkRequestedSymbols.add(symbol);
     } catch (error) {
       lastSentSubscriptionBatch = [];
       pendingSubscriptionSymbols = [...batch, ...pendingSubscriptionSymbols];
@@ -115,24 +123,24 @@ function scheduleSubscriptionFlush(delay = 0) {
 
 function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
   const desired = [...new Set(desiredSymbols)];
-  const known = [...socketSubscribedSymbols, ...pendingSubscriptionSet];
+  const known = [...socketSdkRequestedSymbols, ...pendingSubscriptionSet];
   const { removed, added } = getSocketSubscriptionDelta(known, desired);
   const operationId = ++subscriptionOperationSequence;
   console.info('[FYERS_DATA] subscription delta:', JSON.stringify({
     operationId, reason, at: new Date().toISOString(),
-    currentCount: socketSubscribedSymbols.size, queuedCount: pendingSubscriptionSet.size,
+    currentCount: socketSdkRequestedSymbols.size, queuedCount: pendingSubscriptionSet.size,
     desiredCount: desired.length, addedCount: added.length, removedCount: removed.length
   }));
   if (removed.length) {
     const removedSet = new Set(removed);
     pendingSubscriptionSymbols = pendingSubscriptionSymbols.filter(symbol => !removedSet.has(symbol));
     for (const symbol of removed) pendingSubscriptionSet.delete(symbol);
-    const activeRemoved = removed.filter(symbol => socketSubscribedSymbols.has(symbol));
+    const activeRemoved = removed.filter(symbol => socketSdkRequestedSymbols.has(symbol));
     if (activeRemoved.length) {
       if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
       console.info('[FYERS_DATA] unsubscribe request:', JSON.stringify({ operationId, count: activeRemoved.length }));
       socket.unsubscribe(activeRemoved);
-      for (const symbol of activeRemoved) socketSubscribedSymbols.delete(symbol);
+      for (const symbol of activeRemoved) socketSdkRequestedSymbols.delete(symbol);
     }
   }
   if (added.length) {
@@ -301,6 +309,7 @@ export function setFnoUniverse(items) {
     unique.set(item.symbol, item);
   }
   universe = [...unique.values()];
+  pruneSocketSymbolState();
   rotationIndex = 0;
   applyFnoRotation();
   if (rotationTimer) clearInterval(rotationTimer);
@@ -331,6 +340,7 @@ export function setSelectedOptionSymbol(symbol) {
     return { status: optionSubscriptionStatus, symbol: next, reason: optionSubscriptionError };
   }
   selectedOptionSymbol = next;
+  pruneSocketSymbolState();
   optionFirstTickLoggedFor = null;
   if (socket && socketStatus === 'CONNECTED') {
     try {
@@ -401,8 +411,9 @@ export function startMarketSocket() {
       }
       const isFirstConnection = !socketHasConnected;
       try {
-        // FYERS auto-reconnect restores the existing subscriptions itself.
-        // Reconcile only symbols changed while disconnected; do not resend the full list.
+        // The FYERS SDK is expected to restore its prior subscriptions on auto-reconnect.
+        // This local set records SDK requests, not exchange-confirmed symbols. Reconcile
+        // only symbols changed while disconnected; freshness remains the proof of feed.
         syncSocketSubscriptions(subscriptions, isFirstConnection ? 'initial-connect' : 'auto-reconnect-reconcile');
         socketHasConnected = true;
       } catch (error) {
@@ -422,12 +433,11 @@ export function startMarketSocket() {
       const decoded = decode(message);
       const acknowledge = item => {
         if (Array.isArray(item)) { for (const child of item) acknowledge(child); return; }
-        if (item && typeof item === 'object' && item.type === 'sub' && Number(item.code) === 200) {
-          const acknowledged = [...lastSentSubscriptionBatch];
-          lastSentSubscriptionBatch = [];
-          console.info('[FYERS_DATA] subscription acknowledged:', JSON.stringify({
-            count: acknowledged.length,
-            symbols: acknowledged,
+        if (isGenericSubscriptionAck(item)) {
+          // This ACK has no symbol identity. Never attribute it to the most
+          // recent local batch; delayed ACKs can arrive after another batch was sent.
+          console.info('[FYERS_DATA] generic subscription ACK received:', JSON.stringify({
+            symbolLevelConfirmation: false,
             at: new Date().toISOString()
           }));
           return;
@@ -452,7 +462,7 @@ export function startMarketSocket() {
         // This avoids duplicating already-active subscriptions after reconnect.
         const rejectedBatch = [...lastSentSubscriptionBatch];
         lastSentSubscriptionBatch = [];
-        for (const symbol of rejectedBatch) socketSubscribedSymbols.delete(symbol);
+        for (const symbol of rejectedBatch) socketSdkRequestedSymbols.delete(symbol);
         const retryBatch = rejectedBatch.filter(symbol => !pendingSubscriptionSet.has(symbol));
         pendingSubscriptionSymbols = [...retryBatch, ...pendingSubscriptionSymbols];
         for (const symbol of retryBatch) pendingSubscriptionSet.add(symbol);
@@ -471,9 +481,9 @@ export function startMarketSocket() {
       socketConnectedAt = null;
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
-      // FYERS Data Socket auto-reconnect automatically restores prior subscriptions.
-      // Keep acknowledged symbols so connect reconciliation adds only genuinely new
-      // symbols; clearing this set would duplicate the SDK's automatic resubscribe.
+      // FYERS Data Socket auto-reconnect is expected to restore prior SDK requests.
+      // Keep the SDK-requested set to avoid duplicate sends; it is not an exchange ACK.
+      // Per-symbol fresh ticks, not this set, prove that the feed has resumed.
       console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
     });
     socket.connect();
@@ -510,7 +520,9 @@ export function getMarketData(now = Date.now()) {
     }))
   };
   return {
-    socketStatus, lastError, fnoTickCoverage, socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
+    socketStatus, lastError, fnoTickCoverage,
+    subscriptionDiagnostics: buildSocketSubscriptionDiagnostics({ desired:desiredSocketSubscriptions(), sentToSdk:[...socketSdkRequestedSymbols], pending:pendingSubscriptionSymbols }),
+    socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
     socketDiagnostics: {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,
       lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -23,4 +23,34 @@ test('FYERS subscription reconciliation deduplicates symbols and preserves the 2
   assert.equal(new Set([...desired]).size, 24);
   assert.equal(delta.added.length, 21);
   assert.deepEqual(delta.removed, ['NSE:ABC-EQ']);
+});
+
+
+test('WebSocket diagnostics distinguish desired symbols, SDK sends and pending subscriptions', () => {
+  const state = buildSocketSubscriptionDiagnostics({
+    desired:['NSE:NIFTY50-INDEX','NSE:ABC-EQ','NSE:ABC-EQ'],
+    sentToSdk:['NSE:NIFTY50-INDEX'],
+    pending:['NSE:ABC-EQ','NSE:ABC-EQ']
+  });
+  assert.equal(state.desiredCount,2);
+  assert.equal(state.sentToSdkCount,1);
+  assert.equal(state.pendingCount,1);
+  assert.deepEqual(state.pendingSymbols,['NSE:ABC-EQ']);
+  assert.equal(state.confirmation,'SDK_SEND_STATE_ONLY');
+});
+
+
+test('socket tick and telemetry maps prune obsolete symbols and stay bounded', () => {
+  const map = new Map([['NSE:KEEP-EQ',1],['NSE:OLD-EQ',2],['NSE:A-EQ',3],['NSE:B-EQ',4]]);
+  assert.equal(pruneSymbolMap(map,['NSE:KEEP-EQ','NSE:A-EQ','NSE:B-EQ'],2),2);
+  assert.deepEqual([...map.keys()],['NSE:A-EQ','NSE:B-EQ']);
+});
+
+
+test('FYERS generic subscription ACK is recognized without assigning symbol identity', () => {
+  assert.equal(isGenericSubscriptionAck({ type: 'sub', code: 200 }), true);
+  assert.equal(isGenericSubscriptionAck({ type: 'sub', code: 200, symbol: 'NSE:ABC-EQ' }), true);
+  assert.equal(isGenericSubscriptionAck({ type: 'sub', code: 429 }), false);
+  assert.equal(isGenericSubscriptionAck({ type: 'symbol_sub', code: 200 }), false);
+  assert.equal(isGenericSubscriptionAck(null), false);
 });

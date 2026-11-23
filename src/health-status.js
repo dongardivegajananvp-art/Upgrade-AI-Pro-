@@ -2,10 +2,20 @@
 export function buildHealthStatus({
   market = {}, masterCurrent = false, sessionDate = null, loadedDate = null,
   ordersEnabled = false, scanner = {}, scanPerSlice = null, rotationIntervalMs = null,
-  rest = {}, runtimeMemory = {}
+  rest = {}, runtimeMemory = {}, authStatus = {}
 } = {}) {
   const indices = market.indices && typeof market.indices === 'object' ? Object.values(market.indices) : [];
   const fno = market.fno || {};
+  const blockers = [];
+  if (!authStatus.tokenStored) blockers.push('FYERS_AUTH_NOT_READY');
+  if (market.socketStatus !== 'CONNECTED') blockers.push('WEBSOCKET_NOT_CONNECTED');
+  if (indices.filter(tick => Boolean(tick?.fresh)).length !== 3) blockers.push('THREE_FRESH_INDEX_TICKS_REQUIRED');
+  if (!masterCurrent) blockers.push('CURRENT_SESSION_FNO_MASTER_NOT_READY');
+  if (!market.selectedUnderlying?.fresh) blockers.push('SELECTED_UNDERLYING_TICK_NOT_FRESH');
+  if (!market.selectedOption?.fresh) blockers.push('SELECTED_OPTION_TICK_NOT_FRESH');
+  if (rest.cooldownActive) blockers.push('FYERS_REST_COOLDOWN_ACTIVE');
+  if (rest.recoveryProbeRequired) blockers.push('FYERS_REST_RECOVERY_PROBE_REQUIRED');
+  if (scanner.status !== 'RUNNING') blockers.push('FNO_SCANNER_NOT_RUNNING');
   const memory = {
     rssBytes: Number.isFinite(Number(runtimeMemory.rss)) ? Number(runtimeMemory.rss) : null,
     heapUsedBytes: Number.isFinite(Number(runtimeMemory.heapUsed)) ? Number(runtimeMemory.heapUsed) : null,
@@ -14,6 +24,8 @@ export function buildHealthStatus({
   };
   return {
     ok: true,
+    processLiveness: 'ALIVE',
+    marketPipelineReadiness: { status: blockers.length ? 'WAIT' : 'MARKET_DATA_READY', blockers },
     app: 'Upgrade AI Pro',
     mode: 'NSE_ONLY',
     marketData: market.socketStatus || 'NOT_STARTED',
@@ -54,8 +66,14 @@ export function buildHealthStatus({
       minGapMs: Number.isFinite(Number(rest.minGapMs)) ? Number(rest.minGapMs) : null,
       queueDepth: Number.isFinite(Number(rest.queueDepth)) ? Number(rest.queueDepth) : null,
       queueCapacity: Number.isFinite(Number(rest.queueCapacity)) ? Number(rest.queueCapacity) : null,
+      status: rest.status || 'IDLE',
+      lastError: rest.lastError || null,
+      lastRequestSource: rest.lastRequestSource || null,
       cooldownActive: Boolean(rest.cooldownActive),
-      cooldownUntil: rest.cooldownUntil || null
+      cooldownUntil: rest.cooldownUntil || null,
+      recoveryProbeRequired: Boolean(rest.recoveryProbeRequired),
+      recoveryProbeAttempted: Boolean(rest.recoveryProbeAttempted),
+      cooldownPersistence: rest.cooldownPersistence || 'UNKNOWN'
     },
     runtimeMemory: memory,
     orders: ordersEnabled ? 'ENABLED' : 'DISABLED'

@@ -33,3 +33,39 @@ export function buildSessionSocketSubscriptions(indexSymbols = [], activeSymbols
     sessionReady ? selectedOptionSymbol : null
   );
 }
+
+
+export function buildSocketSubscriptionDiagnostics({ desired = [], sentToSdk = [], pending = [] } = {}) {
+  const normalize = values => [...new Set((Array.isArray(values) ? values : [])
+    .filter(symbol => typeof symbol === 'string' && symbol))];
+  const desiredSymbols = normalize(desired);
+  const sentSymbols = normalize(sentToSdk);
+  const pendingSymbols = normalize(pending);
+  return {
+    desiredCount: desiredSymbols.length,
+    sentToSdkCount: sentSymbols.length,
+    pendingCount: pendingSymbols.length,
+    desiredSymbols,
+    sentToSdkSymbols: sentSymbols,
+    pendingSymbols,
+    // The FYERS SDK's generic subscription ACK is not symbol-specific; do not
+    // mislabel a local SDK send as an exchange-confirmed subscription.
+    confirmation: 'SDK_SEND_STATE_ONLY'
+  };
+}
+
+
+export function pruneSymbolMap(map, allowedSymbols = [], maxSize = 300) {
+  if (!(map instanceof Map)) return 0;
+  const allowed = new Set((Array.isArray(allowedSymbols) ? allowedSymbols : [])
+    .filter(symbol => typeof symbol === 'string' && symbol));
+  for (const key of map.keys()) if (!allowed.has(key)) map.delete(key);
+  const limit = Math.max(1, Math.floor(Number(maxSize) || 300));
+  while (map.size > limit) map.delete(map.keys().next().value);
+  return map.size;
+}
+
+// FYERS subscription ACKs are generic; they do not identify accepted symbols.
+export function isGenericSubscriptionAck(item) {
+  return Boolean(item && typeof item === 'object' && !Array.isArray(item) && item.type === 'sub' && Number(item.code) === 200);
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseDirectionalOption, verifyOptionContractUnderlying } from './option-selection.js';
+import { chooseDirectionalOption, verifyOptionContractUnderlying, normalizeExpiryTimestamp, matchesRequestedExpiry } from './option-selection.js';
 
 const chain = [
   { symbol: 'NSE:ABC100CE', option_type: 'CE', strike_price: 100 },
@@ -35,4 +35,15 @@ test('official contract identity is verified independently of live tick freshnes
   assert.equal(verifyOptionContractUnderlying(contract, 'NSE:ABC-EQ').status, 'CONTRACT_IDENTITY_VERIFIED');
   assert.equal(verifyOptionContractUnderlying(contract, null).status, 'UNDERLYING_NOT_SELECTED');
   assert.equal(verifyOptionContractUnderlying(contract, 'NSE:XYZ-EQ').status, 'UNDERLYING_MISMATCH');
+});
+
+
+test('official option expiry matching normalizes seconds and milliseconds to the same IST contract date',()=>{
+  const expirySeconds=Date.parse('2026-11-26T10:00:00Z')/1000;
+  assert.equal(normalizeExpiryTimestamp(expirySeconds),expirySeconds);
+  assert.equal(normalizeExpiryTimestamp(expirySeconds*1000),expirySeconds);
+  assert.equal(matchesRequestedExpiry(expirySeconds,expirySeconds*1000),true);
+  assert.equal(matchesRequestedExpiry(expirySeconds,Date.parse('2026-12-03T10:00:00Z')/1000),false);
+  assert.equal(matchesRequestedExpiry(expirySeconds,0),false);
+  assert.equal(normalizeExpiryTimestamp('invalid'),null);
 });

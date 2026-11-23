@@ -8,6 +8,7 @@ import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUnivers
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
+import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
 import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
@@ -78,7 +79,11 @@ function startFnoStrategyScanner() {
     const active=snapshot.activeSymbols || [];
     if (!active.length) { fnoStrategyScanStats.status='WAITING_FOR_ACTIVE_FNO_SLICE'; return; }
     // Do not consume warmup retry attempts or advance scans during FYERS's 429 cooldown.
-    if (getRestDiagnostics().cooldownActive) { fnoStrategyScanStats.status='FYERS_REST_COOLDOWN_WAIT'; return; }
+    const restGate=getRestDiagnostics();
+    if (restGate.cooldownActive || restGate.recoveryProbeRequired) {
+      fnoStrategyScanStats.status=restGate.cooldownActive?'FYERS_REST_COOLDOWN_WAIT':'FYERS_REST_RECOVERY_PROBE_WAIT';
+      return;
+    }
     if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
       fnoStrategyScanRotation=snapshot.rotationIndex;
       fnoStrategyScanCursor=0;
@@ -98,8 +103,8 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.warmupSymbol=warmupSymbol;
       fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
       try {
-        await getDailyHistory(warmupSymbol,Date.now(),-10,'scanner-warmup-daily');
-        await getFifteenMinuteHistory(warmupSymbol,Date.now(),-10,'scanner-warmup-15m');
+        await getDailyHistory(warmupSymbol,Date.now(),REST_PRIORITY.WARMUP,'scanner-warmup-daily');
+        await getFifteenMinuteHistory(warmupSymbol,Date.now(),REST_PRIORITY.WARMUP,'scanner-warmup-15m');
         if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
           throw new Error('Research warmup queue completion state was not registered');
         }
@@ -139,7 +144,7 @@ function startFnoStrategyScanner() {
       if(!isFreshFnoTick(scanTick,Date.now())) {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
       }
-      const history=await getFiveMinuteHistory(symbol,Date.now(),-10,'fno-scanner-5m');
+      const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'fno-scanner-5m');
       const tick=scanTick;
       const market=getMarketData();
       const research=detectNineStrategySetup({
@@ -313,11 +318,11 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
-      if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),50,'chart-history'));
+      if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),REST_PRIORITY.CHART,'chart-history'));
       if (url.pathname === '/api/research-context') {
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
-        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol,Date.now(),50,'research-context-daily'),getFifteenMinuteHistory(symbol,Date.now(),50,'research-context-15m')]);
+        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-daily'),getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-15m')]);
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
       if (url.pathname === '/api/research/historical-universe') {
@@ -395,7 +400,7 @@ const server = http.createServer(async (req,res) => {
           return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Fresh selected-underlying FYERS tick is required for independent research'});
         }
         const [fiveMinute,daily,fifteenMinute] = await Promise.all([
-          getFiveMinuteHistory(symbol,Date.now(),50,'manual-research-5m'), getDailyHistory(symbol,Date.now(),50,'manual-research-daily'), getFifteenMinuteHistory(symbol,Date.now(),50,'manual-research-15m')
+          getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-5m'), getDailyHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-daily'), getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-15m')
         ]);
         const latestMarket = getMarketData();
         const latestUnderlying = latestMarket.selectedUnderlying;
@@ -438,7 +443,7 @@ const server = http.createServer(async (req,res) => {
     const market = getSessionMarketData();
     return send(res,200,buildHealthStatus({
       market, masterCurrent:isFnoMasterCurrent(), sessionDate:getNseSessionDate(),
-      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(),
+      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(), authStatus:getAuthStatus(),
       scanner:fnoStrategyScanStats, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
       rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
       rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
@@ -558,10 +563,10 @@ const server = http.createServer(async (req,res) => {
         const startedAt = Date.now();
         console.info('[SETUP_EVAL] started:',JSON.stringify({underlying:body.underlying,contract:body.contract,contractSide:contract.side,strike:contract.strike,expiry:contract.expiry}));
         const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([
-          getFiveMinuteHistory(body.underlying,Date.now(),50,'setup-underlying-5m'),
-          getFiveMinuteHistory(body.contract,Date.now(),50,'setup-option-5m'),
-          getDailyHistory(body.underlying,Date.now(),50,'setup-underlying-daily'),
-          getFifteenMinuteHistory(body.underlying,Date.now(),50,'setup-underlying-15m')
+          getFiveMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-5m'),
+          getFiveMinuteHistory(body.contract,Date.now(),REST_PRIORITY.ENTRY,'setup-option-5m'),
+          getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily'),
+          getFifteenMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-15m')
         ]);
         console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,

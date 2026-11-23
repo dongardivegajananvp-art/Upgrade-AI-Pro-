@@ -675,9 +675,10 @@ function evaluateUnderlyingFixture(underlyingCandles, side='LONG', extra={}) {
 
 test('end-to-end bullish continuation validates the complete LONG→CE→risk-plan pipeline',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
-  for(let i=0;i<17;i++){const close=100+i;rows.push({time:start+i*300,open:close-.2,high:close+.3,low:close-.3,close,volume:200});}
-  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:107.2,high:108,low:106,close:107.2,volume:100});
-  rows.push({time:start+29*300,open:108.2,high:109.5,low:108.1,close:109,volume:400});
+  for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:100});
+  rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:200});
+  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:106.5,high:107,low:106,close:106.5,volume:100});
+  rows.push({time:start+29*300,open:107.2,high:108.2,low:107.1,close:108.1,volume:200});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
   assert.equal(result.strategy,'BULLISH_CONTINUATION');
@@ -688,11 +689,12 @@ test('end-to-end bullish continuation validates the complete LONG→CE→risk-pl
 
 test('end-to-end bearish continuation validates the complete SHORT→PE→risk-plan pipeline',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
-  for(let i=0;i<17;i++){const close=120-i;rows.push({time:start+i*300,open:close+.2,high:close+.3,low:close-.3,close,volume:200});}
-  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:104,high:104.5,low:103.5,close:104,volume:100});
-  rows.push({time:start+29*300,open:103.4,high:103.6,low:101,close:101.5,volume:400});
+  for(let i=0;i<16;i++)rows.push({time:start+i*300,open:120.2,high:120.3,low:119.7,close:120,volume:100});
+  rows.push({time:start+16*300,open:111,high:111.2,low:109.5,close:110,volume:200});
+  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:113.5,high:114,low:113,close:113.5,volume:100});
+  rows.push({time:start+29*300,open:112.8,high:112.9,low:111.7,close:111.8,volume:200});
   const result=evaluateUnderlyingFixture(rows,'SHORT');
-  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
   assert.equal(result.strategy,'BEARISH_CONTINUATION');
   assert.equal(result.underlyingSide,'SHORT');
   assert.equal(result.optionSide,'PE');
@@ -701,11 +703,12 @@ test('end-to-end bearish continuation validates the complete SHORT→PE→risk-p
 
 test('end-to-end flag-volume breakout is independently selectable when continuation impulse threshold is not met',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
-  for(let i=0;i<17;i++){const close=100+i*.6;rows.push({time:start+i*300,open:close-.2,high:close+.3,low:close-.3,close,volume:200});}
+  for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:400});
+  rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:400});
   for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:108,high:112,low:104,close:108,volume:100});
-  rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:400});
+  rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:600});
   const result=evaluateUnderlyingFixture(rows,'LONG');
-  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
   assert.equal(result.strategy,'FLAG_BREAKOUT_VOLUME');
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);

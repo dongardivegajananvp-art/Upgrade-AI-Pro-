@@ -97,7 +97,9 @@ function startFnoStrategyScanner() {
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
     // Daily/15m warmups so research preparation cannot starve F&O coverage.
-    const shouldWarmup=!fnoStrategyScanRetrySymbol && fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
+    const retryPendingActive=Boolean(fnoStrategyScanRetrySymbol && active.includes(fnoStrategyScanRetrySymbol) &&
+      isFreshFnoTick(snapshot.ticks.get(fnoStrategyScanRetrySymbol),Date.now()));
+    const shouldWarmup=!retryPendingActive && fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
     if (shouldWarmup) {
       const warmupSymbol=fnoResearchWarmupQueue.take();
       fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
@@ -134,8 +136,7 @@ function startFnoStrategyScanner() {
     if (fnoStrategyScanCursor>=scanLimit) return;
     const scanSymbols=getFnoSliceScanSymbols(active,scanLimit);
     const normalSymbol=scanSymbols[fnoStrategyScanCursor] || null;
-    const retryCandidate=Boolean(fnoStrategyScanRetrySymbol && active.includes(fnoStrategyScanRetrySymbol) &&
-      isFreshFnoTick(snapshot.ticks.get(fnoStrategyScanRetrySymbol),Date.now()));
+    const retryCandidate=retryPendingActive;
     const symbol=retryCandidate ? fnoStrategyScanRetrySymbol : normalSymbol;
     if(!symbol) return;
     let scanTick=snapshot.ticks.get(symbol)||null;
@@ -211,16 +212,16 @@ function startFnoStrategyScanner() {
         fnoStrategyScanRetryAt=0;
       }
       fnoStrategyScanStats.lastSymbol=symbol;
-      fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';
+      fnoStrategyScanStats.lastStatus=retryable?'RETRY_QUEUED':'DATA_UNAVAILABLE_NO_TRADE';
       fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);
       fnoStrategyScanStats.lastScanAt=new Date().toISOString();
       fnoSymbolScanLedger.set(symbol,{
-        symbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:fnoStrategyScanStats.lastReason,
+        symbol,status:fnoStrategyScanStats.lastStatus,reason:fnoStrategyScanStats.lastReason,
         attemptedAt:new Date(scanStartedAt).toISOString(),scannedAt:fnoStrategyScanStats.lastScanAt,
         attemptCount:fnoSymbolScanLedger.get(symbol)?.attemptCount||1,
         tickFresh:isFreshFnoTick(scanTick,Date.now()),
         tickExchangeTime:scanTick?.exchangeTime||null,
-        source:isFreshFnoTick(scanTick,Date.now())?'FYERS_HISTORY_BLOCKED':'FYERS_SCAN_BLOCKED'
+        source:retryable?'FYERS_REST_RETRY_PENDING':isFreshFnoTick(scanTick,Date.now())?'FYERS_HISTORY_BLOCKED':'FYERS_SCAN_BLOCKED'
       });
     } finally {
       fnoStrategyScanBusy=false;

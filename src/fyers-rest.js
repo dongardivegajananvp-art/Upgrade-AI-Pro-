@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -8,6 +8,7 @@ const MIN_REST_GAP_MS = 4000;
 const MAX_REST_QUEUE_SIZE = 100;
 let nextRequestAt = 0;
 let cooldownUntil = 0;
+let recoveryProbeRequired = false;
 const restQueue = [];
 let restQueueSequence = 0;
 let drainingRestQueue = false;
@@ -116,6 +117,15 @@ async function drainRestQueue() {
         break;
       }
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
+      if (recoveryProbeRequired) {
+        const recoveryIndex = restQueue.findIndex(job => canRunRestRecoveryProbe({ recoveryProbeRequired, priority: job.priority }));
+        if (recoveryIndex < 0) {
+          const error = new Error('FYERS REST recovery probe required; background request was held before upstream submission');
+          for (const pending of restQueue.splice(0)) pending.reject(error);
+          lastRestStatus = 'RECOVERY_PROBE_REQUIRED';
+          break;
+        }
+      }
       // A Cloudflare 1015 was observed after 11 /data/history calls in one
       // minute. Cap this endpoint at 8 per rolling minute, while allowing
       // higher/lower-priority non-history REST work to proceed independently.
@@ -170,6 +180,7 @@ async function drainRestQueue() {
             cooldownAttempt = unknownRateLimitCountToday;
             cooldownUntil = getUnknownRateLimitCooldownUntil(Date.now(), lastRestMeta.retryAfter, cooldownAttempt);
           }
+          recoveryProbeRequired = true;
           lastRestStatus = 'RATE_LIMITED';
           const markers = [
             lastRestMeta.retryAfter !== null ? 'Retry-After=' + lastRestMeta.retryAfter : null,
@@ -214,6 +225,7 @@ async function drainRestQueue() {
         }
         lastRestStatus = 'OK';
         lastRestError = null;
+        recoveryProbeRequired = false;
         job.resolve(body);
       } catch (error) {
         requestRecord.status = 'NETWORK_ERROR';
@@ -284,7 +296,7 @@ const fiveMinuteCache = new Map();
 // Scanner and chart share one verified 5-minute cache and one FYERS history read.
 // The shared payload retains the chart's last-ten-NSE-session candle set, which
 // gives scanner research more complete real sessions without synthetic candles.
-export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = 50, source = 'chart-history') {
+export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = REST_PRIORITY.CHART, source = 'chart-history') {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   return getFiveMinuteSessionHistory(symbol, now, priority, source);
 }
@@ -344,7 +356,7 @@ export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const fifteenMinuteCache = new Map();
-export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = -10, source = 'fifteen-minute-research') {
+export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = REST_PRIORITY.WARMUP, source = 'fifteen-minute-research') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
   return runHistoryRequestOnce('15m:' + symbol, async () => {
     const cached=fifteenMinuteCache.get(symbol);
@@ -364,7 +376,7 @@ export async function getFyersQuotes(symbols, source = 'quotes-panel') {
   if (!Array.isArray(symbols) || symbols.length < 1 || symbols.length > 50 || !symbols.every(validateNseSymbol)) {
     throw new Error('Quotes require 1 to 50 valid NSE symbols per request');
   }
-  return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') }, 50, source);
+  return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') }, REST_PRIORITY.INTERACTIVE, source);
 }
 export function normalizeDailyCandles(rows, now = Date.now()) {
   if (!Array.isArray(rows)) return [];
@@ -384,7 +396,7 @@ export function normalizeDailyCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const dailyCache = new Map();
-export async function getDailyHistory(symbol, now = Date.now(), priority = -10, source = 'daily-research') {
+export async function getDailyHistory(symbol, now = Date.now(), priority = REST_PRIORITY.WARMUP, source = 'daily-research') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
   return runHistoryRequestOnce('1d:' + symbol, async () => {
     const cached = dailyCache.get(symbol);
@@ -404,10 +416,10 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');
   const count = Number(strikecount);
   if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error('Option-chain strike count must be from 1 to 50');
-  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' }, 100, source);
+  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' }, REST_PRIORITY.OPTION_CHAIN, source);
 }
-export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, 50, 'account-positions'); }
-export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, 50, 'account-orderbook'); }
+export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, REST_PRIORITY.ACCOUNT, 'account-positions'); }
+export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, REST_PRIORITY.ACCOUNT, 'account-orderbook'); }
 export function getRestDiagnostics(now = Date.now()) {
   refreshRequestCounters(now);
   return {
@@ -436,6 +448,7 @@ export function getRestDiagnostics(now = Date.now()) {
     lastRateLimitKind,
     cooldownStrategy: 'FYERS_PLAN_LIMIT_60S_120S_240S_THEN_IST_DAY_BLOCK; CLOUDFLARE_1015_30S_EXPONENTIAL; UNKNOWN_429_BOUNDED',
     cooldownActive: now < cooldownUntil,
+    recoveryProbeRequired,
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
     cooldownPersistence: 'PROCESS_LOCAL_ONLY',
     restartSafe: false

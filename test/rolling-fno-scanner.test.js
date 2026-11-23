@@ -34,7 +34,6 @@ test('reports complete coverage only after every current-session symbol was obse
   assert.equal(buildRollingFnoLeaderboard({universe,ticks,now}).coverageComplete,true);
 });
 
-
 test('Top Gainers includes rolling observations but preserves each tick freshness flag', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];
   const ticks=new Map([
@@ -50,16 +49,15 @@ test('Top Gainers includes rolling observations but preserves each tick freshnes
   assert.equal(result.topGainers[1].fresh,false);
 });
 
-
 test('overlapping socket slices cover new F&O symbols without skipping the overlap', () => {
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const first=buildFnoRotationSlice(universe,0,20);
-  const second=buildFnoRotationSlice(universe,4,20);
+  const second=buildFnoRotationSlice(universe,8,20);
   assert.equal(first.length,20);
   assert.equal(second.length,20);
-  assert.equal(first.filter(symbol=>second.includes(symbol)).length,16);
-  assert.equal(second[0],'NSE:STOCK4-EQ');
-  assert.equal(second[19],'NSE:STOCK23-EQ');
+  assert.equal(first.filter(symbol=>second.includes(symbol)).length,12);
+  assert.equal(second[0],'NSE:STOCK8-EQ');
+  assert.equal(second[19],'NSE:STOCK27-EQ');
 });
 
 test('selected underlying is pinned without duplicates or changing the rotation start', () => {
@@ -70,8 +68,8 @@ test('selected underlying is pinned without duplicates or changing the rotation 
   assert.equal(new Set(slice).size,20);
 });
 
-test('four-symbol F&O rotation covers all 218 symbols exactly once, including the final partial batch', () => {
-  assert.equal(FNO_SCAN_PER_SLICE,4);
+test('eight-symbol F&O rotation covers all 218 symbols exactly once, including the final partial batch', () => {
+  assert.equal(FNO_SCAN_PER_SLICE,8);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const batches=[];
   let start=0;
@@ -84,10 +82,12 @@ test('four-symbol F&O rotation covers all 218 symbols exactly once, including th
   assert.equal(batches.length,218);
   assert.equal(new Set(batches).size,218);
   assert.deepEqual([...batches].sort(),universe.map(item=>item.symbol).sort());
-  assert.equal(getFnoScanBatchSize(218,216,4),2);
-  assert.equal(getFnoScanBatchSize(218,0,4),4);
-  assert.equal(getNextFnoRotationIndex(218,212,4),216);
-  assert.equal(getNextFnoRotationIndex(218,216,4),0);
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20),4)[0],'NSE:STOCK0-EQ');
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,4,20),4)[0],'NSE:STOCK4-EQ');
+  assert.equal(getFnoScanBatchSize(218,216,8),2);
+  assert.equal(getFnoScanBatchSize(218,0,8),8);
+  assert.equal(getNextFnoRotationIndex(218,208,8),216);
+  assert.equal(getNextFnoRotationIndex(218,216,8),0);
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20),8)[0],'NSE:STOCK0-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,8,20),8)[0],'NSE:STOCK8-EQ');
+  const rollingWindow=buildRollingFnoLeaderboard({universe,ticks:new Map(),now,slotCount:FNO_SCAN_PER_SLICE,rotationIntervalMs:60000});
+  assert.equal(rollingWindow.maxObservationAgeSeconds,1740);
 });

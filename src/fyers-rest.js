@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -101,11 +101,28 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a, b) => a.time - b.time);
 }
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function expireQueuedRestJobs(now = Date.now()) {
+  for (let index = restQueue.length - 1; index >= 0; index -= 1) {
+    const job = restQueue[index];
+    if (now - job.enqueuedAt < job.maxQueueAgeMs) continue;
+    restQueue.splice(index, 1);
+    const error = new Error('FYERS REST queued request expired before upstream submission; stale work was discarded');
+    lastRestStatus = 'QUEUE_EXPIRED';
+    lastRestError = error.message;
+    job.reject(error);
+    console.warn('[FYERS_REST] queued request expired before upstream submission:', JSON.stringify({
+      path: job.url.pathname, source: job.source, priority: job.priority,
+      queuedForMs: now - job.enqueuedAt
+    }));
+  }
+}
 async function drainRestQueue() {
   if (drainingRestQueue) return;
   drainingRestQueue = true;
   try {
     while (restQueue.length) {
+      expireQueuedRestJobs();
+      if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
         const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
         for (const job of restQueue.splice(0)) job.reject(error);
@@ -115,6 +132,8 @@ async function drainRestQueue() {
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
       const delay = getRestWaitMs(Date.now(), nextRequestAt);
       if (delay) await wait(delay);
+      expireQueuedRestJobs();
+      if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
         const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
         for (const job of restQueue.splice(0)) job.reject(error);
@@ -284,7 +303,8 @@ async function drainRestQueue() {
 }
 function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
   return new Promise((resolve, reject) => {
-    const job = { url, options, priority: Number(priority) || 0, source:String(source || 'UNCLASSIFIED'), sequence: ++restQueueSequence, resolve, reject };
+    const normalizedPriority = Number(priority) || 0;
+    const job = { url, options, priority: normalizedPriority, source:String(source || 'UNCLASSIFIED'), sequence: ++restQueueSequence, enqueuedAt:Date.now(), maxQueueAgeMs:getRestQueueMaxAgeMs(normalizedPriority), resolve, reject };
     const admission = admitRestJob(restQueue, job, MAX_REST_QUEUE_SIZE);
     if (!admission.accepted) {
       reject(new Error('FYERS REST queue is full; request was rejected before upstream submission'));

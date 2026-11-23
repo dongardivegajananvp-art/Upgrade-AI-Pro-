@@ -140,13 +140,13 @@ test('every backend restart starts behind an interactive REST recovery gate', ()
 
 test('background history budget preserves two rolling-window slots for Entry and chart work', () => {
   const now = Date.UTC(2026, 10, 23, 5, 0, 0);
-  const requests = Array.from({length:6}, (_,index) => ({
+  const requests = Array.from({length:4}, (_,index) => ({
     at:new Date(now - index * 1000).toISOString(), path:'/history',
     source:'fno-scanner-5m', priority:REST_PRIORITY.SCANNER
   }));
   assert.equal(getHistoryRequestWindowWaitMs(requests, now, 8), 0);
-  assert.ok(getHistoryRequestWindowWaitMs(requests, now, 6, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) > 0);
-  assert.equal(getHistoryRequestWindowWaitMs(requests.slice(0,5), now, 6, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1), 0);
+  assert.ok(getHistoryRequestWindowWaitMs(requests, now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) > 0);
+  assert.equal(getHistoryRequestWindowWaitMs(requests.slice(0,3), now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1), 0);
   const entryRequests = [...requests, {at:new Date(now).toISOString(),path:'/history',source:'entry-option-history',priority:REST_PRIORITY.ENTRY}];
   assert.equal(getHistoryRequestWindowWaitMs(entryRequests, now, 8), 0);
 });

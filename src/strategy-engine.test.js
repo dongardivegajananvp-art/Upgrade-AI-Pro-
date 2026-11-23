@@ -741,3 +741,37 @@ test('end-to-end daily-trend pullback requires fresh daily context and completes
   assert.notEqual(missingDaily.strategy,'DAILY_TREND_5M_PULLBACK');
   assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='DAILY_TREND_5M_PULLBACK').status,'BLOCKED');
 });
+
+
+test('end-to-end double-top neckline breakdown/retest validates SHORT→PE with original cross-candle volume',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  rows[5]={...rows[5],open:95,high:101,low:90,close:95};
+  for(const i of [10,20])rows[i]={...rows[i],open:109,high:110,low:108,close:109};
+  rows[22]={...rows[22],open:100,high:100.5,low:96.5,close:97,volume:200};
+  for(let i=23;i<49;i++)rows[i]={...rows[i],open:98.2,high:98.5,low:97.5,close:98};
+  rows[49]={...rows[49],open:98.8,high:99.1,low:97.5,close:97.8};
+  const result=evaluateUnderlyingFixture(rows,'SHORT');
+  assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
+  assert.equal(result.strategy,'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
+  assert.equal(result.underlyingSide,'SHORT');
+  assert.equal(result.optionSide,'PE');
+  assert.ok(result.rr>=2);
+});
+
+test('end-to-end double-bottom neckline breakout/retest validates LONG→CE with original cross-candle volume',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  rows[5]={...rows[5],open:115,high:120,low:99,close:115};
+  for(const i of [10,20])rows[i]={...rows[i],open:91,high:92,low:90,close:91};
+  rows[15]={...rows[15],open:109,high:110,low:100,close:109};
+  rows[22]={...rows[22],open:110,high:113,low:109.5,close:112.5,volume:200};
+  for(let i=23;i<49;i++)rows[i]={...rows[i],open:112,high:113,low:111,close:112};
+  rows[49]={...rows[49],open:109.9,high:110.5,low:109.8,close:110.3};
+  const result=evaluateUnderlyingFixture(rows,'LONG');
+  assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
+  assert.equal(result.strategy,'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
+  assert.equal(result.underlyingSide,'LONG');
+  assert.equal(result.optionSide,'CE');
+  assert.ok(result.rr>=2);
+});

@@ -161,3 +161,17 @@ test('rate-limit diagnostics preserve the exact upstream caller and recent histo
   assert.equal(context.recentRequests.at(-1).source, 'fno-scanner-5m');
   assert.equal(context.recentRequests.at(-1).status, 429);
 });
+
+
+import { getHistoryRequestWindowWaitMs } from '../src/rest-scheduler-utils.js';
+
+test('history endpoint is capped at eight requests per rolling minute without blocking other paths', () => {
+  const requests = Array.from({length:8}, (_, index) => ({
+    at:new Date(1000 + index * 5000).toISOString(), path:'/history'
+  }));
+  requests.push({at:new Date(40000).toISOString(),path:'/quotes'});
+  assert.equal(getHistoryRequestWindowWaitMs(requests, 41000), 20000);
+  assert.equal(getHistoryRequestWindowWaitMs(requests, 76000), 0);
+  assert.equal(getHistoryRequestWindowWaitMs([{at:new Date(40000).toISOString(),path:'/quotes'}], 41000), 0);
+  assert.equal(getHistoryRequestWindowWaitMs(requests, 41000, 9), 0);
+});

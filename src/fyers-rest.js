@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -116,7 +116,19 @@ async function drainRestQueue() {
         break;
       }
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
-      const job = restQueue.shift();
+      // A Cloudflare 1015 was observed after 11 /data/history calls in one
+      // minute. Cap this endpoint at 8 per rolling minute, while allowing
+      // higher/lower-priority non-history REST work to proceed independently.
+      const eligibleIndex = restQueue.findIndex(job =>
+        job.url.pathname !== '/history' ||
+        getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now()) === 0
+      );
+      if (eligibleIndex < 0) {
+        const windowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now());
+        await wait(Math.max(1, windowWait));
+        continue;
+      }
+      const [job] = restQueue.splice(eligibleIndex, 1);
       if (!job) continue;
       lastRequestPath = job.url.pathname;
       lastRequestPriority = job.priority;
@@ -174,6 +186,11 @@ async function drainRestQueue() {
           lastRestError = 'Upstream HTTP 429 (' + lastRateLimitKind + '); ' + cooldownLabel +
             ' active until ' + new Date(cooldownUntil).toISOString() +
             ' (process-local cooldown; no durable store configured)' + (markers ? ' · ' + markers : '');
+          const requestContext = buildRestRateLimitContext({
+            requestRecord,
+            requestSources: [...requestSourceStats.values()],
+            recentRequests: recentUpstreamRequests
+          });
           console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
             path: lastRequestPath, status: response.status, at: lastRateLimitAt,
             rateLimitKind: lastRateLimitKind, retryAfter: lastRestMeta.retryAfter,
@@ -181,6 +198,7 @@ async function drainRestQueue() {
             cfRay: lastRestMeta.cfRay, server: lastRestMeta.server,
             requestsThisMinute, requestsToday, rateLimitCountToday,
             cloudflareRateLimitCountToday, unknownRateLimitCountToday,
+            ...requestContext,
             cooldownUntil: new Date(cooldownUntil).toISOString()
           }));
           job.reject(new Error(lastRestError));

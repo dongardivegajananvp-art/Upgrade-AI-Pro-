@@ -104,3 +104,40 @@ export function admitRestJob(jobs = [], job, maxSize = 100) {
   queue.push(job);
   return { accepted: true, queue, dropped };
 }
+
+// Keep the exact caller identity with a 429 so shared /data/history traffic can
+// be traced to chart, scanner, warmup, or manual research without guessing.
+export function buildRestRateLimitContext({ requestRecord, requestSources = [], recentRequests = [] } = {}) {
+  return {
+    requestSource: String(requestRecord?.source || 'UNCLASSIFIED'),
+    requestPath: String(requestRecord?.path || 'unknown'),
+    requestPriority: Number(requestRecord?.priority) || 0,
+    sourceCounts: requestSources.map(item => ({
+      source: String(item?.source || 'UNCLASSIFIED'),
+      requestsThisMinute: Number(item?.requestsThisMinute) || 0,
+      requestsToday: Number(item?.requestsToday) || 0
+    })).sort((a, b) => b.requestsThisMinute - a.requestsThisMinute || b.requestsToday - a.requestsToday),
+    recentRequests: recentRequests.slice(-12).map(item => ({
+      at: item?.at || null, path: item?.path || 'unknown',
+      source: item?.source || 'UNCLASSIFIED', priority: Number(item?.priority) || 0,
+      status: item?.status || 'UNKNOWN'
+    }))
+  };
+}
+
+
+// Cloudflare 1015 was observed on /data/history at 11 requests in one minute.
+// Keep this endpoint below that observed edge threshold with a conservative
+// rolling-window ceiling; this is an application guard, not FYERS' published plan limit.
+export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 8, windowMs = 60_000) {
+  const current = Number(now);
+  const limit = Math.max(1, Math.floor(Number(maxRequests) || 8));
+  const window = Math.max(1, Number(windowMs) || 60_000);
+  const recent = requests
+    .filter(item => item?.path === '/history')
+    .map(item => Date.parse(item?.at))
+    .filter(at => Number.isFinite(at) && at <= current && current - at < window)
+    .sort((a, b) => a - b);
+  if (recent.length < limit) return 0;
+  return Math.max(0, recent[0] + window - current);
+}

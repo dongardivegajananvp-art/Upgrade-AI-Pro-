@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from '../src/option-selection.js';
+import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from '../src/option-selection.js';
 import { compactOptionMasterRows, verifyOptionContractRow } from '../src/fyers-symbol-master.js';
 
 const now = Date.parse('2026-11-19T06:00:00Z');
@@ -61,4 +61,11 @@ test('cached official option master rows retain contract identity while dropping
     'expiryDate','fyToken','minLotSize','optType','strikePrice','symTicker','tickSize','tradeStatus','underSym'
   ].sort());
   assert.deepEqual(verifyOptionContractRow(compact[0],base.symTicker,now),verifyOptionContractRow(base,base.symTicker,now));
+});
+
+test('official contract identity is verified independently of live-tick freshness', () => {
+  const selected = verifyOptionContractUnderlying({ underlying:'ABC' }, 'NSE:ABC-EQ');
+  assert.deepEqual(selected, { status:'CONTRACT_IDENTITY_VERIFIED', underlying:'ABC' });
+  assert.equal(verifyOptionContractUnderlying({ underlying:'XYZ' }, 'NSE:ABC-EQ').status, 'UNDERLYING_MISMATCH');
+  assert.equal(verifyOptionContractUnderlying({ underlying:'ABC' }, null).status, 'UNDERLYING_NOT_SELECTED');
 });

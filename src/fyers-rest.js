@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, sortRestQueue, admitRestJob } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -174,6 +174,11 @@ async function drainRestQueue() {
           lastRestError = 'Upstream HTTP 429 (' + lastRateLimitKind + '); ' + cooldownLabel +
             ' active until ' + new Date(cooldownUntil).toISOString() +
             ' (process-local cooldown; no durable store configured)' + (markers ? ' · ' + markers : '');
+          const requestContext = buildRestRateLimitContext({
+            requestRecord,
+            requestSources: [...requestSourceStats.values()],
+            recentRequests: recentUpstreamRequests
+          });
           console.warn('[FYERS_REST] upstream rate limit:', JSON.stringify({
             path: lastRequestPath, status: response.status, at: lastRateLimitAt,
             rateLimitKind: lastRateLimitKind, retryAfter: lastRestMeta.retryAfter,
@@ -181,6 +186,7 @@ async function drainRestQueue() {
             cfRay: lastRestMeta.cfRay, server: lastRestMeta.server,
             requestsThisMinute, requestsToday, rateLimitCountToday,
             cloudflareRateLimitCountToday, unknownRateLimitCountToday,
+            ...requestContext,
             cooldownUntil: new Date(cooldownUntil).toISOString()
           }));
           job.reject(new Error(lastRestError));

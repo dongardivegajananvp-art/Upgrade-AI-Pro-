@@ -17,6 +17,9 @@ let lastRestMeta = { retryAfter: null, cfRay: null, server: null, contentType: n
 let lastRequestPath = null;
 let lastRateLimitAt = null;
 let lastRequestPriority = null;
+let lastRequestSource = null;
+const requestSourceStats = new Map();
+const recentUpstreamRequests = [];
 let rateLimitDayKey = null;
 let rateLimitCountToday = 0;
 let cloudflareRateLimitCountToday = 0;
@@ -48,10 +51,24 @@ function refreshRequestCounters(now = Date.now()) {
     unknownRateLimitCountToday = 0;
   }
 }
-function recordUpstreamRequest(now = Date.now()) {
+function recordUpstreamRequest(now = Date.now(), source = 'UNCLASSIFIED', path = 'unknown', priority = 0) {
   refreshRequestCounters(now);
   requestsThisMinute++;
   requestsToday++;
+  const minuteKey = Math.floor(Number(now) / 60_000);
+  const dayKey = istDayKey(now);
+  const key = String(source || 'UNCLASSIFIED');
+  const stats = requestSourceStats.get(key) || { source:key, minuteKey, dayKey, requestsThisMinute:0, requestsToday:0 };
+  if (stats.minuteKey !== minuteKey) { stats.minuteKey = minuteKey; stats.requestsThisMinute = 0; }
+  if (stats.dayKey !== dayKey) { stats.dayKey = dayKey; stats.requestsToday = 0; }
+  stats.requestsThisMinute++;
+  stats.requestsToday++;
+  requestSourceStats.set(key, stats);
+  lastRequestSource = key;
+  const record = { at:new Date(now).toISOString(), path, source:key, priority:Number(priority)||0, status:'IN_FLIGHT' };
+  recentUpstreamRequests.push(record);
+  if (recentUpstreamRequests.length > 30) recentUpstreamRequests.shift();
+  return record;
 }
 
 export function validateNseSymbol(symbol) {
@@ -103,9 +120,12 @@ async function drainRestQueue() {
       if (!job) continue;
       lastRequestPath = job.url.pathname;
       lastRequestPriority = job.priority;
-      recordUpstreamRequest(Date.now());
+      const requestStartedAt = Date.now();
+      const requestRecord = recordUpstreamRequest(requestStartedAt, job.source, job.url.pathname, job.priority);
       try {
         const response = await fetch(job.url, { ...job.options, signal: AbortSignal.timeout(12000) });
+        requestRecord.status = response.status;
+        requestRecord.durationMs = Date.now() - requestStartedAt;
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
         lastRestMeta = {
           retryAfter: response.headers.get('retry-after'),
@@ -178,6 +198,9 @@ async function drainRestQueue() {
         lastRestError = null;
         job.resolve(body);
       } catch (error) {
+        requestRecord.status = 'NETWORK_ERROR';
+        requestRecord.durationMs = Date.now() - requestStartedAt;
+        requestRecord.error = String(error?.message || 'FYERS REST request failed').slice(0,100);
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
         lastRestStatus = 'ERROR';
         lastRestError = String(error?.message || 'FYERS REST request failed').slice(0,180);
@@ -189,9 +212,9 @@ async function drainRestQueue() {
     if (restQueue.length && !isRestCooldownActive(Date.now(), cooldownUntil)) void drainRestQueue();
   }
 }
-function scheduledFetch(url, options, priority = 0) {
+function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
   return new Promise((resolve, reject) => {
-    const job = { url, options, priority: Number(priority) || 0, sequence: ++restQueueSequence, resolve, reject };
+    const job = { url, options, priority: Number(priority) || 0, source:String(source || 'UNCLASSIFIED'), sequence: ++restQueueSequence, resolve, reject };
     const admission = admitRestJob(restQueue, job, MAX_REST_QUEUE_SIZE);
     if (!admission.accepted) {
       reject(new Error('FYERS REST queue is full; request was rejected before upstream submission'));
@@ -204,13 +227,13 @@ function scheduledFetch(url, options, priority = 0) {
     void drainRestQueue();
   });
 }
-async function fyersGet(base, path, params = {}, priority = 0) {
+async function fyersGet(base, path, params = {}, priority = 0, source = 'UNCLASSIFIED') {
   const token = getAccessTokenForServer();
   const appId = process.env.FYERS_APP_ID?.trim();
   if (!token || !appId) throw new Error('FYERS authentication is not active in this server process');
   if (Date.now() < cooldownUntil) throw new Error('FYERS REST cooldown active; no upstream request was sent');
   const url = buildFyersUrl(base, path, params);
-  return scheduledFetch(url, { method: 'GET', headers: { Authorization: `${appId}:${token}`, Accept: 'application/json' } }, priority);
+  return scheduledFetch(url, { method: 'GET', headers: { Authorization: `${appId}:${token}`, Accept: 'application/json' } }, priority, source);
 }
 export function buildFyersUrl(base, path, params = {}) {
   const url = new URL(path.replace(/^\/+/, ''), base.endsWith('/') ? base : base + '/');
@@ -224,6 +247,12 @@ function istDate(now = Date.now()) { return new Date(now + 19800000).toISOString
 // A 10-calendar-day verified FYERS window supplies enough contiguous completed
 // 5-minute candles for EMA50/pattern research from the opening part of the session.
 // Session gaps are validated by the strategy engine; no synthetic candles are added.
+export function getFiveMinuteCacheValidUntil(now = Date.now(), settleMs = 2000) {
+  const current = Number(now);
+  const nextCompletedBucket = (Math.floor(current / 300_000) + 1) * 300_000;
+  return nextCompletedBucket + Math.max(0, Number(settleMs) || 0);
+}
+
 export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
   const days = Math.max(2, Math.floor(Number(lookbackDays) || 10));
   return {
@@ -237,9 +266,9 @@ const fiveMinuteCache = new Map();
 // Scanner and chart share one verified 5-minute cache and one FYERS history read.
 // The shared payload retains the chart's last-ten-NSE-session candle set, which
 // gives scanner research more complete real sessions without synthetic candles.
-export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = 50) {
+export async function getFiveMinuteHistory(symbol, now = Date.now(), priority = 50, source = 'chart-history') {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
-  return getFiveMinuteSessionHistory(symbol, now, priority);
+  return getFiveMinuteSessionHistory(symbol, now, priority, source);
 }
 // Chart history is the latest ten verified NSE trading sessions. Request a
 // 20-calendar-day window so weekends and exchange holidays do not reduce the
@@ -260,22 +289,22 @@ export function filterFiveMinuteCandlesToNseSession(candles, now = Date.now()) {
   const sessionStart = Math.floor((now / 1000 + 19800) / 86400) * 86400 - 19800;
   return (Array.isArray(candles) ? candles : []).filter(candle => Number(candle?.time) >= sessionStart);
 }
-export async function getFiveMinuteSessionHistory(symbol, now = Date.now(), priority = 50) {
+export async function getFiveMinuteSessionHistory(symbol, now = Date.now(), priority = 50, source = 'chart-history') {
   if (!validateHistorySymbol(symbol)) throw new Error('A supported NSE/BSE index or NSE symbol is required');
   return runHistoryRequestOnce('5m:' + symbol, async () => {
     const date = istDate(now);
     const cached = fiveMinuteCache.get(symbol);
-    if (cached && cached.sessionDate === date && now - cached.savedAt < 20_000) return cached.value;
+    if (cached && cached.sessionDate === date && now < cached.validUntil) return cached.value;
     const range = getFiveMinuteHistoryRange(now, 20);
     const body = await fyersGet(DATA_BASE, '/history', {
       symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
-    }, priority);
+    }, priority, source);
     if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified ten-session 5-minute history');
     const candles = filterLastNseTradingSessions(normalizeFiveMinuteCandles(body.candles, now), 10);
     if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the last ten NSE sessions');
     const sessions = [...new Set(candles.map(candle => new Date((candle.time + 19800) * 1000).toISOString().slice(0, 10)))];
     const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, sessions, sessionCount: sessions.length, source: 'FYERS_VERIFIED_5M_HISTORY', range: 'LAST_10_NSE_TRADING_SESSIONS', actionable: true };
-    fiveMinuteCache.set(symbol, { savedAt: now, sessionDate: date, value });
+    fiveMinuteCache.set(symbol, { savedAt: now, validUntil:getFiveMinuteCacheValidUntil(now), sessionDate: date, value });
     return value;
   });
 }
@@ -297,14 +326,14 @@ export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const fifteenMinuteCache = new Map();
-export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = -10) {
+export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = -10, source = 'fifteen-minute-research') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
   return runHistoryRequestOnce('15m:' + symbol, async () => {
     const cached=fifteenMinuteCache.get(symbol);
     if(cached&&now-cached.savedAt<30*60*1000)return cached.value;
     const to=istDate(now);
     const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
-    const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority);
+    const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority,source);
     if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute research candles');
     const candles=normalizeFifteenMinuteCandles(body.candles,now);
     if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles for research');
@@ -337,14 +366,14 @@ export function normalizeDailyCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const dailyCache = new Map();
-export async function getDailyHistory(symbol, now = Date.now(), priority = -10) {
+export async function getDailyHistory(symbol, now = Date.now(), priority = -10, source = 'daily-research') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
   return runHistoryRequestOnce('1d:' + symbol, async () => {
     const cached = dailyCache.get(symbol);
     if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
     const to = istDate(now);
     const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
-    const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority);
+    const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority, source);
     if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
     const candles = normalizeDailyCandles(body.candles, now);
     if (candles.length < 50) throw new Error('Insufficient completed FYERS daily candles for research');
@@ -353,14 +382,14 @@ export async function getDailyHistory(symbol, now = Date.now(), priority = -10) 
     return value;
   });
 }
-export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = '') {
+export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = '', source = 'option-chain') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');
   const count = Number(strikecount);
   if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error('Option-chain strike count must be from 1 to 50');
-  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' }, 100);
+  return fyersGet(DATA_BASE, '/options-chain-v3', { symbol, strikecount: count, timestamp, greeks: '0' }, 100, source);
 }
-export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, 50); }
-export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, 50); }
+export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, 50, 'account-positions'); }
+export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, 50, 'account-orderbook'); }
 export function getRestDiagnostics(now = Date.now()) {
   refreshRequestCounters(now);
   return {
@@ -368,6 +397,9 @@ export function getRestDiagnostics(now = Date.now()) {
     lastError: lastRestError,
     upstream: { ...lastRestMeta },
     lastRequestPath,
+    lastRequestSource,
+    requestSources:[...requestSourceStats.values()].map(item=>({...item})).sort((a,b)=>b.requestsToday-a.requestsToday),
+    recentRequests:recentUpstreamRequests.slice(-20).map(item=>({...item})),
     lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
     queueDepth: restQueue.length,

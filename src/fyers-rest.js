@@ -15,6 +15,7 @@ let recoveryProbeRequired = REST_RECOVERY_REQUIRED_ON_START;
 // probe stays closed; no queued interactive request may turn into a retry storm.
 let recoveryProbeAttempted = false;
 const restQueue = [];
+const inFlightRestJobs = new Map();
 let restQueueSequence = 0;
 let drainingRestQueue = false;
 let lastRestStatus = 'IDLE';
@@ -102,6 +103,7 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
 }
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function settleRestJob(job, succeeded, value) {
+  if (job?.coalesceKey && inFlightRestJobs.get(job.coalesceKey) === job) inFlightRestJobs.delete(job.coalesceKey);
   const waiters = Array.isArray(job?.waiters) ? job.waiters.splice(0) : [];
   const settle = succeeded ? 'resolve' : 'reject';
   job?.[settle]?.(value);
@@ -204,6 +206,7 @@ async function drainRestQueue() {
       lastRequestPath = job.url.pathname;
       lastRequestPriority = job.priority;
       const requestStartedAt = Date.now();
+      if (job.coalesceKey) inFlightRestJobs.set(job.coalesceKey, job);
       if (recoveryProbeRequired) recoveryProbeAttempted = true;
       const requestRecord = recordUpstreamRequest(requestStartedAt, job.source, job.url.pathname, job.priority);
       try {
@@ -322,7 +325,18 @@ function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
     const coalesceKey = String(options?.method || 'GET').toUpperCase() + ':' + url.href;
     const duplicateIndex = findRestQueueDuplicate(restQueue, coalesceKey);
     if (duplicateIndex >= 0) {
-      restQueue[duplicateIndex].waiters.push({ resolve, reject });
+      const existing = restQueue[duplicateIndex];
+      existing.waiters.push({ resolve, reject });
+      if (normalizedPriority > existing.priority) {
+        existing.priority = normalizedPriority;
+        existing.source = String(source || existing.source);
+        existing.maxQueueAgeMs = Math.min(existing.maxQueueAgeMs, getRestQueueMaxAgeMs(normalizedPriority));
+      }
+      return;
+    }
+    const inFlight = inFlightRestJobs.get(coalesceKey);
+    if (inFlight) {
+      inFlight.waiters.push({ resolve, reject });
       return;
     }
     const job = { url, options, priority: normalizedPriority, source:String(source || 'UNCLASSIFIED'), sequence: ++restQueueSequence, enqueuedAt:Date.now(), maxQueueAgeMs:getRestQueueMaxAgeMs(normalizedPriority), coalesceKey, waiters:[], resolve, reject };

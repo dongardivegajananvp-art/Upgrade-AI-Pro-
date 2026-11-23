@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -8,7 +8,9 @@ const MIN_REST_GAP_MS = 4000;
 const MAX_REST_QUEUE_SIZE = 100;
 let nextRequestAt = 0;
 let cooldownUntil = 0;
-let recoveryProbeRequired = false;
+// Process-local cooldown timestamps disappear on restart. Start in a conservative
+// recovery state so background scanner traffic cannot immediately hit the edge.
+let recoveryProbeRequired = REST_RECOVERY_REQUIRED_ON_START;
 const restQueue = [];
 let restQueueSequence = 0;
 let drainingRestQueue = false;

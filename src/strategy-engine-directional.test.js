@@ -60,6 +60,14 @@ test('daily-trend 5m bearish pullback requires fresh completed daily context and
     const close = 200 - i * 0.2;
     return {time:start+i*300,open:close+0.05,high:close+0.1,low:close-0.1,close,volume:100};
   });
+  rows[58] = {
+    time:start+58*300,
+    open:190.0,
+    high:190.2,
+    low:189.9,
+    close:190.05,
+    volume:120
+  };
   const previous = rows[58];
   rows[59] = {
     time:start+59*300,

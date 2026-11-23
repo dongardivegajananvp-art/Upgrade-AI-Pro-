@@ -464,3 +464,23 @@ test('double-top and double-bottom detectors require a neckline break followed b
   assert.equal(doubleBottom?.side,'LONG');
   assert.equal(doubleBottom?.pattern,'DOUBLE_BOTTOM');
 });
+
+
+test('daily-trend 5m pullback detector confirms bullish EMA alignment and resume after a pullback touch',()=>{
+  const now=Date.parse('2026-11-23T12:00:00Z');
+  const start=Math.floor(now/1000)-60*300;
+  const rows=Array.from({length:60},(_,i)=>{
+    const close=100+i*.2;
+    return{time:start+i*300,open:close-.05,high:close+.1,low:close-.1,close,volume:100};
+  });
+  rows[58]={time:start+58*300,open:109.05,high:109.15,low:108.7,close:108.9,volume:120};
+  rows[59]={time:start+59*300,open:109.1,high:109.7,low:109,close:109.6,volume:150};
+  const dailyStart=Math.floor(now/1000)-60*86400;
+  const daily=Array.from({length:60},(_,i)=>{
+    const close=100+i;
+    return{time:dailyStart+i*86400,open:close-.2,high:close+.5,low:close-.5,close,volume:1000};
+  });
+  const result=detectDailyTrendPullback(rows,daily,now);
+  assert.equal(result?.side,'LONG');
+  assert.equal(result?.strategy,'DAILY_TREND_5M_PULLBACK');
+});

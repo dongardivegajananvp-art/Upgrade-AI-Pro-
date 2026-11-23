@@ -29,7 +29,7 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
     universeCount: symbols.length,
     coverageComplete: symbols.length > 0 && observed.length === symbols.length,
     maxObservationAgeSeconds,
-    topGainers: freshObserved.slice(0, Math.max(1, limit))
+    topGainers: observed.slice(0, Math.max(1, limit))
   };
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -166,4 +166,44 @@ test('global FYERS REST budget counts every endpoint and preserves interactive h
   assert.equal(getRestRequestWindowWaitMs(requests, now, 3, 60_000, REST_PRIORITY.CHART, Number.POSITIVE_INFINITY), 0);
   assert.ok(getRestRequestWindowWaitMs(requests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART-1) > 0);
   assert.equal(getRestRequestWindowWaitMs(requests.slice(0,5), now, 6), 0);
+});
+
+
+test('background REST scheduling rotates fairly across Account, scanner and research classes', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const jobs = [
+    {id:'research',priority:REST_PRIORITY.RESEARCH,sequence:1},
+    {id:'scanner',priority:REST_PRIORITY.SCANNER,sequence:2},
+    {id:'account',priority:REST_PRIORITY.ACCOUNT,sequence:3}
+  ];
+  const eligible = () => true;
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, eligible)].id, 'research');
+  const recent = [
+    {at:new Date(now-30_000).toISOString(),priority:REST_PRIORITY.RESEARCH},
+    {at:new Date(now-20_000).toISOString(),priority:REST_PRIORITY.ACCOUNT}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, recent, now, eligible)].id, 'scanner');
+  const withScanner = [...recent,{at:new Date(now-10_000).toISOString(),priority:REST_PRIORITY.SCANNER}];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, withScanner, now, eligible)].id, 'research');
+});
+
+test('interactive REST jobs keep priority over fair background classes', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const jobs = [
+    {id:'scanner',priority:REST_PRIORITY.SCANNER,sequence:1},
+    {id:'chart',priority:REST_PRIORITY.CHART,sequence:2},
+    {id:'entry',priority:REST_PRIORITY.ENTRY,sequence:3}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, () => true)].id, 'entry');
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, job => job.id !== 'entry')].id, 'chart');
+});
+
+test('fair REST selector never chooses a request rejected by the budget gate', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const jobs = [
+    {id:'scanner',priority:REST_PRIORITY.SCANNER,sequence:1},
+    {id:'account',priority:REST_PRIORITY.ACCOUNT,sequence:2}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, job => job.id === 'account')].id, 'account');
+  assert.equal(findFairRestQueueIndex(jobs, [], now, () => false), -1);
 });

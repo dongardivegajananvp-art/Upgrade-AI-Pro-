@@ -86,7 +86,8 @@ export function buildHealthStatus({
       cooldownUntil: rest.cooldownUntil || null,
       recoveryProbeRequired: Boolean(rest.recoveryProbeRequired),
       recoveryProbeAttempted: Boolean(rest.recoveryProbeAttempted),
-      cooldownPersistence: rest.cooldownPersistence || 'UNKNOWN'
+      cooldownPersistence: rest.cooldownPersistence || 'UNKNOWN',
+      endpointHealth
     },
     runtimeMemory: memory,
     orders: ordersEnabled ? 'ENABLED' : 'DISABLED'

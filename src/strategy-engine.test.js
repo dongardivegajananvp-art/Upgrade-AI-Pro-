@@ -746,7 +746,7 @@ test('end-to-end daily-trend pullback requires fresh daily context and completes
 test('end-to-end double-top neckline breakdown/retest validates SHORT→PE with original cross-candle volume',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000;
   const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:101,low:99,close:100,volume:100}));
-  rows[5]={...rows[5],open:95,high:101,low:90,close:95};
+  rows[5]={...rows[5],open:100,high:101,low:90,close:100};
   for(const i of [10,20])rows[i]={...rows[i],open:109,high:110,low:108,close:109};
   rows[22]={...rows[22],open:100,high:100.5,low:96.5,close:97,volume:200};
   for(let i=23;i<49;i++)rows[i]={...rows[i],open:98.2,high:98.5,low:97.5,close:98};

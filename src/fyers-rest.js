@@ -134,14 +134,26 @@ async function drainRestQueue() {
       // A Cloudflare 1015 was observed after 11 /data/history calls in one
       // minute. Cap this endpoint at 8 per rolling minute, while allowing
       // higher/lower-priority non-history REST work to proceed independently.
-      const eligibleIndex = restQueue.findIndex(job =>
-        (!recoveryProbeRequired || canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) &&
-        (job.url.pathname !== '/history' ||
-          getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now()) === 0)
-      );
+      const eligibleIndex = restQueue.findIndex(job => {
+        if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
+        if (job.url.pathname !== '/history') return true;
+        const totalWindowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
+        // Keep two of the eight observed-safe history slots available for selected
+        // chart/option/Entry work. Scanner, warmup and research cannot consume them.
+        const backgroundWindowWait = job.priority < REST_PRIORITY.CHART
+          ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          : 0;
+        return totalWindowWait === 0 && backgroundWindowWait === 0;
+      });
       if (eligibleIndex < 0) {
-        const windowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now());
-        await wait(Math.max(1, windowWait));
+        const waits = restQueue.filter(job => job.url.pathname === '/history').flatMap(job => {
+          const totalWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
+          const backgroundWait = job.priority < REST_PRIORITY.CHART
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+            : 0;
+          return [totalWait, backgroundWait].filter(value => value > 0);
+        });
+        await wait(Math.max(1, waits.length ? Math.min(...waits) : 1));
         continue;
       }
       const [job] = restQueue.splice(eligibleIndex, 1);
@@ -226,7 +238,7 @@ async function drainRestQueue() {
           for (const pending of restQueue.splice(0)) pending.reject(queuedError);
           break;
         }
-        if (!response.ok || body.s === 'error' || Number(body.code) < 0) {
+        if (!response.ok || body.s === 'error' || Number(body.code) < 0 || (recoveryProbeRequired && body.s !== 'ok')) {
           lastRestStatus = 'ERROR';
           lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
           job.reject(new Error(lastRestError));

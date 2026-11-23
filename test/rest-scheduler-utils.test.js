@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate
+  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -240,4 +240,20 @@ test('identical pending FYERS REST requests are discoverable for coalescing', ()
   assert.equal(findRestQueueDuplicate(jobs,jobs[0].coalesceKey),0);
   assert.equal(findRestQueueDuplicate(jobs,'GET:https://api-t1.fyers.in/data/history'),-1);
   assert.equal(findRestQueueDuplicate(jobs,''),-1);
+});
+
+test('scanner dispatch gate holds work when queue, cooldown, pacing or budgets are not ready', () => {
+  const ready=buildRestDispatchGate({});
+  assert.equal(ready.ready,true);
+  assert.deepEqual(ready.blockers,[]);
+  const held=buildRestDispatchGate({
+    cooldownActive:true,queueDepth:2,minGapWaitMs:4000,
+    totalWindowWaitMs:12000,backgroundWindowWaitMs:30000,historyWindowWaitMs:15000
+  });
+  assert.equal(held.ready,false);
+  assert.ok(held.blockers.includes('COOLDOWN_ACTIVE'));
+  assert.ok(held.blockers.includes('QUEUE_NOT_EMPTY'));
+  assert.equal(held.waitMs,30000);
+  const recovery=buildRestDispatchGate({recoveryProbeRequired:true,recoveryProbeAllowed:false});
+  assert.ok(recovery.blockers.includes('RECOVERY_PROBE_REQUIRED'));
 });

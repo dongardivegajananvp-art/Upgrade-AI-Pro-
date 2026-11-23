@@ -6,10 +6,6 @@ export function getRestWaitMs(now, nextRequestAt) {
   return Math.max(0, Number(nextRequestAt) - Number(now));
 }
 
-// FYERS may provide Retry-After as seconds or an HTTP date. Never retry before it.
-// When it is absent/zero, use bounded exponential backoff. FYERS documents a
-// rest-of-day block after more than three per-minute limit violations in a day;
-// the fourth 429 therefore blocks this process until the next IST calendar day.
 export function parseRetryAfterMs(value, now = Date.now()) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const raw = String(value).trim();
@@ -21,6 +17,31 @@ export function parseRetryAfterMs(value, now = Date.now()) {
   return Number.isFinite(at) ? Math.max(0, at - Number(now)) : null;
 }
 
+// Distinguish Cloudflare edge throttling from FYERS plan/API quota responses.
+// Cloudflare 1015 is not the FYERS documented -360/-429 quota error.
+export function classifyRestRateLimit({ status, code, server, cfRay } = {}) {
+  if (Number(status) !== 429) return 'NOT_RATE_LIMITED';
+  const normalizedCode = String(code ?? '').trim();
+  const normalizedServer = String(server ?? '').toLowerCase();
+  if (normalizedCode === '1015' || (normalizedServer.includes('cloudflare') && Boolean(cfRay))) {
+    return 'CLOUDFLARE_1015';
+  }
+  if (normalizedCode === '-360' || normalizedCode === '-429') return 'FYERS_PLAN_LIMIT';
+  return 'UNKNOWN_429';
+}
+
+function boundedBackoffUntil(now, retryAfter, attempt, baseMs, maxMs) {
+  const current = Number(now);
+  const n = Math.max(1, Math.floor(Number(attempt) || 1));
+  const providerWait = parseRetryAfterMs(retryAfter, current) || 0;
+  const base = Math.max(1, Number(baseMs) || 60_000);
+  const cap = Math.max(base, Number(maxMs) || 15 * 60_000);
+  const backoff = Math.min(cap, base * (2 ** Math.min(n - 1, 20)));
+  return current + Math.max(backoff, providerWait);
+}
+
+// FYERS documents a rest-of-day block after more than three per-minute
+// quota violations in a day. Call this only for identified FYERS -360/-429 errors.
 export function getRateLimitCooldownUntil(now, retryAfter, attempt = 1, baseMs = 60_000, maxMs = 15 * 60_000) {
   const current = Number(now);
   const n = Math.max(1, Math.floor(Number(attempt) || 1));
@@ -30,14 +51,21 @@ export function getRateLimitCooldownUntil(now, retryAfter, attempt = 1, baseMs =
     const nextIstMidnight = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + 1) - 19_800_000;
     return Math.max(nextIstMidnight, current + providerWait);
   }
-  const base = Math.max(1, Number(baseMs) || 60_000);
-  const cap = Math.max(base, Number(maxMs) || 15 * 60_000);
-  const backoff = Math.min(cap, base * (2 ** Math.min(n - 1, 20)));
-  return current + Math.max(backoff, providerWait);
+  return boundedBackoffUntil(current, retryAfter, n, baseMs, maxMs);
+}
+
+// Cloudflare documents a 30-second default Retry-After for 1015.
+// Repeated 1015 responses back off further, but never trigger FYERS' daily quota lock.
+export function getCloudflareRateLimitCooldownUntil(now, retryAfter, attempt = 1, baseMs = 30_000, maxMs = 15 * 60_000) {
+  return boundedBackoffUntil(now, retryAfter, attempt, baseMs, maxMs);
+}
+
+// Unclassified 429s fail closed with bounded backoff, not a guessed provider day lock.
+export function getUnknownRateLimitCooldownUntil(now, retryAfter, attempt = 1, baseMs = 60_000, maxMs = 15 * 60_000) {
+  return boundedBackoffUntil(now, retryAfter, attempt, baseMs, maxMs);
 }
 
 // Bounded exponential backoff for WebSocket 1015/rate-limit recovery.
-// attempt is one-based; the cap prevents an unbounded reconnect delay.
 export function getSocketRateLimitBackoffMs(attempt, baseMs = 60_000, maxMs = 15 * 60_000) {
   const n = Math.max(1, Math.floor(Number(attempt) || 1));
   const base = Math.max(1, Number(baseMs) || 60_000);
@@ -57,8 +85,6 @@ export function sortRestQueue(jobs = []) {
 }
 
 // Bound pending work so slow upstream responses cannot grow memory indefinitely.
-// Higher-priority requests may displace the newest job at the lowest priority;
-// equal-priority arrivals preserve FIFO and are rejected when the queue is full.
 export function admitRestJob(jobs = [], job, maxSize = 100) {
   const queue = [...jobs];
   const limit = Math.max(1, Math.floor(Number(maxSize) || 100));

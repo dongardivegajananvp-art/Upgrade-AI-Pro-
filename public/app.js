@@ -5,6 +5,7 @@ const labels = [
   ['BSE:SENSEX-INDEX','sensex','sensex-change']
 ];
 let selectedSymbol = null;
+let refreshRunning = false;
 let chartRestoredFromCache = false;
 const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
 const CHART_SNAPSHOT_KEY = 'upgrade-ai-pro:last-verified-chart:v1';
@@ -178,6 +179,8 @@ async function refreshUniverseScan() {
   } finally {universeScanRunning=false;}
 }
 async function refresh() {
+  if (refreshRunning || document.hidden) return;
+  refreshRunning = true;
   try {
     const r = await fetch('/api/status',{cache:'no-store'});
     if (!r.ok) throw new Error('status unavailable');
@@ -302,11 +305,27 @@ async function refresh() {
   } catch {
     document.querySelector('#feed').textContent = 'BACKEND DISCONNECTED';
     document.querySelector('#feed').dataset.state = 'disconnected';
+  } finally {
+    refreshRunning = false;
   }
 }
 restorePersistedChart();
-refresh();
-setInterval(refresh,2000);
+let refreshTimer = null;
+function startStatusPolling() {
+  if (refreshTimer || document.hidden) return;
+  void refresh();
+  refreshTimer = setInterval(refresh, 2000);
+}
+function stopStatusPolling() {
+  if (!refreshTimer) return;
+  clearInterval(refreshTimer);
+  refreshTimer = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopStatusPolling();
+  else startStatusPolling();
+});
+startStatusPolling();
 if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 
 function appendLine(container, text) {

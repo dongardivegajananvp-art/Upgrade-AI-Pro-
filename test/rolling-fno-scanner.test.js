@@ -35,7 +35,7 @@ test('reports complete coverage only after every current-session symbol was obse
 });
 
 
-test('live Top Gainers never retains a stale rolling observation', () => {
+test('Top Gainers includes rolling observations but preserves each tick freshness flag', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];
   const ticks=new Map([
     ['NSE:A-EQ',{symbol:'NSE:A-EQ',price:10,changePercent:9,exchangeTime:sec,receivedAt:now-5000}],
@@ -43,8 +43,11 @@ test('live Top Gainers never retains a stale rolling observation', () => {
   ]);
   const result=buildRollingFnoLeaderboard({universe,ticks,now,slotCount:20,rotationIntervalMs:60000});
   assert.equal(result.freshCount,1);
-  assert.equal(result.topGainers.length,1);
+  assert.equal(result.topGainers.length,2);
   assert.equal(result.topGainers[0].symbol,'NSE:A-EQ');
+  assert.equal(result.topGainers[0].fresh,true);
+  assert.equal(result.topGainers[1].symbol,'NSE:B-EQ');
+  assert.equal(result.topGainers[1].fresh,false);
 });
 
 

@@ -224,3 +224,10 @@ export function getRestQueueMaxAgeMs(priority = 0) {
   if (value >= REST_PRIORITY.SCANNER) return 10_000;
   return 120_000;
 }
+
+export function isRestQueueExpired(enqueuedAt, now = Date.now(), maxAgeMs = 0) {
+  const queuedAt = Number(enqueuedAt);
+  const current = Number(now);
+  const maxAge = Math.max(0, Number(maxAgeMs) || 0);
+  return !Number.isFinite(queuedAt) || !Number.isFinite(current) || current - queuedAt >= maxAge;
+}

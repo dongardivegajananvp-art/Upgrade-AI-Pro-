@@ -215,3 +215,25 @@ test('ten-session chart cache preserves up to 800 verified five-minute candles',
   assert.ok(snapshotSource);
   assert.match(serviceWorker, /upgrade-ai-pro-shell-v14/);
 });
+
+test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {
+  const start = app.indexOf('async function refresh()');
+  const end = app.indexOf('\nfunction ', start + 1);
+  assert.ok(start >= 0 && end > start, 'refresh implementation is present');
+  const flow = app.slice(start, end);
+  const update = flow.indexOf('chartLiveCandle = underlyingTick.liveCandle || null');
+  const summary = flow.indexOf('renderLiveCandleSummary(underlyingTick)');
+  assert.ok(update >= 0 && summary > update,
+    'summary must render after the live candle from the same status snapshot is assigned');
+  assert.match(flow, /if \(selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\s\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\s\S]*?renderChartViewport\(\);/);
+});
+
+test('option contract identity check is independent of selected underlying tick freshness', () => {
+  const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/select-option')");
+  const end = server.indexOf("if (req.method === 'POST' && url.pathname.startsWith('/api/orders'))", start);
+  assert.ok(start >= 0 && end > start, 'manual option-selection route is present');
+  const route = server.slice(start, end);
+  assert.match(route, /verifyOptionContractUnderlying\(contract, market\.selectedUnderlyingSymbol\)/);
+  assert.doesNotMatch(route, /market\.selectedUnderlying\?\.fresh/);
+  assert.match(route, /liveTickRequired:true/);
+});

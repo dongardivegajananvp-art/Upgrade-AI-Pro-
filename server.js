@@ -6,7 +6,7 @@ import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
-import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry } from './src/option-selection.js';
+import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
@@ -327,7 +327,7 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:candidates.length?'HISTORICAL_CANDIDATES_AVAILABLE':'NO_HISTORICAL_CANDIDATE',mode:'HISTORICAL_ONLY_NOT_LIVE',universeCount:snapshot.universe?.length||0,evaluatedCount:evaluations.filter(row=>row.status!=='BLOCKED').length,blockedCount:evaluations.filter(row=>row.status==='BLOCKED').length,candidateCount:candidates.length,candidates:candidates.slice(0,20),evaluations,note:'Historical FYERS completed candles only. No live tick, option quote, option candle, entry, stop or target is inferred. This list is research-only and cannot authorize a trade.'});
       }
       if (url.pathname === '/api/research/universe') {
-        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:4,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',marketSession:isNseRegularSession(Date.now())?'OPEN':'CLOSED',scannerStatus:'WAITING_FOR_OFFICIAL_MASTER',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:4,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();
@@ -360,7 +360,7 @@ const server = http.createServer(async (req,res) => {
           lastUpdatedAt:new Date(now).toISOString(),
           simultaneous:false
         };
-        return send(res,200,{...result,activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
+        return send(res,200,{...result,marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
           rotationIntervalMs:snapshot.rotationIntervalMs,scanPerSlice:snapshot.scanPerSlice,symbolCap:snapshot.symbolCap,
           scanner:fnoStrategyScanStats,coverageSummary,symbolCoverage,
           note:'Per-symbol scan/tick coverage is observational only. Rotating ticks are not simultaneous. Missing/stale inputs are BLOCKED; this endpoint does not fetch synthetic data or place orders.'});
@@ -609,16 +609,16 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'OPTION_SUBSCRIPTION_CLEARED'});
       }
       const contract = getVerifiedOptionContract(body.symbol);
-      const selectedUnderlying=getMarketData().selectedUnderlying;
-      const expectedUnderlying=String(selectedUnderlying?.symbol||'').replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
-      if(!selectedUnderlying?.fresh||!expectedUnderlying||contract.underlying!==expectedUnderlying) {
-        return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:'Option contract underlying does not match the currently selected FYERS NSE underlying'});
+      const market = getMarketData();
+      const identity = verifyOptionContractUnderlying(contract, market.selectedUnderlyingSymbol);
+      if (identity.status !== 'CONTRACT_IDENTITY_VERIFIED') {
+        return send(res,409,{status:'CONTRACT_NOT_VERIFIED',verification:identity.status,reason:identity.reason});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);
       if (subscription?.status === 'SUBSCRIPTION_FAILED') {
         return send(res,503,{status:'OPTION_SUBSCRIPTION_FAILED',reason:subscription.reason || 'FYERS option subscription failed',subscription});
       }
-      return send(res,200,{status:'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',contract,subscription});
+      return send(res,200,{status:'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED',contract,subscription,tradeEligible:false,liveTickRequired:true,note:'Official contract identity verified independently; fresh underlying and option exchange ticks remain mandatory before setup evaluation.'});
     } catch (error) {
       return send(res,400,{status:'CONTRACT_NOT_VERIFIED',reason:String(error.message || 'Option contract verification failed').slice(0,180)});
     }

@@ -59,13 +59,13 @@ async function refreshUniverseScan() {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
     container.replaceChildren();
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING';
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent='Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
-    warmup.textContent='RESEARCH WARMUP · '+(scanner.warmupStatus||'IDLE')+
+    warmup.textContent='RESEARCH WARMUP · '+(data.marketSession==='CLOSED'?'PAUSED · MARKET CLOSED':(scanner.warmupStatus||'IDLE'))+
       ' · QUEUED '+(scanner.warmupQueueDepth||0)+
       ' · DONE '+(scanner.warmupCompletedCount||0)+
       ' · RETRIES '+(scanner.warmupRetryCount||0)+
@@ -211,17 +211,19 @@ async function refresh() {
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;
-    renderLiveCandleSummary(underlyingTick);
     // Restore the backend's selected chart symbol after a page reload; otherwise
     // the server can build a live candle while the client never renders it.
     if ((!selectedSymbol || (chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol)) &&
         underlyingTick?.symbol && underlyingTick.fresh) {
       selectSymbol(underlyingTick.symbol, underlyingTick.price);
     }
-    if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh && underlyingTick.liveCandle) {
-      chartLiveCandle = underlyingTick.liveCandle;
+    // Update the chart candle from this exact status snapshot before rendering
+    // its summary. This keeps OHLCV and live price aligned to one FYERS tick.
+    if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh) {
+      chartLiveCandle = underlyingTick.liveCandle || null;
       if (!chartGestureActive) renderChartViewport();
     }
+    renderLiveCandleSummary(underlyingTick);
     const optionLtp = document.querySelector('#option-ltp');
     const optionStatus = document.querySelector('#option-status');
     if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) {
@@ -301,6 +303,19 @@ async function refresh() {
       feed.textContent = 'FYERS DISCONNECTED · NO VERIFIED LIVE TICK';
       feed.dataset.state = 'disconnected';
     }
+    const ws = md.socketDiagnostics || {};
+    const tickAge = ws.lastTickAgeSeconds !== null && ws.lastTickAgeSeconds !== undefined && Number.isFinite(Number(ws.lastTickAgeSeconds)) ? ws.lastTickAgeSeconds + 's AGO' : 'NEVER';
+    const exchangeTickAge = ws.lastTickExchangeAgeSeconds !== null && ws.lastTickExchangeAgeSeconds !== undefined && Number.isFinite(Number(ws.lastTickExchangeAgeSeconds)) ? ws.lastTickExchangeAgeSeconds + 's' : 'UNKNOWN';
+    feed.textContent += ' · WS ' + (md.socketStatus || 'UNKNOWN') +
+      ' · RECONNECTS ' + (ws.reconnectCount || 0) +
+      ' · CLOSES ' + (ws.closeCount || 0) +
+      ' · ERRORS ' + (ws.errorCount || 0) +
+      ' · LAST TICK RX ' + tickAge + ' · EXCHANGE AGE ' + exchangeTickAge;
+    feed.title = 'WebSocket last connected: ' + (ws.lastConnectedAt || 'unknown') +
+      ' · last closed: ' + (ws.lastClosedAt || 'unknown') +
+      ' · last message: ' + (ws.lastMessageAt || 'unknown') +
+      ' · last valid tick: ' + (ws.lastTickAt || 'unknown') +
+      ' · last socket error: ' + (ws.lastErrorAt || 'none');
   } catch {
     document.querySelector('#feed').textContent = 'BACKEND DISCONNECTED';
     document.querySelector('#feed').dataset.state = 'disconnected';

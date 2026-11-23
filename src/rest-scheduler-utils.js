@@ -104,3 +104,23 @@ export function admitRestJob(jobs = [], job, maxSize = 100) {
   queue.push(job);
   return { accepted: true, queue, dropped };
 }
+
+// Keep the exact caller identity with a 429 so shared /data/history traffic can
+// be traced to chart, scanner, warmup, or manual research without guessing.
+export function buildRestRateLimitContext({ requestRecord, requestSources = [], recentRequests = [] } = {}) {
+  return {
+    requestSource: String(requestRecord?.source || 'UNCLASSIFIED'),
+    requestPath: String(requestRecord?.path || 'unknown'),
+    requestPriority: Number(requestRecord?.priority) || 0,
+    sourceCounts: requestSources.map(item => ({
+      source: String(item?.source || 'UNCLASSIFIED'),
+      requestsThisMinute: Number(item?.requestsThisMinute) || 0,
+      requestsToday: Number(item?.requestsToday) || 0
+    })).sort((a, b) => b.requestsThisMinute - a.requestsThisMinute || b.requestsToday - a.requestsToday),
+    recentRequests: recentRequests.slice(-12).map(item => ({
+      at: item?.at || null, path: item?.path || 'unknown',
+      source: item?.source || 'UNCLASSIFIED', priority: Number(item?.priority) || 0,
+      status: item?.status || 'UNKNOWN'
+    }))
+  };
+}

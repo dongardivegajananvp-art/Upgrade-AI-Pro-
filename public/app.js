@@ -597,6 +597,11 @@ function restorePersistedChart() {
     if (candleStatus) candleStatus.textContent = 'LAST SESSION · VERIFIED FYERS 5-MIN CANDLES · NOT LIVE';
     renderChartViewport();
     renderLiveCandleSummary(null);
+    // A persisted chart is display-only. Re-pin its symbol to this server
+    // process immediately; waiting for a matching backend tick here deadlocks
+    // after a Render restart because the backend cannot emit that tick until
+    // the selected underlying has been pinned to the WebSocket slice.
+    void selectSymbol(snapshot.symbol);
   } catch {}
 }
 function renderLiveCandleSummary(tick) {

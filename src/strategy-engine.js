@@ -199,7 +199,22 @@ function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = n
   const hasHistoricalAnchor = historicalAsOf !== null && historicalAsOf !== undefined && Number.isFinite(Number(historicalAsOf));
   const exchangeTime = hasHistoricalAnchor ? Number(historicalAsOf) : tick?.exchangeTime;
   const window = getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds);
-  if (!window.fresh) return { error: label + ' latest completed candle is stale' };
+  if (!window.fresh) {
+    const lastCandleTime = Number(window.lastClosed?.time);
+    const exchangeStamp = Number(exchangeTime);
+    const age = Number.isFinite(lastCandleTime) && Number.isFinite(exchangeStamp)
+      ? exchangeStamp - (lastCandleTime + INTERVAL_SECONDS) : null;
+    const diagnostic = {
+      label,
+      exchangeTime: Number.isFinite(exchangeStamp) ? new Date(exchangeStamp * 1000).toISOString() : null,
+      lastCompletedCandleTime: Number.isFinite(lastCandleTime) ? new Date(lastCandleTime * 1000).toISOString() : null,
+      ageSeconds: Number.isFinite(age) ? Math.round(age) : null,
+      maxAgeSeconds,
+      candleCount: window.completed.length,
+      currentBucket: Number.isFinite(exchangeStamp) ? Math.floor(exchangeStamp / INTERVAL_SECONDS) * INTERVAL_SECONDS : null
+    };
+    return { error: label + ' latest completed candle is stale; diagnostics=' + JSON.stringify(diagnostic) };
+  }
   if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
   return { rows: window.completed, last: window.lastClosed };
 }

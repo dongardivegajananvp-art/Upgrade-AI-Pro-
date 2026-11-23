@@ -576,16 +576,23 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const chosen=setup;
   if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return blockDetected('Selected option side does not match the confirmed underlying direction');
   const premiumRows=o.rows,tickSize=number(contract.tickSize);
-  const prior=premiumRows.at(-2),reference=premiumRows.at(-1);
-  // The underlying strategy already confirmed on a completed 5-minute candle.
-  // Do not wait for a second option candle confirmation: trigger on a fresh live
-  // option premium crossing the latest completed option candle high + one tick.
-  const premiumLevel=number(reference.high);
+  // Require an ordered, completed option structure: prior range, bullish breakout
+  // close above that range, then a bullish retest/hold. Live ticks cannot replace
+  // either completed-candle confirmation.
+  const prior=premiumRows.at(-3),breakout=premiumRows.at(-2),confirmation=premiumRows.at(-1);
+  const priorHigh=number(prior.high),breakoutHigh=number(breakout.high);
+  const validOptionBreakout=number(breakout.close)>priorHigh&&number(breakout.close)>number(breakout.open);
+  const validOptionRetest=number(confirmation.low)<=breakoutHigh&&number(confirmation.close)>priorHigh&&number(confirmation.close)>number(confirmation.open);
+  if(!validOptionBreakout||!validOptionRetest)
+    return blockDetected(!validOptionBreakout
+      ?'Option premium breakout candle must close bullish above the preceding completed 5-minute candle high'
+      :'Option premium confirmation candle must retest the breakout range and close bullish above the prior range high');
+  const premiumLevel=number(confirmation.high);
   const entry=Number((Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize).toFixed(8));
-  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Underlying setup is confirmed; waiting for live option premium to break the latest completed 5-minute candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Waiting for verified live option premium to cross the breakout level'}:row)};
-  // Structural risk uses the last two completed option candles; the live quote is
-  // the trigger. This removes the redundant extra 5-minute confirmation delay.
-  const swingLow=Math.min(number(prior.low),number(reference.low));
+  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Three completed option candles verified: prior range, bullish breakout close and bullish retest/hold; waiting for live option premium to break the confirmation candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Option structure confirmed; waiting for live premium to cross the confirmation candle high'}:row)};
+  // The completed retest candle defines structural risk; the fresh quote is only
+  // the trigger for the already verified three-candle pattern.
+  const swingLow=number(confirmation.low);
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow,targetR:chosen.research?.targetR||2});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:plan.reason}:row)};
   return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'EARLY_LIVE_OPTION_PREMIUM_BREAK',entryTiming:'EARLY_VERIFIED_LIVE_PREMIUM_BREAK',entryBasis:'LATEST_COMPLETED_OPTION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',targetBasis:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',targetR:plan.targetR,targetRationale:chosen.research?.targetRationale||'Minimum 2R research objective',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};

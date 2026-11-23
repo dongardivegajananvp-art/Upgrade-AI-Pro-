@@ -134,6 +134,22 @@ export function buildRestRateLimitContext({ requestRecord, requestSources = [], 
 }
 
 
+// Cloudflare 1015 was observed on mixed REST traffic at only eight requests/minute.
+// Apply a conservative process-local rolling budget to every FYERS REST endpoint,
+// not only /history. This is an application safety guard, not a published FYERS quota.
+export function getRestRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 6, windowMs = 60_000, minPriority = Number.NEGATIVE_INFINITY, maxPriority = Number.POSITIVE_INFINITY) {
+  const current = Number(now);
+  const limit = Math.max(1, Math.floor(Number(maxRequests) || 6));
+  const window = Math.max(1, Number(windowMs) || 60_000);
+  const recent = requests
+    .filter(item => Number(item?.priority || 0) >= Number(minPriority) && Number(item?.priority || 0) <= Number(maxPriority))
+    .map(item => Date.parse(item?.at))
+    .filter(at => Number.isFinite(at) && at <= current && current - at < window)
+    .sort((a, b) => a - b);
+  if (recent.length < limit) return 0;
+  return Math.max(0, recent[0] + window - current);
+}
+
 // Cloudflare 1015 was observed on /data/history at 11 requests in one minute.
 // Keep this endpoint below that observed edge threshold with a conservative
 // rolling-window ceiling; this is an application guard, not FYERS' published plan limit.

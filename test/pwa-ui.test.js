@@ -225,7 +225,7 @@ test('live candle summary is rendered only after the matching fresh tick updates
   const summary = flow.indexOf('renderLiveCandleSummary(underlyingTick)');
   assert.ok(update >= 0 && summary > update,
     'summary must render after the live candle from the same status snapshot is assigned');
-  assert.match(flow, /if \(selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\\s\\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\\s\\S]*?renderChartViewport\(\);/);
+  assert.match(flow, /if \(selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\s\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\s\S]*?renderChartViewport\(\);/);
 });
 
 test('option contract identity check is independent of selected underlying tick freshness', () => {

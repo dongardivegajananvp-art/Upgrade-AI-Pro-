@@ -191,7 +191,7 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
   const optionCandles=Array.from({length:3},(_,i)=>({
     time:start+(47+i)*300,open:103+i,high:104+i,low:102+i,close:103.5+i,volume:500+i,completed:true
   }));
-  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
   const optionTick={symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({
     underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
@@ -217,7 +217,7 @@ test('option entry requires ordered prior-range, bullish-breakout and bullish-re
     {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
     {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
   ];
-  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
   const base={underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
     optionTick:{symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now},
     contract,optionCandles,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now};
@@ -244,7 +244,7 @@ test('confirmed option entry returns Entry/SL/Target/RR and the retest candle ti
     {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
     {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
   ];
-  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
   const result=evaluateNineStrategies({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
@@ -322,7 +322,7 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
     {time:1800005400,open:104,high:105,low:103,close:104.5,volume:510},
     {time:1800006000,open:105,high:106,low:104,close:105.5,volume:520}
   ];
-  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
   const result=evaluateNineStrategies({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
@@ -498,7 +498,7 @@ test('confirmed bearish underlying setup validates a PE contract and fixed Entry
     {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
     {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
   ];
-  const contract={symbol:'NSE:ABC26NOV150PE',underlying:'ABC',side:'PE',tickSize:.05};
+  const contract={symbol:'NSE:ABC26NOV150PE',underlying:'ABC',side:'PE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-PE-150'};
   const result=evaluateNineStrategies({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
@@ -518,10 +518,12 @@ test('confirmed bearish underlying setup validates a PE contract and fixed Entry
 
 test('all nine strategies enforce the full LONG/CE and SHORT/PE contract-side matrix', () => {
   for(const strategy of STRATEGIES){
-    const longCe=validateStrategyOptionContract({strategy,underlyingSide:'LONG',contract:{symbol:'NSE:ABC26NOV150CE',side:'CE',tickSize:0.05}});
-    const longPe=validateStrategyOptionContract({strategy,underlyingSide:'LONG',contract:{symbol:'NSE:ABC26NOV150PE',side:'PE',tickSize:0.05}});
-    const shortPe=validateStrategyOptionContract({strategy,underlyingSide:'SHORT',contract:{symbol:'NSE:ABC26NOV150PE',side:'PE',tickSize:0.05}});
-    const shortCe=validateStrategyOptionContract({strategy,underlyingSide:'SHORT',contract:{symbol:'NSE:ABC26NOV150CE',side:'CE',tickSize:0.05}});
+    const now=Date.parse('2026-11-19T08:00:00Z');
+    const base={underlying:'ABC',expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'FY123',tickSize:0.05};
+    const longCe=validateStrategyOptionContract({strategy,underlyingSide:'LONG',underlyingSymbol:'NSE:ABC-EQ',now,contract:{...base,symbol:'NSE:ABC26NOV150CE',side:'CE'}});
+    const longPe=validateStrategyOptionContract({strategy,underlyingSide:'LONG',underlyingSymbol:'NSE:ABC-EQ',now,contract:{...base,symbol:'NSE:ABC26NOV150PE',side:'PE'}});
+    const shortPe=validateStrategyOptionContract({strategy,underlyingSide:'SHORT',underlyingSymbol:'NSE:ABC-EQ',now,contract:{...base,symbol:'NSE:ABC26NOV150PE',side:'PE'}});
+    const shortCe=validateStrategyOptionContract({strategy,underlyingSide:'SHORT',underlyingSymbol:'NSE:ABC-EQ',now,contract:{...base,symbol:'NSE:ABC26NOV150CE',side:'CE'}});
     assert.equal(longCe.ok,true,strategy+' LONG must accept CE');
     assert.equal(longPe.ok,false,strategy+' LONG must reject PE');
     assert.equal(shortPe.ok,true,strategy+' SHORT must accept PE');
@@ -529,9 +531,16 @@ test('all nine strategies enforce the full LONG/CE and SHORT/PE contract-side ma
   }
 });
 test('directional contract matrix rejects unknown strategy, absent side, invalid tick size and non-NSE symbol', () => {
-  const valid={symbol:'NSE:ABC26NOV150CE',side:'CE',tickSize:0.05};
-  assert.equal(validateStrategyOptionContract({strategy:'UNKNOWN',underlyingSide:'LONG',contract:valid}).ok,false);
-  assert.equal(validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'FLAT',contract:valid}).ok,false);
-  assert.equal(validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'LONG',contract:{...valid,tickSize:0}}).ok,false);
-  assert.equal(validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'LONG',contract:{...valid,symbol:'BSE:ABC26NOV150CE'}}).ok,false);
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const valid={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'FY123'};
+  const args={strategy:STRATEGIES[0],underlyingSide:'LONG',underlyingSymbol:'NSE:ABC-EQ',now,contract:valid};
+  assert.equal(validateStrategyOptionContract({...args,strategy:'UNKNOWN'}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,underlyingSide:'FLAT'}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,tickSize:0}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,symbol:'BSE:ABC26NOV150CE'}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,underlying:'XYZ'}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,underlyingSymbol:'NSE:XYZ-EQ'}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,expiry:now/1000-1}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,strike:0}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,fyToken:''}}).ok,false);
 });

@@ -15,7 +15,7 @@ test('ranks rolling observations across all symbols and exposes partial coverage
   assert.equal(result.topGainers[0].symbol,universe[0].symbol);
   assert.equal(result.topGainers[0].fresh,true);
 });
-test('marks old rolling ticks non-fresh and excludes prior-session observations', () => {
+test('keeps current-session rolling observations visible with explicit stale age and excludes prior-session ticks', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];
   const ticks=new Map([
     ['NSE:A-EQ',{symbol:'NSE:A-EQ',price:10,changePercent:5,exchangeTime:sec,receivedAt:now-90000}],
@@ -24,7 +24,9 @@ test('marks old rolling ticks non-fresh and excludes prior-session observations'
   const result=buildRollingFnoLeaderboard({universe,ticks,now,slotCount:20,rotationIntervalMs:60000});
   assert.equal(result.observedCount,1);
   assert.equal(result.freshCount,0);
-  assert.equal(result.topGainers.length,0);
+  assert.equal(result.topGainers.length,1);
+  assert.equal(result.topGainers[0].fresh,false);
+  assert.equal(result.topGainers[0].ageSeconds,90);
 });
 test('reports complete coverage only after every current-session symbol was observed', () => {
   const universe=[{symbol:'NSE:A-EQ'},{symbol:'NSE:B-EQ'}];

@@ -2,8 +2,8 @@ export const REST_RECOVERY_REQUIRED_ON_START = true;
 
 export const REST_PRIORITY = Object.freeze({ ENTRY:100, OPTION_CHAIN:90, CHART:80, INTERACTIVE:60, RESEARCH:40, CONTEXT:30, ACCOUNT:20, SCANNER:10, WARMUP:-20 });
 
-export function canRunRestRecoveryProbe({ recoveryProbeRequired, priority } = {}) {
-  return !Boolean(recoveryProbeRequired) || Number(priority) >= REST_PRIORITY.CHART;
+export function canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted = false, priority } = {}) {
+  return !Boolean(recoveryProbeRequired) || (!Boolean(recoveryProbeAttempted) && Number(priority) >= REST_PRIORITY.CHART);
 }
 
 export function isRestCooldownActive(now, cooldownUntil) {

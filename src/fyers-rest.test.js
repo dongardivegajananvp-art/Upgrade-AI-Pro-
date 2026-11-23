@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -149,4 +149,21 @@ test('background history budget preserves two rolling-window slots for Entry and
   assert.equal(getHistoryRequestWindowWaitMs(requests.slice(0,3), now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1), 0);
   const entryRequests = [...requests, {at:new Date(now).toISOString(),path:'/history',source:'entry-option-history',priority:REST_PRIORITY.ENTRY}];
   assert.equal(getHistoryRequestWindowWaitMs(entryRequests, now, 8), 0);
+});
+
+
+test('global FYERS REST budget counts every endpoint and preserves interactive headroom', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const requests = [
+    {at:new Date(now-30_000).toISOString(),path:'/history',source:'fno-scanner-5m',priority:REST_PRIORITY.SCANNER},
+    {at:new Date(now-25_000).toISOString(),path:'/api/v3/positions',source:'account-positions',priority:REST_PRIORITY.ACCOUNT},
+    {at:new Date(now-20_000).toISOString(),path:'/api/v3/orders',source:'account-orderbook',priority:REST_PRIORITY.ACCOUNT},
+    {at:new Date(now-15_000).toISOString(),path:'/options-chain-v3',source:'option-chain-panel',priority:REST_PRIORITY.OPTION_CHAIN},
+    {at:new Date(now-10_000).toISOString(),path:'/history',source:'chart-history',priority:REST_PRIORITY.CHART},
+    {at:new Date(now-5_000).toISOString(),path:'/history',source:'research-context-daily',priority:REST_PRIORITY.CONTEXT}
+  ];
+  assert.ok(getRestRequestWindowWaitMs(requests, now, 6) > 0);
+  assert.equal(getRestRequestWindowWaitMs(requests, now, 3, 60_000, REST_PRIORITY.CHART, Number.POSITIVE_INFINITY), 0);
+  assert.ok(getRestRequestWindowWaitMs(requests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART-1) > 0);
+  assert.equal(getRestRequestWindowWaitMs(requests.slice(0,5), now, 6), 0);
 });

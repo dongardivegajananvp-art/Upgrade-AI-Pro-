@@ -130,8 +130,9 @@ async function drainRestQueue() {
       // minute. Cap this endpoint at 8 per rolling minute, while allowing
       // higher/lower-priority non-history REST work to proceed independently.
       const eligibleIndex = restQueue.findIndex(job =>
-        job.url.pathname !== '/history' ||
-        getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now()) === 0
+        (!recoveryProbeRequired || canRunRestRecoveryProbe({ recoveryProbeRequired, priority: job.priority })) &&
+        (job.url.pathname !== '/history' ||
+          getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now()) === 0)
       );
       if (eligibleIndex < 0) {
         const windowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now());

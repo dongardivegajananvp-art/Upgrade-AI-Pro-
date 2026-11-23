@@ -258,6 +258,7 @@ test('confirmed option entry returns Entry/SL/Target/RR and the retest candle ti
   assert.equal(result.stopLoss,103.95);
   assert.equal(result.rr,2);
   assert.equal(result.optionConfirmation,'COMPLETED_BULLISH_BREAKOUT_RETEST');
+  assertStaleOptionQuoteBlocks(underlyingCandles,'LONG','EMA20_EMA50_TREND');
 });
 
 test('non-retest strategies validate pressure on the trigger candle, not an older level cross', () => {
@@ -514,6 +515,7 @@ test('confirmed bearish underlying setup validates a PE contract and fixed Entry
   assert.equal(result.stopLoss,103.95);
   assert.equal(result.rr,2);
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(underlyingCandles,'SHORT','EMA20_EMA50_TREND');
 });
 
 test('all nine strategies enforce the full LONG/CE and SHORT/PE contract-side matrix', () => {

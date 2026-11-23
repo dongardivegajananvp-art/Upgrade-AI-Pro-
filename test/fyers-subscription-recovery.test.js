@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -37,4 +37,11 @@ test('WebSocket diagnostics distinguish desired symbols, SDK sends and pending s
   assert.equal(state.pendingCount,1);
   assert.deepEqual(state.pendingSymbols,['NSE:ABC-EQ']);
   assert.equal(state.confirmation,'SDK_SEND_STATE_ONLY');
+});
+
+
+test('socket tick and telemetry maps prune obsolete symbols and stay bounded', () => {
+  const map = new Map([['NSE:KEEP-EQ',1],['NSE:OLD-EQ',2],['NSE:A-EQ',3],['NSE:B-EQ',4]]);
+  assert.equal(pruneSymbolMap(map,['NSE:KEEP-EQ','NSE:A-EQ','NSE:B-EQ'],2),2);
+  assert.deepEqual([...map.keys()],['NSE:A-EQ','NSE:B-EQ']);
 });

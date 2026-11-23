@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -216,4 +216,12 @@ test('queued REST work has strict freshness deadlines by request class', () => {
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ACCOUNT), 30_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.SCANNER), 10_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.WARMUP), 120_000);
+});
+
+
+test('queued REST requests expire at the exact age boundary and reject invalid timestamps', () => {
+  assert.equal(isRestQueueExpired(1000, 10999, 10_000), false);
+  assert.equal(isRestQueueExpired(1000, 11000, 10_000), true);
+  assert.equal(isRestQueueExpired(Number.NaN, 11000, 10_000), true);
+  assert.equal(isRestQueueExpired(1000, 11000, 0), true);
 });

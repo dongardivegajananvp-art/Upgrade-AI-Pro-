@@ -237,3 +237,16 @@ test('option contract identity check is independent of selected underlying tick 
   assert.doesNotMatch(route, /market\.selectedUnderlying\?\.fresh/);
   assert.match(route, /liveTickRequired:true/);
 });
+
+
+test('live F&O scanner keeps the default DOM compact without weakening strategy diagnostics', () => {
+  assert.match(app, /activeEvaluationsAll=\(data\.evaluations\|\|\[\]\)\.filter/);
+  assert.match(app, /activeEvaluations=activeEvaluationsAll\.slice\(0,4\)/);
+  assert.match(app, /for\(const item of stock\.strategyLedger\|\|\[\]\)/);
+  assert.doesNotMatch(app, /for\(const stock of data\.symbolCoverage\|\|\[\]\)/);
+  assert.match(app, /coverage\.freshTickCount/);
+  assert.match(app, /coverage\.staleTickCount/);
+  assert.match(app, /coverage\.noTickCount/);
+  assert.match(app, /RESEARCH · /);
+  assert.doesNotMatch(app, /warmupLastFailure/);
+});

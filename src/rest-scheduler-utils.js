@@ -231,3 +231,28 @@ export function isRestQueueExpired(enqueuedAt, now = Date.now(), maxAgeMs = 0) {
   const maxAge = Math.max(0, Number(maxAgeMs) || 0);
   return !Number.isFinite(queuedAt) || !Number.isFinite(current) || current - queuedAt >= maxAge;
 }
+
+export function buildRestEndpointHealth(requests = [], now = Date.now()) {
+  const latest = path => {
+    const row = [...requests].reverse().find(item => item?.path === path && Number.isFinite(Number(item?.status)));
+    if (!row) return { status: 'NOT_VERIFIED', ok: false, at: null, ageMs: null, source: null };
+    const httpStatus = Number(row.status);
+    const apiStatus = row.apiStatus || null;
+    const responseCode = row.responseCode ?? null;
+    const ok = httpStatus >= 200 && httpStatus < 300 && apiStatus !== 'error' &&
+      !(responseCode !== null && Number(responseCode) < 0);
+    const at = Date.parse(row.at);
+    return {
+      status: ok ? 'SUCCESS' : 'ERROR', ok,
+      httpStatus, apiStatus, responseCode,
+      at: row.at || null, ageMs: Number.isFinite(at) ? Math.max(0, Number(now) - at) : null,
+      durationMs: Number.isFinite(Number(row.durationMs)) ? Number(row.durationMs) : null,
+      source: row.source || null
+    };
+  };
+  return {
+    optionChain: latest('/options-chain-v3'),
+    positions: latest('/api/v3/positions'),
+    orderbook: latest('/api/v3/orders')
+  };
+}

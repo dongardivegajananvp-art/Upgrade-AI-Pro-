@@ -634,6 +634,7 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan only after ori
     {time:start+900,open:101.2,high:102,low:100.9,close:101.7,volume:180}
   ];
   const option=makeOptionPipelineFields(start+300,'CE');
+  option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:101.7,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'DAY_HIGH_LOW_BREAK_RETEST');

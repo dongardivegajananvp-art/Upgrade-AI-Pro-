@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate
+  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -256,4 +256,16 @@ test('scanner dispatch gate holds work when queue, cooldown, pacing or budgets a
   assert.equal(held.waitMs,30000);
   const recovery=buildRestDispatchGate({recoveryProbeRequired:true,recoveryProbeAllowed:false});
   assert.ok(recovery.blockers.includes('RECOVERY_PROBE_REQUIRED'));
+});
+
+test('REST coalescing is limited to same-authenticated GET requests', () => {
+  const url='https://api-t1.fyers.in/api/v3/positions';
+  assert.equal(buildRestCoalesceKey({method:'GET',url,authorization:'Bearer token-A'}),
+    'GET:'+url+':auth:Bearer token-A');
+  assert.notEqual(
+    buildRestCoalesceKey({method:'GET',url,authorization:'Bearer token-A'}),
+    buildRestCoalesceKey({method:'GET',url,authorization:'Bearer token-B'})
+  );
+  assert.equal(buildRestCoalesceKey({method:'POST',url,authorization:'Bearer token-A'}),null);
+  assert.equal(buildRestCoalesceKey({method:'GET',url:''}),null);
 });

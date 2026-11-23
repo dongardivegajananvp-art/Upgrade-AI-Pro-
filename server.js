@@ -179,9 +179,17 @@ function startFnoStrategyScanner() {
     } finally {
       fnoStrategyScanBusy=false;
       const memory=process.memoryUsage();
+      const scanRecord=fnoSymbolScanLedger.get(symbol)||{};
       console.info('[FYERS_SCANNER] symbol scan completed:',JSON.stringify({
         symbol,
         status:fnoStrategyScanStats.lastStatus,
+        reason:scanRecord.reason||fnoStrategyScanStats.lastReason||null,
+        tickFresh:scanRecord.tickFresh??false,
+        tickExchangeTime:scanRecord.tickExchangeTime||null,
+        lastCompletedCandleTime:scanRecord.lastCompletedCandleTime||null,
+        candleCount:scanRecord.candleCount||0,
+        evaluatedStrategyCount:Array.isArray(scanRecord.strategyLedger)?scanRecord.strategyLedger.filter(row=>row.status!=='BLOCKED').length:0,
+        blockedStrategyCount:Array.isArray(scanRecord.strategyLedger)?scanRecord.strategyLedger.filter(row=>row.status==='BLOCKED').length:0,
         durationMs:Date.now()-scanStartedAt,
         restCooldownActive:getRestDiagnostics().cooldownActive,
         rssBytes:memory.rss,

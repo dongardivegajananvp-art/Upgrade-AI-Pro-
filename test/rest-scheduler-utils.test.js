@@ -139,3 +139,25 @@ test('selected chart and option research work outranks background F&O scans', ()
   assert.equal(admitted.dropped.id,'background-2');
   assert.deepEqual(sortRestQueue(admitted.queue).map(job=>job.id),['selected-option-history','standard','background-1']);
 });
+
+import { buildRestRateLimitContext } from '../src/rest-scheduler-utils.js';
+
+test('rate-limit diagnostics preserve the exact upstream caller and recent history request mix', () => {
+  const context = buildRestRateLimitContext({
+    requestRecord: { source:'fno-scanner-5m', path:'/data/history', priority:-10 },
+    requestSources: [
+      { source:'fno-scanner-5m', requestsThisMinute:8, requestsToday:80 },
+      { source:'chart-history', requestsThisMinute:2, requestsToday:12 }
+    ],
+    recentRequests: [
+      { at:'2026-11-23T08:39:40Z', path:'/data/history', source:'chart-history', priority:50, status:200 },
+      { at:'2026-11-23T08:39:44Z', path:'/data/history', source:'fno-scanner-5m', priority:-10, status:429 }
+    ]
+  });
+  assert.equal(context.requestSource, 'fno-scanner-5m');
+  assert.equal(context.requestPath, '/data/history');
+  assert.equal(context.requestPriority, -10);
+  assert.deepEqual(context.sourceCounts.map(item=>item.source), ['fno-scanner-5m','chart-history']);
+  assert.equal(context.recentRequests.at(-1).source, 'fno-scanner-5m');
+  assert.equal(context.recentRequests.at(-1).status, 429);
+});

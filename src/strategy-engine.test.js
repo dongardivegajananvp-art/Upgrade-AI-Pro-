@@ -322,7 +322,7 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
     {time:1800005400,open:104,high:105,low:103,close:104.5,volume:510},
     {time:1800006000,open:105,high:106,low:104,close:105.5,volume:520}
   ];
-  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:now/1000+7*86400,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
   const result=evaluateNineStrategies({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},

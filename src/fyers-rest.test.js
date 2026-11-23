@@ -67,13 +67,21 @@ test('daily research excludes the current incomplete IST session candle', () => 
 
 import { parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 
-test('FYERS Retry-After seconds and HTTP dates never shorten the one-hour safety cooldown', () => {
+test('FYERS Retry-After and bounded REST backoff respect provider wait times', () => {
   const now = Date.UTC(2026, 10, 20, 10, 0, 0);
   assert.equal(parseRetryAfterMs('120', now), 120_000);
-  assert.equal(getRateLimitCooldownUntil(now, '120'), now + 60 * 60 * 1000);
-  assert.equal(getRateLimitCooldownUntil(now, '7200'), now + 2 * 60 * 60 * 1000);
-  assert.equal(getRateLimitCooldownUntil(now, new Date(now + 3 * 60 * 60 * 1000).toUTCString()), now + 3 * 60 * 60 * 1000);
+  assert.equal(parseRetryAfterMs('0', now), 0);
+  assert.equal(getRateLimitCooldownUntil(now, '0', 1), now + 60_000);
+  assert.equal(getRateLimitCooldownUntil(now, null, 2), now + 120_000);
+  assert.equal(getRateLimitCooldownUntil(now, null, 3), now + 240_000);
+  assert.equal(getRateLimitCooldownUntil(now, '7200', 1), now + 2 * 60 * 60 * 1000);
   assert.equal(parseRetryAfterMs('not-a-date', now), null);
+});
+
+test('fourth FYERS 429 in the same IST day blocks until the next IST midnight', () => {
+  const now = Date.UTC(2026, 10, 20, 10, 0, 0);
+  const nextIstMidnight = Date.UTC(2026, 10, 20, 18, 30, 0);
+  assert.equal(getRateLimitCooldownUntil(now, '0', 4), nextIstMidnight);
 });
 
 test('FYERS WebSocket 1015 recovery uses bounded exponential backoff', () => {

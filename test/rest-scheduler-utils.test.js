@@ -14,18 +14,22 @@ test('cooldown remains active at the post-wait boundary until its deadline', () 
 });
 
 
-test('Retry-After seconds and HTTP dates are honored without shortening the one-hour safety floor', () => {
+test('Retry-After is honored and zero/missing values use bounded exponential backoff', () => {
   const now = Date.parse('2026-11-21T10:00:00Z');
   assert.equal(parseRetryAfterMs('120', now), 120000);
+  assert.equal(parseRetryAfterMs('0', now), 0);
   assert.equal(parseRetryAfterMs(new Date(now + 2*60*60*1000).toUTCString(), now), 2*60*60*1000);
-  assert.equal(getRateLimitCooldownUntil(now, '120'), now + 60*60*1000);
-  assert.equal(getRateLimitCooldownUntil(now, new Date(now + 2*60*60*1000).toUTCString()), now + 2*60*60*1000);
+  assert.equal(getRateLimitCooldownUntil(now, '0', 1), now + 60_000);
+  assert.equal(getRateLimitCooldownUntil(now, null, 2), now + 120_000);
+  assert.equal(getRateLimitCooldownUntil(now, 'not-a-date', 3), now + 240_000);
+  assert.equal(getRateLimitCooldownUntil(now, new Date(now + 2*60*60*1000).toUTCString(), 1), now + 2*60*60*1000);
 });
 
-test('invalid Retry-After never creates a shorter-than-floor cooldown', () => {
-  const now = 100000;
-  assert.equal(parseRetryAfterMs('not-a-date', now), null);
-  assert.equal(getRateLimitCooldownUntil(now, 'not-a-date'), now + 60*60*1000);
+test('fourth 429 in one IST day blocks until next IST midnight', () => {
+  const now = Date.parse('2026-11-21T10:00:00Z');
+  const nextIstMidnight = Date.parse('2026-11-21T18:30:00Z');
+  assert.equal(getRateLimitCooldownUntil(now, '0', 4), nextIstMidnight);
+  assert.equal(getRateLimitCooldownUntil(now, '72000', 4), now + 72000_000);
 });
 
 test('WebSocket 1015 backoff grows exponentially and remains bounded', () => {

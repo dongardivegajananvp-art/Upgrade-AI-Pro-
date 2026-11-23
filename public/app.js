@@ -211,17 +211,19 @@ async function refresh() {
     renderMovers(md.fno || {});
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;
-    renderLiveCandleSummary(underlyingTick);
     // Restore the backend's selected chart symbol after a page reload; otherwise
     // the server can build a live candle while the client never renders it.
     if ((!selectedSymbol || (chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol)) &&
         underlyingTick?.symbol && underlyingTick.fresh) {
       selectSymbol(underlyingTick.symbol, underlyingTick.price);
     }
-    if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh && underlyingTick.liveCandle) {
-      chartLiveCandle = underlyingTick.liveCandle;
+    // Update the chart candle from this exact status snapshot before rendering
+    // its summary. This keeps OHLCV and live price aligned to one FYERS tick.
+    if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh) {
+      chartLiveCandle = underlyingTick.liveCandle || null;
       if (!chartGestureActive) renderChartViewport();
     }
+    renderLiveCandleSummary(underlyingTick);
     const optionLtp = document.querySelector('#option-ltp');
     const optionStatus = document.querySelector('#option-status');
     if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) {

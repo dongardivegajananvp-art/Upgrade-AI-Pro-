@@ -149,7 +149,7 @@ async function drainRestQueue() {
           ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 2, 60_000, REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT)
           : 0;
         const backgroundRequests = recentUpstreamRequests.filter(item => Number(item?.priority || 0) !== REST_PRIORITY.ACCOUNT);
-        const backgroundWindowWait = job.priority < REST_PRIORITY.INTERACTIVE
+        const backgroundWindowWait = job.priority < REST_PRIORITY.INTERACTIVE && job.priority !== REST_PRIORITY.ACCOUNT
           ? getRestRequestWindowWaitMs(backgroundRequests, Date.now(), 1, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.INTERACTIVE - 1)
           : 0;
         if (totalWindowWait > 0 || accountWindowWait > 0 || backgroundWindowWait > 0) return false;
@@ -171,7 +171,7 @@ async function drainRestQueue() {
             ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 2, 60_000, REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT)
             : 0;
           const backgroundRequests = recentUpstreamRequests.filter(item => Number(item?.priority || 0) !== REST_PRIORITY.ACCOUNT);
-          const backgroundWait = job.priority < REST_PRIORITY.INTERACTIVE
+          const backgroundWait = job.priority < REST_PRIORITY.INTERACTIVE && job.priority !== REST_PRIORITY.ACCOUNT
             ? getRestRequestWindowWaitMs(backgroundRequests, Date.now(), 1, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.INTERACTIVE - 1)
             : 0;
           const historyWait = job.url.pathname === '/history'

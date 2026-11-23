@@ -273,17 +273,19 @@ export function normalizeDailyCandles(rows, now = Date.now()) {
 const dailyCache = new Map();
 export async function getDailyHistory(symbol, now = Date.now(), priority = -10) {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE symbol is required');
-  const cached = dailyCache.get(symbol);
-  if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
-  const to = istDate(now);
-  const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
-  const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority);
-  if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
-  const candles = normalizeDailyCandles(body.candles, now);
-  if (candles.length < 50) throw new Error('Insufficient completed FYERS daily candles for research');
-  const value={symbol,candles,count:candles.length,source:'FYERS_DAILY_HISTORY'};
-  dailyCache.set(symbol,{savedAt:now,value});
-  return value;
+  return runHistoryRequestOnce('1d:' + symbol, async () => {
+    const cached = dailyCache.get(symbol);
+    if (cached && now - cached.savedAt < 30 * 60 * 1000) return cached.value;
+    const to = istDate(now);
+    const from = new Date(now - 180 * 86400000 + 19800000).toISOString().slice(0,10);
+    const body = await fyersGet(DATA_BASE, '/history', { symbol, resolution: 'D', date_format: '1', range_from: from, range_to: to }, priority);
+    if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified daily candles');
+    const candles = normalizeDailyCandles(body.candles, now);
+    if (candles.length < 50) throw new Error('Insufficient completed FYERS daily candles for research');
+    const value={symbol,candles,count:candles.length,source:'FYERS_DAILY_HISTORY'};
+    dailyCache.set(symbol,{savedAt:now,value});
+    return value;
+  });
 }
 export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = '') {
   if (!validateNseSymbol(symbol)) throw new Error('A valid NSE underlying symbol is required');

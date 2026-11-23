@@ -33,3 +33,23 @@ export function buildSessionSocketSubscriptions(indexSymbols = [], activeSymbols
     sessionReady ? selectedOptionSymbol : null
   );
 }
+
+
+export function buildSocketSubscriptionDiagnostics({ desired = [], sentToSdk = [], pending = [] } = {}) {
+  const normalize = values => [...new Set((Array.isArray(values) ? values : [])
+    .filter(symbol => typeof symbol === 'string' && symbol))];
+  const desiredSymbols = normalize(desired);
+  const sentSymbols = normalize(sentToSdk);
+  const pendingSymbols = normalize(pending);
+  return {
+    desiredCount: desiredSymbols.length,
+    sentToSdkCount: sentSymbols.length,
+    pendingCount: pendingSymbols.length,
+    desiredSymbols,
+    sentToSdkSymbols: sentSymbols,
+    pendingSymbols,
+    // The FYERS SDK's generic subscription ACK is not symbol-specific; do not
+    // mislabel a local SDK send as an exchange-confirmed subscription.
+    confirmation: 'SDK_SEND_STATE_ONLY'
+  };
+}

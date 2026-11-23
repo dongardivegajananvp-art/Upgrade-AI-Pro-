@@ -137,12 +137,12 @@ export function buildRestRateLimitContext({ requestRecord, requestSources = [], 
 // Cloudflare 1015 was observed on /data/history at 11 requests in one minute.
 // Keep this endpoint below that observed edge threshold with a conservative
 // rolling-window ceiling; this is an application guard, not FYERS' published plan limit.
-export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 8, windowMs = 60_000) {
+export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 8, windowMs = 60_000, minPriority = Number.NEGATIVE_INFINITY, maxPriority = Number.POSITIVE_INFINITY) {
   const current = Number(now);
   const limit = Math.max(1, Math.floor(Number(maxRequests) || 8));
   const window = Math.max(1, Number(windowMs) || 60_000);
   const recent = requests
-    .filter(item => item?.path === '/history')
+    .filter(item => item?.path === '/history' && Number(item?.priority || 0) >= Number(minPriority) && Number(item?.priority || 0) <= Number(maxPriority))
     .map(item => Date.parse(item?.at))
     .filter(at => Number.isFinite(at) && at <= current && current - at < window)
     .sort((a, b) => a - b);

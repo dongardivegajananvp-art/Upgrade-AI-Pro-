@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -104,7 +104,7 @@ function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function expireQueuedRestJobs(now = Date.now()) {
   for (let index = restQueue.length - 1; index >= 0; index -= 1) {
     const job = restQueue[index];
-    if (now - job.enqueuedAt < job.maxQueueAgeMs) continue;
+    if (!isRestQueueExpired(job.enqueuedAt, now, job.maxQueueAgeMs)) continue;
     restQueue.splice(index, 1);
     const error = new Error('FYERS REST queued request expired before upstream submission; stale work was discarded');
     lastRestStatus = 'QUEUE_EXPIRED';

@@ -660,6 +660,9 @@ test('end-to-end opening-range first-candle breakout passes only with completed 
   assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(result.underlyingSide,'LONG');
   assert.ok(result.rr>=2);
+  const stale=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,optionTick:{...option.optionTick,receivedAt:now-11000},now,researchEnabled:false});
+  assert.equal(stale.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(stale.strategyLedger.find(row=>row.strategy==='OPENING_RANGE_BREAKOUT').status,'BLOCKED');
 });
 
 

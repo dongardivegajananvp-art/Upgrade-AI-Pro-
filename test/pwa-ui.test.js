@@ -277,3 +277,14 @@ test('live F&O scanner keeps the default DOM compact without weakening strategy 
   assert.match(app, /RESEARCH · /);
   assert.doesNotMatch(app, /warmupLastFailure/);
 });
+
+
+test('status polling is single-flight and paused while the workstation tab is hidden', () => {
+  assert.match(app, /if \(refreshRunning \|\| document\.hidden\) return/);
+  assert.match(app, /refreshRunning = true/);
+  assert.match(app, /finally \{\s*refreshRunning = false;/);
+  assert.match(app, /function startStatusPolling\(\)/);
+  assert.match(app, /function stopStatusPolling\(\)/);
+  assert.match(app, /document\.addEventListener\('visibilitychange'/);
+  assert.match(app, /if \(document\.hidden\) stopStatusPolling\(\);\s*else startStatusPolling\(\);/);
+});

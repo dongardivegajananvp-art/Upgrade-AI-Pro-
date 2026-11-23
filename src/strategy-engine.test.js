@@ -205,6 +205,33 @@ test('early option entry exposes exact tick-aligned trigger while waiting inside
   assert.equal(result.optionSide,'CE');
 });
 
+test('option entry requires ordered prior-range, bullish-breakout and bullish-retest candles', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i};
+  });
+  const optionCandles=[
+    {time:start+47*300,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05};
+  const base={underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionTick:{symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now},
+    contract,optionCandles,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now};
+  const valid=evaluateNineStrategies(base);
+  assert.equal(valid.status,'WAITING_FOR_OPTION_BREAKOUT');
+  assert.equal(valid.entryTriggerPrice,106.05);
+  const invalid=evaluateNineStrategies({...base,optionCandles:[
+    optionCandles[0],optionCandles[1],
+    {...optionCandles[2],low:102.5,close:103,open:104}
+  ]});
+  assert.equal(invalid.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(invalid.reason,/confirmation candle must retest/i);
+});
+
 test('non-retest strategies validate pressure on the trigger candle, not an older level cross', () => {
   const rows=Array.from({length:22},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[20]={time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:200};

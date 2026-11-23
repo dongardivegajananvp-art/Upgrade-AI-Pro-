@@ -544,3 +544,70 @@ test('directional contract matrix rejects unknown strategy, absent side, invalid
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,strike:0}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,fyToken:''}}).ok,false);
 });
+
+
+function makeTopGainerEndToEndCase() {
+  const now=Date.parse('2026-11-19T04:01:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=[
+    {time:start+300,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+600,open:101,high:104,low:100.8,close:103.8,volume:200}
+  ];
+  const optionCandles=[
+    {time:start,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+600,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={
+    symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
+    expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'
+  };
+  return {
+    now,underlyingCandles,optionCandles,contract,isTopGainer:true,researchEnabled:false,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:103.8,exchangeTime:now/1000,receivedAt:now},
+    optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now}
+  };
+}
+
+test('end-to-end Top Gainer LONG setup passes underlying, CE contract, live option retest and fixed risk gates',()=>{
+  const input=makeTopGainerEndToEndCase();
+  const result=evaluateNineStrategies(input);
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(result.underlyingSide,'LONG');
+  assert.equal(result.optionSide,'CE');
+  assert.equal(result.entry,106.05);
+  assert.equal(result.stopLoss,103.95);
+  assert.equal(result.target,110.25);
+  assert.ok(result.rr>=2);
+  assert.equal(result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT').status,'DETECTED');
+});
+
+test('end-to-end Top Gainer pipeline fails closed when option quote is stale or absent',()=>{
+  const input=makeTopGainerEndToEndCase();
+  const stale=evaluateNineStrategies({...input,optionTick:{...input.optionTick,receivedAt:input.now-11000}});
+  assert.equal(stale.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(stale.reason,/Fresh FYERS option premium tick/);
+  const absent=evaluateNineStrategies({...input,optionTick:null});
+  assert.equal(absent.status,'DATA_UNAVAILABLE_NO_TRADE');
+});
+
+test('end-to-end Top Gainer pipeline rejects wrong option direction and incomplete option candle history',()=>{
+  const input=makeTopGainerEndToEndCase();
+  const wrongSide=evaluateNineStrategies({...input,contract:{...input.contract,side:'PE',symbol:'NSE:ABC26NOV150PE'}});
+  assert.equal(wrongSide.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(wrongSide.reason,/option side does not match/);
+  const missingCandle=evaluateNineStrategies({...input,optionCandles:input.optionCandles.slice(1)});
+  assert.equal(missingCandle.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(missingCandle.reason,/3 contiguous completed 5-minute candles/);
+});
+
+test('end-to-end Top Gainer pipeline waits below premium trigger and blocks chasing beyond 0.5R',()=>{
+  const input=makeTopGainerEndToEndCase();
+  const waiting=evaluateNineStrategies({...input,optionTick:{...input.optionTick,price:106.0}});
+  assert.equal(waiting.status,'WAITING_FOR_OPTION_BREAKOUT');
+  assert.equal(waiting.entryTriggerPrice,106.05);
+  const chased=evaluateNineStrategies({...input,optionTick:{...input.optionTick,price:107.2}});
+  assert.equal(chased.status,'NO_TRADE');
+  assert.match(chased.reason,/more than 0.5R/);
+});

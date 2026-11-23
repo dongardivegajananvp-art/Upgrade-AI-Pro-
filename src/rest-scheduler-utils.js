@@ -282,3 +282,9 @@ export function buildRestDispatchGate({
       Number(backgroundWindowWaitMs)||0, Number(historyWindowWaitMs)||0)
   };
 }
+
+export function buildRestCoalesceKey({method='GET',url,authorization=''}={}) {
+  const verb=String(method||'GET').toUpperCase();
+  if(verb!=='GET'||typeof url!=='string'||!url)return null;
+  return verb+':'+url+':auth:'+String(authorization||'');
+}

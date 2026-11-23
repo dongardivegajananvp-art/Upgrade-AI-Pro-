@@ -514,7 +514,6 @@ test('confirmed bearish underlying setup validates a PE contract and fixed Entry
   assert.equal(result.stopLoss,103.95);
   assert.equal(result.rr,2);
   assert.ok(result.rr>=2);
-  assertStaleOptionQuoteBlocks(rows,'LONG','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
 });
 
 test('all nine strategies enforce the full LONG/CE and SHORT/PE contract-side matrix', () => {
@@ -793,4 +792,5 @@ test('end-to-end double-bottom neckline breakout/retest validates LONG→CE with
   assert.equal(result.underlyingSide,'LONG');
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(rows,'LONG','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
 });

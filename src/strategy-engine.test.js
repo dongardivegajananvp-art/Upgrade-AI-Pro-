@@ -514,6 +514,7 @@ test('confirmed bearish underlying setup validates a PE contract and fixed Entry
   assert.equal(result.stopLoss,103.95);
   assert.equal(result.rr,2);
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(rows,'LONG','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
 });
 
 test('all nine strategies enforce the full LONG/CE and SHORT/PE contract-side matrix', () => {
@@ -641,6 +642,7 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan only after ori
   assert.equal(result.underlyingSide,'LONG');
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(underlyingCandles,'LONG','DAY_HIGH_LOW_BREAK_RETEST');
 });
 
 test('end-to-end opening-range first-candle breakout passes only with completed pressure/volume and option confirmation',()=>{
@@ -659,6 +661,18 @@ test('end-to-end opening-range first-candle breakout passes only with completed 
   assert.ok(result.rr>=2);
 });
 
+
+function assertStaleOptionQuoteBlocks(rows, side, strategy, extra={}) {
+  const now=(rows.at(-1).time+360)*1000;
+  const optionSide=side==='LONG'?'CE':'PE';
+  const symbol='NSE:ABC26NOV150'+optionSide;
+  const result=evaluateUnderlyingFixture(rows,side,{
+    ...extra,
+    optionTick:{symbol,price:106.05,exchangeTime:now/1000,receivedAt:now-11000}
+  });
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE',JSON.stringify(result));
+  assert.equal(result.strategyLedger.find(row=>row.strategy===strategy).status,'BLOCKED');
+}
 
 function evaluateUnderlyingFixture(underlyingCandles, side='LONG', extra={}) {
   const lastTime=underlyingCandles.at(-1).time;
@@ -685,6 +699,7 @@ test('end-to-end bullish continuation validates the complete LONG→CE→risk-pl
   assert.equal(result.underlyingSide,'LONG');
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(rows,'LONG','BULLISH_CONTINUATION');
 });
 
 test('end-to-end bearish continuation validates the complete SHORT→PE→risk-plan pipeline',()=>{
@@ -699,6 +714,7 @@ test('end-to-end bearish continuation validates the complete SHORT→PE→risk-p
   assert.equal(result.underlyingSide,'SHORT');
   assert.equal(result.optionSide,'PE');
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(rows,'SHORT','BEARISH_CONTINUATION');
 });
 
 test('end-to-end flag-volume breakout is independently selectable when continuation impulse threshold is not met',()=>{
@@ -712,6 +728,7 @@ test('end-to-end flag-volume breakout is independently selectable when continuat
   assert.equal(result.strategy,'FLAG_BREAKOUT_VOLUME');
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(rows,'LONG','FLAG_BREAKOUT_VOLUME');
 });
 
 test('end-to-end daily-trend pullback requires fresh daily context and completes the SHORT/PE risk plan',()=>{
@@ -740,6 +757,7 @@ test('end-to-end daily-trend pullback requires fresh daily context and completes
   const missingDaily=evaluateNineStrategies({...base,dailyCandles:[]});
   assert.notEqual(missingDaily.strategy,'DAILY_TREND_5M_PULLBACK');
   assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='DAILY_TREND_5M_PULLBACK').status,'BLOCKED');
+  assertStaleOptionQuoteBlocks(rows,'SHORT','DAILY_TREND_5M_PULLBACK',{dailyCandles:daily});
 });
 
 
@@ -757,6 +775,7 @@ test('end-to-end double-top neckline breakdown/retest validates SHORT→PE with 
   assert.equal(result.underlyingSide,'SHORT');
   assert.equal(result.optionSide,'PE');
   assert.ok(result.rr>=2);
+  assertStaleOptionQuoteBlocks(rows,'SHORT','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
 });
 
 test('end-to-end double-bottom neckline breakout/retest validates LONG→CE with original cross-candle volume',()=>{

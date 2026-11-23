@@ -5,7 +5,8 @@ import {
   getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil,
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
-  sortRestQueue, admitRestJob
+  sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
+  isRestQueueExpired, buildRestEndpointHealth
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -174,4 +175,59 @@ test('history endpoint is capped at eight requests per rolling minute without bl
   assert.equal(getHistoryRequestWindowWaitMs(requests, 76000), 0);
   assert.equal(getHistoryRequestWindowWaitMs([{at:new Date(40000).toISOString(),path:'/quotes'}], 41000), 0);
   assert.equal(getHistoryRequestWindowWaitMs(requests, 41000, 9), 0);
+});
+
+
+test('background REST queue selects the least-served Account, Scanner and Research class', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const jobs=[
+    {id:'research',priority:40,sequence:1},
+    {id:'scanner',priority:10,sequence:2},
+    {id:'account',priority:20,sequence:3}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,()=>true)].id,'research');
+  const recent=[
+    {at:new Date(now-30000).toISOString(),priority:40},
+    {at:new Date(now-20000).toISOString(),priority:20}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,recent,now,()=>true)].id,'scanner');
+  const allServed=[...recent,{at:new Date(now-10000).toISOString(),priority:10}];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,allServed,now,()=>true)].id,'research');
+});
+
+test('interactive Entry and Chart work retain priority over fair background classes', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const jobs=[
+    {id:'scanner',priority:10,sequence:1},
+    {id:'chart',priority:80,sequence:2},
+    {id:'entry',priority:100,sequence:3}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,()=>true)].id,'entry');
+  assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,job=>job.id!=='entry')].id,'chart');
+});
+
+test('queued REST requests expire at their exact deadline and invalid timestamps fail closed', () => {
+  assert.equal(getRestQueueMaxAgeMs(100),10000);
+  assert.equal(getRestQueueMaxAgeMs(90),15000);
+  assert.equal(getRestQueueMaxAgeMs(80),30000);
+  assert.equal(getRestQueueMaxAgeMs(20),30000);
+  assert.equal(getRestQueueMaxAgeMs(10),10000);
+  assert.equal(getRestQueueMaxAgeMs(-20),120000);
+  assert.equal(isRestQueueExpired(1000,10999,10000),false);
+  assert.equal(isRestQueueExpired(1000,11000,10000),true);
+  assert.equal(isRestQueueExpired(Number.NaN,11000,10000),true);
+});
+
+test('Option Chain and Account Feed endpoint health requires actual successful responses', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const health=buildRestEndpointHealth([
+    {path:'/options-chain-v3',status:200,apiStatus:'ok',responseCode:200,at:new Date(now-1000).toISOString(),durationMs:240,source:'option-chain-panel'},
+    {path:'/api/v3/positions',status:429,apiStatus:'error',responseCode:1015,at:new Date(now-2000).toISOString(),durationMs:90,source:'account-positions'}
+  ],now);
+  assert.equal(health.optionChain.status,'SUCCESS');
+  assert.equal(health.optionChain.ageMs,1000);
+  assert.equal(health.positions.status,'ERROR');
+  assert.equal(health.positions.httpStatus,429);
+  assert.equal(health.orderbook.status,'NOT_VERIFIED');
+  assert.equal(health.orderbook.ok,false);
 });

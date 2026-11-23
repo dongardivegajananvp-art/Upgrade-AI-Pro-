@@ -193,7 +193,7 @@ function accept(item) {
       console.info('[FYERS_DATA] market tick received:', JSON.stringify({
         symbol, receivedAt: new Date(tick.receivedAt).toISOString(),
         exchangeTime: new Date(tick.exchangeTime * 1000).toISOString(),
-        receiveAgeMs: 0, exchangeAgeMs: Math.round(Date.now() / 1000 - tick.exchangeTime) * 1000,
+        receiveAgeMs: Date.now() - tick.receivedAt, exchangeAgeMs: Math.round((Date.now() / 1000 - tick.exchangeTime) * 1000),
         fresh: isFresh(tick), selectedUnderlying: symbol === selectedUnderlyingSymbol,
         selectedOption: symbol === selectedOptionSymbol
       }));

@@ -53,3 +53,14 @@ export function buildSocketSubscriptionDiagnostics({ desired = [], sentToSdk = [
     confirmation: 'SDK_SEND_STATE_ONLY'
   };
 }
+
+
+export function pruneSymbolMap(map, allowedSymbols = [], maxSize = 300) {
+  if (!(map instanceof Map)) return 0;
+  const allowed = new Set((Array.isArray(allowedSymbols) ? allowedSymbols : [])
+    .filter(symbol => typeof symbol === 'string' && symbol));
+  for (const key of map.keys()) if (!allowed.has(key)) map.delete(key);
+  const limit = Math.max(1, Math.floor(Number(maxSize) || 300));
+  while (map.size > limit) map.delete(map.keys().next().value);
+  return map.size;
+}

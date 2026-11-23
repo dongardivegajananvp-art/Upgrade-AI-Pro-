@@ -97,7 +97,7 @@ function startFnoStrategyScanner() {
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
     // Daily/15m warmups so research preparation cannot starve F&O coverage.
-    const shouldWarmup=fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
+    const shouldWarmup=!fnoStrategyScanRetrySymbol && fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
     if (shouldWarmup) {
       const warmupSymbol=fnoResearchWarmupQueue.take();
       fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
@@ -151,6 +151,7 @@ function startFnoStrategyScanner() {
       return;
     }
     if(!retryCandidate) fnoStrategyScanCursor++;
+    fnoStrategyScanStats.status='RUNNING';
     const scanStartedAt=Date.now();
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;

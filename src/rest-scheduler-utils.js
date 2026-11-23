@@ -6,8 +6,10 @@ export function getRestWaitMs(now, nextRequestAt) {
   return Math.max(0, Number(nextRequestAt) - Number(now));
 }
 
-// FYERS may provide Retry-After as seconds or an HTTP date. Keep the local
-// one-hour safety floor, but never retry earlier than the provider explicitly asks.
+// FYERS may provide Retry-After as seconds or an HTTP date. Never retry before it.
+// When it is absent/zero, use bounded exponential backoff. FYERS documents a
+// rest-of-day block after more than three per-minute limit violations in a day;
+// the fourth 429 therefore blocks this process until the next IST calendar day.
 export function parseRetryAfterMs(value, now = Date.now()) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const raw = String(value).trim();
@@ -19,9 +21,19 @@ export function parseRetryAfterMs(value, now = Date.now()) {
   return Number.isFinite(at) ? Math.max(0, at - Number(now)) : null;
 }
 
-export function getRateLimitCooldownUntil(now, retryAfter, fallbackMs = 60 * 60 * 1000) {
-  const providerWait = parseRetryAfterMs(retryAfter, now);
-  return Number(now) + Math.max(Number(fallbackMs) || 0, providerWait || 0);
+export function getRateLimitCooldownUntil(now, retryAfter, attempt = 1, baseMs = 60_000, maxMs = 15 * 60_000) {
+  const current = Number(now);
+  const n = Math.max(1, Math.floor(Number(attempt) || 1));
+  const providerWait = parseRetryAfterMs(retryAfter, current) || 0;
+  if (n >= 4) {
+    const ist = new Date(current + 19_800_000);
+    const nextIstMidnight = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + 1) - 19_800_000;
+    return Math.max(nextIstMidnight, current + providerWait);
+  }
+  const base = Math.max(1, Number(baseMs) || 60_000);
+  const cap = Math.max(base, Number(maxMs) || 15 * 60_000);
+  const backoff = Math.min(cap, base * (2 ** Math.min(n - 1, 20)));
+  return current + Math.max(backoff, providerWait);
 }
 
 // Bounded exponential backoff for WebSocket 1015/rate-limit recovery.

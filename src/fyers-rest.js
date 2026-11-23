@@ -216,6 +216,13 @@ async function drainRestQueue() {
         try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
         lastRestMeta.responseCode = body.code ?? null;
         lastRestMeta.responseMessage = String(body.message || body.error || '').slice(0, 160) || null;
+        console.info('[FYERS_REST] upstream response:', JSON.stringify({
+          path: job.url.pathname, source: job.source, priority: job.priority,
+          status: response.status, responseCode: lastRestMeta.responseCode,
+          durationMs: requestRecord.durationMs,
+          queueWaitMs: Math.max(0, requestStartedAt - job.enqueuedAt),
+          ok: response.ok && body.s !== 'error' && !(Number(body.code) < 0)
+        }));
         if (response.status === 429) {
           refreshRequestCounters(Date.now());
           lastRateLimitKind = classifyRestRateLimit({

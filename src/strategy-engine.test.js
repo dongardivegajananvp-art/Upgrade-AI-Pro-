@@ -677,7 +677,7 @@ test('end-to-end bullish continuation validates the complete LONG→CE→risk-pl
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<17;i++){const close=100+i;rows.push({time:start+i*300,open:close-.2,high:close+.3,low:close-.3,close,volume:200});}
   for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:107.2,high:108,low:106,close:107.2,volume:100});
-  rows.push({time:start+29*300,open:108.2,high:109.5,low:108.1,close:109,volume:200});
+  rows.push({time:start+29*300,open:108.2,high:109.5,low:108.1,close:109,volume:400});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'BULLISH_CONTINUATION');
@@ -690,7 +690,7 @@ test('end-to-end bearish continuation validates the complete SHORT→PE→risk-p
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<17;i++){const close=120-i;rows.push({time:start+i*300,open:close+.2,high:close+.3,low:close-.3,close,volume:200});}
   for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:104,high:104.5,low:103.5,close:104,volume:100});
-  rows.push({time:start+29*300,open:103.4,high:103.6,low:101,close:101.5,volume:200});
+  rows.push({time:start+29*300,open:103.4,high:103.6,low:101,close:101.5,volume:400});
   const result=evaluateUnderlyingFixture(rows,'SHORT');
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'BEARISH_CONTINUATION');
@@ -703,7 +703,7 @@ test('end-to-end flag-volume breakout is independently selectable when continuat
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<17;i++){const close=100+i*.6;rows.push({time:start+i*300,open:close-.2,high:close+.3,low:close-.3,close,volume:200});}
   for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:108,high:112,low:104,close:108,volume:100});
-  rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:200});
+  rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:400});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'FLAG_BREAKOUT_VOLUME');
@@ -735,5 +735,6 @@ test('end-to-end daily-trend pullback requires fresh daily context and completes
   assert.equal(result.optionSide,'PE');
   assert.ok(result.rr>=2);
   const missingDaily=evaluateNineStrategies({...base,dailyCandles:[]});
-  assert.notEqual(missingDaily.status,'SETUP_CONFIRMED');
+  assert.notEqual(missingDaily.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='DAILY_TREND_5M_PULLBACK').status,'BLOCKED');
 });

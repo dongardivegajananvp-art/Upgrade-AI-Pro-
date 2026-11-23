@@ -27,7 +27,7 @@
 - [x] Positive end-to-end setup fixtures cover all nine strategy IDs with directional CE/PE contract validation and fixed Entry/SL/Target at RR >= 1:2.
 - [x] A stale-option-quote negative end-to-end gate is exercised for all nine strategy IDs; Top Gainer also covers absent option tick, wrong CE/PE side, incomplete option candles, below-trigger wait and >0.5R chase rejection.
 - [x] Added a nine-strategy evaluator-pipeline negative matrix using fresh underlying ticks, contiguous completed 5-minute candles and fresh daily context; every strategy must return an explicit REJECTED ledger reason when its pattern is absent.
-- [x] Added targeted detector-level invalidation checks for EMA alignment, Top Gainer membership/breakout, missing daily pullback context, day-range retest, double-pattern structure, bullish/bearish continuation impulse, flag volume contraction and opening-range breakout. These are direct detector regressions; they are not yet independent full-pipeline E2E negative fixtures for each strategy.
+- [x] Added full-pipeline per-strategy negative E2E fixtures for EMA alignment, Top Gainer breakout, daily pullback touch/resume, day high/low retest, double-pattern neckline retest, bullish/bearish continuation impulse, flag volume contraction/breakout and opening-range breakout. Each evaluates `evaluateNineStrategies()` and asserts NO_TRADE, no selected strategy, no risk plan, and a specific ledger rejection reason. Separate full-pipeline cases cover missing daily history and missing verified Top Gainer membership.
 - [ ] PWA browser update/cache lifecycle verification on real supported browsers.
 - [ ] Manual rollback drill with Render deployment evidence.
 - [ ] Final market-live acceptance; otherwise UI must remain NO TRADE and orders disabled.
@@ -47,7 +47,7 @@
 | Area | Verification performed | Status / boundary |
 |---|---|---|
 | Runtime baseline | CI and Verify install/use Node.js 22; JavaScript syntax checks and production dependency audits pass | PASS for the tested CI environment |
-| Strategy engine | Nine strategy IDs, positive end-to-end fixtures, directional CE/PE mapping, contract identity and fixed-risk RR >= 1:2 | PASS for covered fixtures; full negative pattern matrix remains open |
+| Strategy engine | Nine strategy IDs, positive end-to-end fixtures, full-pipeline strategy-specific negative E2E matrix, directional CE/PE mapping, contract identity and fixed-risk RR >= 1:2 | PASS for covered fixtures; live-market behavior remains unverified |
 | FYERS REST | Fair scheduling, interactive priority, request coalescing, queue expiry, rolling budget/cooldown and endpoint response diagnostics have regression coverage | PASS in automated tests; not a live FYERS quota guarantee |
 | WebSocket candles | Active-slice bounded 5m OHLC observations, gap/out-of-order/off-session handling and completed-bar boundaries | Diagnostic-only; volume is unverified and observations are not actionable |
 | Scanner | Honest one-history-backed-underlying/minute cadence and 20-slot WebSocket rotation | Code-level checks only; full-session throughput/coverage not proven |
@@ -58,15 +58,10 @@
 Compatibility is therefore **partially verified, not universally certified**. CI passing does not prove browser, broker, market-session, deployment, or restart behavior. No production deployment or Render configuration was changed by this PR.
 
 
-### Latest strategy negative-matrix increment
+### Full-pipeline strategy negative E2E increment
 
-- A single full evaluator-pipeline negative fixture now checks all nine strategy ledger rows on a fresh, contiguous, pattern-neutral session and requires REJECTED plus a non-empty reason for every strategy.
-- This complements the existing positive fixture for each strategy and stale-option-quote rejection for all nine.
-- This does not close the remaining pattern-specific negative variants listed above.
-
-
-### Targeted detector invalidation increment
-
-- Direct negative tests now exercise the specific missing prerequisite for each strategy family, including both continuation directions.
-- These complement the full evaluator neutral-session matrix and the all-nine stale-option quote gate.
-- Full-pipeline pattern-specific negative E2E variants remain a separate acceptance item; no claim is made that detector tests alone prove every end-to-end rejection path.
+- Added `src/strategy-engine-negative-e2e.test.js` with strategy-specific invalidation scenarios executed through `evaluateNineStrategies()`, not just direct detector calls.
+- The matrix covers all nine strategy IDs and asserts NO_TRADE, no selected strategy, no Entry/SL/Target/RR/contract output, and an explicit per-strategy ledger reason.
+- Additional full-pipeline cases verify missing verified Top Gainer membership and missing daily history fail closed as BLOCKED.
+- CI run #234 and Verify run #553 completed successfully on PR #89's merge ref for commit `a87e6431312ea04ca017c56c426984215b5cfb8e`: 261 tests passed, 0 failed. Production dependency audit and syntax checks also passed.
+- This closes the automated full-pipeline negative fixture item for the covered conditions. It does not replace live-market acceptance or guarantee all possible market-data combinations.

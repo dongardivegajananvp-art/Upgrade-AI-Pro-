@@ -26,7 +26,8 @@
 - [ ] Scanner coverage/latency measurement over a full NSE session. WebSocket OHLC observations currently remain diagnostic-only; they do not yet replace the 5-minute REST history, daily/15-minute context, or verified volume required by strategy confirmation.
 - [x] Positive end-to-end setup fixtures cover all nine strategy IDs with directional CE/PE contract validation and fixed Entry/SL/Target at RR >= 1:2.
 - [x] A stale-option-quote negative end-to-end gate is exercised for all nine strategy IDs; Top Gainer also covers absent option tick, wrong CE/PE side, incomplete option candles, below-trigger wait and >0.5R chase rejection.
-- [ ] Per-pattern negative end-to-end variants for every strategy remain incomplete. Detector-level negative cases exist, but they are not a substitute for full evaluator-pipeline rejection fixtures.
+- [x] Added a nine-strategy evaluator-pipeline negative matrix using fresh underlying ticks, contiguous completed 5-minute candles and fresh daily context; every strategy must return an explicit REJECTED ledger reason when its pattern is absent.
+- [ ] Pattern-specific invalidation variants (e.g. EMA alignment failure, missing Top Gainer qualification, failed daily pullback resume, missing retest/neckline, weak continuation impulse, failed flag volume and opening-range non-break) remain to be added individually. The neutral-session matrix is a broad evaluator fail-closed check, not proof of every individual invalidation rule.
 - [ ] PWA browser update/cache lifecycle verification on real supported browsers.
 - [ ] Manual rollback drill with Render deployment evidence.
 - [ ] Final market-live acceptance; otherwise UI must remain NO TRADE and orders disabled.
@@ -55,3 +56,10 @@
 | Restart / rollback | Process-local cooldown limitation documented; rollback procedure documented | Restart-safe cooldown and an executed rollback drill remain open |
 
 Compatibility is therefore **partially verified, not universally certified**. CI passing does not prove browser, broker, market-session, deployment, or restart behavior. No production deployment or Render configuration was changed by this PR.
+
+
+### Latest strategy negative-matrix increment
+
+- A single full evaluator-pipeline negative fixture now checks all nine strategy ledger rows on a fresh, contiguous, pattern-neutral session and requires REJECTED plus a non-empty reason for every strategy.
+- This complements the existing positive fixture for each strategy and stale-option-quote rejection for all nine.
+- This does not close the remaining pattern-specific negative variants listed above.

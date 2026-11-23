@@ -342,11 +342,11 @@ export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority
     return value;
   });
 }
-export async function getFyersQuotes(symbols) {
+export async function getFyersQuotes(symbols, source = 'quotes-panel') {
   if (!Array.isArray(symbols) || symbols.length < 1 || symbols.length > 50 || !symbols.every(validateNseSymbol)) {
     throw new Error('Quotes require 1 to 50 valid NSE symbols per request');
   }
-  return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') }, 50);
+  return fyersGet(DATA_BASE, '/quotes', { symbols: symbols.join(',') }, 50, source);
 }
 export function normalizeDailyCandles(rows, now = Date.now()) {
   if (!Array.isArray(rows)) return [];

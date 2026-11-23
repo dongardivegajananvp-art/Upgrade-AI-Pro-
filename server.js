@@ -16,6 +16,7 @@ import { buildHealthStatus } from './src/health-status.js';
 import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession } from './src/nse-session.js';
+import { createSingleFlight } from './src/setup-evaluation-flight.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -42,6 +43,7 @@ function parseCookies(header='') {
   }));
 }
 const consumedOAuthStates = new Set();
+const setupEvaluationFlight = createSingleFlight();
 let fnoUniverseLoadPromise = null;
 let fnoUniverseLoadedDate = null;
 let fnoUniverseRetryDate = null;
@@ -533,21 +535,56 @@ const server = http.createServer(async (req,res) => {
       if (contract.symbol !== body.contract || contract.underlying !== expectedUnderlying || !['CE','PE'].includes(contract.side)) {
         return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected option contract identity, underlying or CE/PE side does not match the requested setup'});
       }
-      const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([getFiveMinuteHistory(body.underlying,Date.now(),50),getFiveMinuteHistory(body.contract,Date.now(),50),getDailyHistory(body.underlying,Date.now(),50),getFifteenMinuteHistory(body.underlying,Date.now(),50)]);
-      // REST history requests are serialized to respect FYERS pacing. Re-read the
-      // WebSocket snapshot afterwards so the 10-second freshness gate uses current ticks.
-      const latestMarket=getMarketData();
-      const latestUnderlying=latestMarket.selectedUnderlying,latestOption=latestMarket.selectedOption;
-      if(!latestUnderlying?.fresh||latestUnderlying.symbol!==body.underlying)
-        return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Underlying tick became stale while verified research history was loading'});
-      if(!latestOption?.fresh||latestOption.symbol!==body.contract)
-        return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Option tick became stale while verified research history was loading'});
-      const isTopGainer = (latestMarket.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
-      const setup = evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,optionCandles:optionHistory.candles,optionTick:latestOption,contract,dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,isTopGainer,researchEnabled:true,now:Date.now()});
-      return send(res,200,{...setup,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'});
+      const flightKey = body.underlying + '|' + body.contract;
+      const setup = await setupEvaluationFlight.run(flightKey, async () => {
+        const startedAt = Date.now();
+        console.info('[SETUP_EVAL] started:',JSON.stringify({underlying:body.underlying,contract:body.contract,contractSide:contract.side,strike:contract.strike,expiry:contract.expiry}));
+        const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([
+          getFiveMinuteHistory(body.underlying,Date.now(),50),
+          getFiveMinuteHistory(body.contract,Date.now(),50),
+          getDailyHistory(body.underlying,Date.now(),50),
+          getFifteenMinuteHistory(body.underlying,Date.now(),50)
+        ]);
+        console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
+          underlying:body.underlying,contract:body.contract,
+          underlying5mCount:underlyingHistory.candles.length,
+          option5mCount:optionHistory.candles.length,
+          optionLastCompletedCandleTime:optionHistory.candles.at(-1)?.time||null,
+          dailyCount:dailyHistory.candles.length,fifteenMinuteCount:fifteenMinuteHistory.candles.length,
+          sources:[underlyingHistory.source,optionHistory.source,dailyHistory.source,fifteenMinuteHistory.source]
+        }));
+        // Re-read after REST work: never let history latency silently weaken the
+        // strict 10-second underlying/option WebSocket freshness gates.
+        const latestMarket=getMarketData();
+        const latestUnderlying=latestMarket.selectedUnderlying,latestOption=latestMarket.selectedOption;
+        if(!latestUnderlying?.fresh||latestUnderlying.symbol!==body.underlying)
+          return {status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Underlying tick became stale while verified research history was loading'};
+        if(!latestOption?.fresh||latestOption.symbol!==body.contract)
+          return {status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Option tick became stale while verified research history was loading'};
+        const isTopGainer = (latestMarket.fno?.topGainers || []).some(item=>item.symbol===body.underlying);
+        const result = evaluateNineStrategies({
+          underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,
+          optionCandles:optionHistory.candles,optionTick:latestOption,contract,
+          dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,
+          isTopGainer,researchEnabled:true,now:Date.now()
+        });
+        console.info('[SETUP_EVAL] completed:',JSON.stringify({
+          underlying:body.underlying,contract:body.contract,status:result.status,
+          strategy:result.strategy||null,reason:result.reason||null,
+          optionCandleCount:optionHistory.candles.length,
+          entry:Number.isFinite(Number(result.entry))?result.entry:null,
+          stopLoss:Number.isFinite(Number(result.stopLoss))?result.stopLoss:null,
+          target:Number.isFinite(Number(result.target))?result.target:null,
+          rr:Number.isFinite(Number(result.rr))?result.rr:null,
+          durationMs:Date.now()-startedAt
+        }));
+        return {...result,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'};
+      });
+      return send(res,200,setup);
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));
       const rest=getRestDiagnostics();
+      console.warn('[SETUP_EVAL] blocked:',JSON.stringify({reason:String(error.message||'Setup verification unavailable').slice(0,180),restStatus:rest.status,cooldownActive:rest.cooldownActive,cooldownUntil:rest.cooldownUntil||null}));
       return send(res,rateLimited?429:200,{
         status:'DATA_UNAVAILABLE_NO_TRADE',
         reason:String(error.message||'Setup verification unavailable').slice(0,180),

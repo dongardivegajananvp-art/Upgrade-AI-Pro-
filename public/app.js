@@ -65,13 +65,9 @@ async function refreshUniverseScan() {
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
-    warmup.textContent='RESEARCH WARMUP · '+(data.marketSession==='CLOSED'?'PAUSED · MARKET CLOSED':(scanner.warmupStatus||'IDLE'))+
-      ' · QUEUED '+(scanner.warmupQueueDepth||0)+
-      ' · DONE '+(scanner.warmupCompletedCount||0)+
-      ' · RETRIES '+(scanner.warmupRetryCount||0)+
-      ' · BLOCKED '+(scanner.warmupRejectedCount||0)+
-      (scanner.warmupLastRetryAt?' · NEXT RETRY '+scanner.warmupLastRetryAt:'')+
-      (scanner.warmupLastFailure?' · LAST FAILURE '+scanner.warmupLastFailure:'');
+    warmup.textContent='RESEARCH · '+(data.marketSession==='CLOSED'?'PAUSED':(scanner.warmupStatus||'IDLE'))+
+      ' · Q '+(scanner.warmupQueueDepth||0)+' · DONE '+(scanner.warmupCompletedCount||0)+
+      ' · RETRY '+(scanner.warmupRetryCount||0)+' · BLOCK '+(scanner.warmupRejectedCount||0);
     container.append(warmup);
     for(const item of data.top3||[]) {
       const card=document.createElement('button');card.type='button';card.className='research-card';
@@ -91,11 +87,15 @@ async function refreshUniverseScan() {
       blocked.textContent='No verified Top 3 yet. Missing/stale data and unconfirmed patterns are not scored.';
       container.append(blocked);
     }
+    // Keep the default DOM intentionally small on mobile. Detailed ledgers are
+    // available for the current active slice only; the full rolling universe is
+    // represented by aggregate counts instead of rendering 218 nested rows.
     const activeSet=new Set(data.activeSymbols||[]);
-    const activeEvaluations=(data.evaluations||[]).filter(row=>activeSet.has(row.symbol));
+    const activeEvaluationsAll=(data.evaluations||[]).filter(row=>activeSet.has(row.symbol));
+    const activeEvaluations=activeEvaluationsAll.slice(0,4);
     const diagnostics=document.createElement('details');
     const diagnosticsTitle=document.createElement('summary');
-    diagnosticsTitle.textContent='ACTIVE SLICE · PER-STOCK NINE-STRATEGY DIAGNOSTICS ('+activeEvaluations.length+')';
+    diagnosticsTitle.textContent='ACTIVE SLICE · '+activeEvaluationsAll.length+' STOCKS · SHOWING '+activeEvaluations.length+' DETAILS';
     diagnostics.append(diagnosticsTitle);
     for(const stock of activeEvaluations) {
       const group=document.createElement('details');
@@ -114,28 +114,11 @@ async function refreshUniverseScan() {
     const coverage=data.coverageSummary||{};
     const coverageAudit=document.createElement('details');
     const coverageTitle=document.createElement('summary');
-    coverageTitle.textContent='FULL F&O ROTATION AUDIT · SCANNED '+(coverage.scannedCount||0)+'/'+(coverage.universeCount||0)+' · FRESH TICKS '+(coverage.freshTickCount||0)+' · STALE '+(coverage.staleTickCount||0)+' · NO TICK '+(coverage.noTickCount||0);
+    coverageTitle.textContent='F&O COVERAGE · '+(coverage.scannedCount||0)+'/'+(coverage.universeCount||0)+' SCANNED · '+(coverage.freshTickCount||0)+' FRESH · '+(coverage.staleTickCount||0)+' STALE · '+(coverage.noTickCount||0)+' NO TICK';
     coverageAudit.append(coverageTitle);
     const coverageNote=document.createElement('small');coverageNote.className='empty-inline';
-    coverageNote.textContent='Per-symbol rolling observations only; not simultaneous. A scan attempt is not proof of a fresh tick or an actionable setup.';
+    coverageNote.textContent='Rolling coverage, not simultaneous. Per-symbol history is intentionally hidden here to keep the live workstation responsive.';
     coverageAudit.append(coverageNote);
-    for(const stock of data.symbolCoverage||[]) {
-      const group=document.createElement('details');
-      const summary=document.createElement('summary');
-      summary.textContent=stock.symbol+' · '+stock.scanStatus+' · TICK '+stock.tickStatus+' · '+stock.scanAttempts+' SCANS';
-      group.append(summary);
-      const detail=document.createElement('small');detail.className='empty-inline';
-      detail.textContent='Last scan: '+(stock.lastScanAt||'Never')+' · Tick age: '+(stock.tickAgeSeconds===null?'Unknown':stock.tickAgeSeconds+'s')+' · Exchange time: '+(stock.tickExchangeTime||'Missing')+' · Completed 5m candles: '+(stock.candleCount||0)+' · Last candle: '+(stock.lastCompletedCandleTime||'Missing');
-      group.append(detail);
-      if(stock.scanReason) {const reason=document.createElement('small');reason.className='empty-inline';reason.textContent='Scan reason: '+stock.scanReason;group.append(reason);}
-      for(const item of stock.strategyLedger||[]) {
-        const row=document.createElement('div');row.className='strategy-ledger-row';
-        const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
-        const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
-        row.append(label,reason);group.append(row);
-      }
-      coverageAudit.append(group);
-    }
     container.append(coverageAudit);
     if(!isNseRegularSession(Date.now())) {
       const historicalHeading=document.createElement('div');historicalHeading.className='empty-inline';

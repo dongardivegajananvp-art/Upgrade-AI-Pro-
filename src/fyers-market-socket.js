@@ -4,6 +4,7 @@ import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, 
 import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { isNseRegularSession } from './nse-session.js';
+import { shouldActivateFnoSliceOnFeedRecovery } from './fno-feed-readiness.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
@@ -187,7 +188,7 @@ function accept(item) {
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   const sessionWasReady = sessionFeedReady(tick.receivedAt);
   ticks.set(symbol, tick);
-  if (!sessionWasReady && universe.length && sessionFeedReady(tick.receivedAt)) {
+  if (shouldActivateFnoSliceOnFeedRecovery(sessionWasReady, sessionFeedReady(tick.receivedAt), universe.length)) {
     console.info('[FYERS_DATA] fresh index feed restored; activating first F&O slice immediately');
     applyFnoRotation(false);
   }

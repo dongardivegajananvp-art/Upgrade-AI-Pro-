@@ -12,8 +12,8 @@ const candle=(offset,open,high,low,close)=>({
   time:t0+offset,open,high,low,close,volume:1000,completed:true,source:'FYERS_EXPIRED_FO_5M'
 });
 function fixture({future=[
-  candle(900,109,115,108,114),
-  candle(1200,114,117,112,116)
+  candle(900,109,111.4,108,111),
+  candle(1200,111,117,110.5,116)
 ]}={}) {
  const dataset={
   source:'FYERS_EXPIRED_FO_API',timestampConvention:'FYERS_EPOCH_BAR_START',integrityVerified:true,
@@ -52,7 +52,7 @@ test('offline option replay uses future bar trigger and stop/target with exact t
 });
 
 test('offline option replay assumes stop first when stop and target are both touched in one candle',()=>{
- const {dataset,contractSpec}=fixture({future:[candle(900,109,118,106,114)]});
+ const {dataset,contractSpec}=fixture({future:[candle(900,110.05,118,106.95,114)]});
  const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
  assert.equal(result.status,'TRADE_CLOSED');
  assert.equal(result.exitReason,'STOP');
@@ -107,4 +107,21 @@ test('performance summary excludes unresolved trades and remains PARTIAL',()=>{
  assert.equal(result.unresolvedCount,1);
  assert.equal(result.dataUnavailableCount,1);
  assert.equal(result.performanceClass,'GROSS_CANDLE_PROXY_NOT_EXECUTABLE');
+});
+
+
+test('offline option replay marks below-trigger bars that cross the chase ceiling as unresolved',()=>{
+ const {dataset,contractSpec}=fixture({future:[candle(900,109,115,108,114)]});
+ const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
+ assert.equal(result.status,'UNRESOLVED');
+ assert.match(result.reason,/cannot prove an in-range entry/);
+ assert.equal(result.pnl,null);
+});
+
+test('offline option replay marks entry and stop touched in one below-trigger bar as unresolved',()=>{
+ const {dataset,contractSpec}=fixture({future:[candle(900,109,111,106.95,108)]});
+ const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
+ assert.equal(result.status,'UNRESOLVED');
+ assert.match(result.reason,/event order is unknowable/);
+ assert.equal(result.pnl,null);
 });

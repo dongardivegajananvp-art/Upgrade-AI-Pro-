@@ -53,7 +53,7 @@ test('offline worker rejects modified files and provenance mismatch', async t =>
 
 test('offline worker rejects modified original FYERS response bytes', async t => {
   const dirs = await fixture(t);
-  await writeFile(path.join(dirs.inputDir,'sbin-5m-response.json'),JSON.stringify({s:'ok',candles:[]}));
+  await writeFile(path.join(dirs.inputDir,'sbin-5m-response.json'),JSON.stringify({s:'ok',candles:[[1,1,1,1,1,1]]}));
   await assert.rejects(runOfflineHistoricalDataset({ ...dirs }), /Original FYERS fiveMinute response SHA-256 mismatch/);
 });
 

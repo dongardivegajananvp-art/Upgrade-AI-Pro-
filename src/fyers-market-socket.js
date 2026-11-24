@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect, formatSocketCloseDetail } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -46,7 +46,7 @@ let socketHasConnected = false;
 const socketSdkRequestedSymbols = new Set();
 let subscriptionOperationSequence = 0;
 const SUBSCRIPTION_BATCH_SIZE = 1;
-const SUBSCRIPTION_BATCH_INTERVAL_MS = 1200;
+const SUBSCRIPTION_BATCH_INTERVAL_MS = SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS;
 let lastSentSubscriptionBatch = [];
 let pendingSubscriptionSymbols = [];
 const pendingSubscriptionSet = new Set();

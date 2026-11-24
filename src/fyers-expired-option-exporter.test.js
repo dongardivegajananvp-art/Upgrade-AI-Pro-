@@ -8,10 +8,11 @@ import { exportExpiredOptionPair } from './fyers-expired-option-exporter.js';
 const underlying='NSE:NIFTY50-INDEX';
 const expiry='2025-03-27';
 const start='2025-03-26';
-const end='2025-03-27';
+const end='2025-03-26';
 const now=Date.parse('2025-03-30T00:00:00Z');
 const quietSafeClock=()=>now;
-const stamp=Math.floor(Date.parse('2025-03-26T03:45:00Z')/1000);
+const stamp=Math.floor(Date.parse('2025-03-26T03:50:00Z')/1000);
+const candleStamp=Math.floor(Date.parse('2025-03-26T03:45:00Z')/1000);
 const columns=['timestamp','open','high','low','close','volume'];
 
 function clientFixture({ce='ok',pe='ok'}={}) {
@@ -34,7 +35,7 @@ function clientFixture({ce='ok',pe='ok'}={}) {
       const status=args.symbol.endsWith('CE')?ce:pe;
       return status==='no_data'
         ? {s:'no_data',symbol:args.symbol,resolution:'5',columns,candles:[]}
-        : {s:'ok',symbol:args.symbol,resolution:'5',columns,candles:[[stamp,100,102,99,101,1200]]};
+        : {s:'ok',symbol:args.symbol,resolution:'5',columns,candles:[[candleStamp,100,102,99,101,1200]]};
     }
   };
   return {client,calls};
@@ -69,6 +70,8 @@ test('expired option export discovers provider expiry and exact nearest-ATM CE/P
     const payload=JSON.parse(await readFile(path.join(outputDir,'NSE_NIFTY25MAR23000CE.json'),'utf8'));
     assert.equal(payload.selection.historicalAtmSelection,true);
     assert.equal(payload.candles[0].source,'FYERS_EXPIRED_FO_5M');
+    assert.equal(payload.candles[0].time,candleStamp);
+    assert.equal(payload.timestampConvention,'FYERS_EPOCH_BAR_START');
     assert.equal(payload.actionable,false);
   });
 });
@@ -104,7 +107,7 @@ test('expired option exporter rejects invalid ranges, unknown contract lists and
   await withOutput(async outputDir=>{
     const {client}=clientFixture();
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,maxIntradayRequests:3}),/4-to-10 request budget/);
-    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,end:'2025-03-28'}),/historical/);
+    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,end:'2025-03-28'}),/one trading date/);
     client.history_underlying_symbols=async()=>({s:'ok',data:{expiry_date:expiry,contracts:{options:[]}}});
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client}),/no parseable option strikes/);
   });
@@ -152,4 +155,12 @@ test('expired option requests share one persistent ten-request IST daily budget 
   } finally {
     await rm(root,{recursive:true,force:true});
   }
+});
+
+test('expired option ATM export refuses multi-session ranges when only one historical close selects the strike',async()=>{
+  await withOutput(async outputDir=>{
+    const {client,calls}=clientFixture();
+    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,end:'2025-03-27'}),/one trading date/);
+    assert.equal(calls.length,0,'invalid multi-session selection must be blocked before any FYERS request');
+  });
 });

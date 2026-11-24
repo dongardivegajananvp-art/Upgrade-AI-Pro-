@@ -164,3 +164,12 @@ test('expired option ATM export refuses multi-session ranges when only one histo
     assert.equal(calls.length,0,'invalid multi-session selection must be blocked before any FYERS request');
   });
 });
+
+test('expired option ATM selection requires a completed underlying close from the same NSE session',async()=>{
+  await withOutput(async outputDir=>{
+    const {client,calls}=clientFixture();
+    const priorDay=Math.floor(Date.parse('2025-03-25T03:50:00Z')/1000);
+    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,selectionTime:priorDay}),/same trading date|selected trading date/);
+    assert.equal(calls.length,0,'invalid historical close must be rejected before API requests');
+  });
+});

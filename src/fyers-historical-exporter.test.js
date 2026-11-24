@@ -63,7 +63,9 @@ test('exporter rejects unverified master and invalid candle rows instead of repa
  await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:PROV,verifiedOfficialMaster:false,symbols:['NSE:SBIN-EQ']}));
  await assert.rejects(exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW}),/verified FYERS official/);
  await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:PROV,verifiedOfficialMaster:true,symbols:['NSE:SBIN-EQ']}));
- await assert.rejects(exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW,minRequestGapMs:1000,pause:async()=>{},fetchImpl:async()=>({status:200,ok:true,text:async()=>JSON.stringify({s:'ok',candles:[[1,1,1,1,1,1]]})})}),/Invalid or duplicate FYERS 5-minute candle/);
+ const invalid=await exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW,minRequestGapMs:1000,pause:async()=>{},fetchImpl:async()=>({status:200,ok:true,text:async()=>JSON.stringify({s:'ok',candles:[[1,1,1,1,1,1]]})})});
+ assert.equal(invalid.manifest.complete,false);
+ assert.match(invalid.manifest.failures[0].reason,/Invalid or duplicate FYERS 5-minute candle/);
 });
 
 test('exporter source has no imports from live REST scheduler or live workstation',async()=>{

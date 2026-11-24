@@ -128,3 +128,28 @@ test('expired option exporter requires completed historical underlying context a
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,underlyingPrice:0}),/completed historical underlying close/);
   });
 });
+
+test('expired option requests share one persistent ten-request IST daily budget across invocations',async()=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'fyers-expired-budget-'));
+  try {
+    const budgetDir=path.join(root,'persistent-budget');
+    const first=clientFixture();
+    const one=await exportExpiredOptionPair({...base(path.join(root,'run-one')),budgetDir,client:first.client});
+    assert.equal(one.report.requestBudget.usedToday,4);
+    assert.equal(one.report.requestBudget.remainingToday,6);
+
+    const second=clientFixture();
+    const two=await exportExpiredOptionPair({...base(path.join(root,'run-two')),budgetDir,client:second.client});
+    assert.equal(two.report.requestBudget.usedToday,8);
+    assert.equal(two.report.requestBudget.remainingToday,2);
+
+    const third=clientFixture();
+    await assert.rejects(
+      ()=>exportExpiredOptionPair({...base(path.join(root,'run-three')),budgetDir,client:third.client}),
+      /daily request budget exhausted/
+    );
+    assert.equal(third.calls.length,2,'only the two remaining daily requests may reach FYERS');
+  } finally {
+    await rm(root,{recursive:true,force:true});
+  }
+});

@@ -14,7 +14,7 @@
 
 - The 6/minute total and 3/minute background caps are conservative application guards based on observed Cloudflare 1015 behavior; they are not published FYERS quotas.
 - Scanner cadence of one symbol/minute means a 218-symbol history-backed pass takes approximately 218 minutes if every request is admitted and every underlying has a fresh tick. Queue expiry, cooldown, missing ticks and account/research work can extend that time. It is not a simultaneous 218-symbol live scan.
-- Cooldown timestamps remain process-local. Startup requires one interactive recovery probe before background work resumes; the exact pre-restart cooldown cannot be durably restored without a persistent store. No paid external storage has been introduced.
+- Active FYERS REST cooldown deadlines are now encrypted into an HttpOnly, Secure, SameSite=Lax browser-session cookie and restored before authenticated API work after a Render restart. This is a no-cost, browser-session-scoped persistence layer; it is not shared across separate browsers/devices, and a response lost before cookie delivery cannot persist its cooldown. The startup recovery probe remains required and is blocked until any restored deadline expires.
 - Endpoint health remains NOT_VERIFIED until that endpoint has returned an actual response in the current process. A successful historical response is not proof of current market freshness.
 - No market-live acceptance is claimed while NSE is closed.
 
@@ -65,3 +65,14 @@ Compatibility is therefore **partially verified, not universally certified**. CI
 - Additional full-pipeline cases verify missing verified Top Gainer membership and missing daily history fail closed as BLOCKED.
 - CI run #234 and Verify run #553 completed successfully on PR #89's merge ref for commit `a87e6431312ea04ca017c56c426984215b5cfb8e`: 261 tests passed, 0 failed. Production dependency audit and syntax checks also passed.
 - This closes the automated full-pipeline negative fixture item for the covered conditions. It does not replace live-market acceptance or guarantee all possible market-data combinations.
+
+
+## 2026-11-24 live-session evidence (production, unchanged deployment)
+
+- Render process started at 2026-11-24T05:07:22Z and listened at 05:07:24Z. FYERS OAuth token exchange succeeded at 05:07:59Z.
+- Official FYERS/NSE master loaded for 2026-11-24: 87,577 FO rows, 10,210 CM rows, 86,908 active option contracts, 224 active underlyings, and 218 mapped equity underlyings.
+- The active WebSocket F&O slice remained at 0 because none of the three subscribed index ticks passed exchange-time freshness. The received NIFTY, BANK NIFTY and SENSEX ticks carried 2026-11-23 exchange timestamps and were explicitly marked `fresh:false`.
+- The Data Socket repeatedly closed and auto-reconnected during the inspected window. The prior close callback discarded close-event details; PR #89 now captures bounded close details and configures SDK auto-reconnect before opening the transport.
+- With no fresh index feed, F&O subscriptions, selected option ticks, and the live scanner correctly remained gated. No live strategy/Entry acceptance can be claimed from this window.
+- Account positions, orderbook and Option Chain had no verified successful upstream response in this log window. Absence of a logged request is not evidence of recovery.
+- Production remained on deployment `dep-dc22957f3r2c73e4evhg`; no PR #89 code was deployed. Orders remained disabled and stale/missing data remained NO TRADE.

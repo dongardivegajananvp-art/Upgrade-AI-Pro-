@@ -22,18 +22,18 @@ function csvRecords(text){
   if(quoted){if(ch==='"'&&text[i+1]==='"'){field+='"';i++;}else if(ch==='"')quoted=false;else field+=ch;continue;}
   if(ch==='"'){quoted=true;continue;}
   if(ch===','){row.push(field);field='';continue;}
-  if(ch==='\\n'){row.push(field.replace(/\\r$/,''));if(row.some(v=>v!==''))rows.push(row);row=[];field='';continue;}
+  if(ch==='\n'){row.push(field.replace(/\r$/,''));if(row.some(v=>v!==''))rows.push(row);row=[];field='';continue;}
   field+=ch;
  }
- if(field!==''||row.length){row.push(field.replace(/\\r$/,''));rows.push(row);}
+ if(field!==''||row.length){row.push(field.replace(/\r$/,''));rows.push(row);}
  return rows;
 }
 function normHeader(value){return String(value||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
 function nseDate(value){
  const raw=String(value||'').trim();
- if(/^\\d{4}-\\d{2}-\\d{2}$/.test(raw))return raw;
- if(/^\\d{8}$/.test(raw))return raw.slice(4,8)+'-'+raw.slice(2,4)+'-'+raw.slice(0,2);
- const m=raw.match(/^(\\d{1,2})[- ]([A-Za-z]{3})[- ](\\d{2,4})$/);
+ if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw;
+ if(/^\d{8}$/.test(raw))return raw.slice(4,8)+'-'+raw.slice(2,4)+'-'+raw.slice(0,2);
+ const m=raw.match(/^(\d{1,2})[- ]([A-Za-z]{3})[- ](\d{2,4})$/);
  if(!m)return null;
  const months={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
  const year=m[3].length===2?'20'+m[3]:m[3];
@@ -41,7 +41,7 @@ function nseDate(value){
 }
 function verifyContractMaster(bytes,spec,optionDataset){
  let text;
- try{text=gunzipSync(bytes).toString('utf8').replace(/^\\uFEFF/,'');}catch{throw new Error('Official NSE daily F&O contract master is not a valid gzip CSV');}
+ try{text=gunzipSync(bytes).toString('utf8').replace(/^\uFEFF/,'');}catch{throw new Error('Official NSE daily F&O contract master is not a valid gzip CSV');}
  const rows=csvRecords(text);
  if(rows.length<2)throw new Error('Official NSE daily F&O contract master has no contract rows');
  const headers=rows[0].map(normHeader);

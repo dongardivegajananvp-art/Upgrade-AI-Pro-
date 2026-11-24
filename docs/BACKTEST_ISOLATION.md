@@ -15,7 +15,13 @@ Set `FYERS_APP_ID` and `FYERS_ACCESS_TOKEN` as environment variables in the isol
 
 ## Official instrument master input
 
-The exporter requires a JSON file created from the official FYERS NSE F&O equity instrument master, with this explicit schema:
+First download and map the current FYERS NSE F&O and NSE Capital Market symbol masters:
+
+`npm run backtest:master -- ./fyers-master`
+
+This reads the official public FYERS JSON URLs for `NSE_FO` and `NSE_CM`, stores the exact raw files, records their SHA-256 hashes and retrieval time, then maps `NSE_FO.underFyTok` to `NSE_CM.fyToken`. Only active NSE cash-market `-EQ` instruments with a matching F&O underlying token are included. The mapper refuses to call the universe complete if fewer than 50 equities map. The resulting `official-master.json` is the required input for the historical exporter.
+
+The master schema is:
 
 ```json
 {
@@ -27,7 +33,7 @@ The exporter requires a JSON file created from the official FYERS NSE F&O equity
 }
 ```
 
-The `verifiedOfficialMaster` flag is an operator assertion, not a cryptographic proof. Before export, independently verify that the symbols were extracted from the current official FYERS master, restricted to NSE equity F&O instruments. Do not substitute a manually guessed list or current Top Gainers.
+The exporter itself downloads both official masters and records the raw-file hashes and URLs. The hashes attest to downloaded bytes but are not a FYERS digital signature. Do not substitute a manually guessed list or current Top Gainers.
 
 ## Export behavior
 
@@ -44,7 +50,7 @@ The dataset manifest also stores the exact instrument-master file hash. The offl
 Example on an isolated machine after installing the repository dependencies and setting credentials securely in that shell:
 
 ```sh
-npm run backtest:export -- ./official-master.json ./fyers-dataset
+npm run backtest:master -- ./fyers-master\nnpm run backtest:export -- ./fyers-master/official-master.json ./fyers-dataset
 npm run backtest:offline -- ./fyers-dataset ./backtest-results
 ```
 

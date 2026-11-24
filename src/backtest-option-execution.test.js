@@ -29,7 +29,7 @@ function fixture({future=[
   ]
  };
  const contractSpec={
-  source:'OFFICIAL_EXCHANGE_CONTRACT_MASTER',sha256:'a'.repeat(64),tradeDate:'2025-03-26',sourceUrl:'https://www.nseindia.com/all-reports-derivatives',masterFile:'NSE_FO_contract_26032025.csv.gz',masterFileSha256:'a'.repeat(64),
+  source:'OFFICIAL_EXCHANGE_CONTRACT_MASTER',masterRowVerified:true,sha256:'a'.repeat(64),tradeDate:'2025-03-26',sourceUrl:'https://www.nseindia.com/all-reports-derivatives',masterFile:'NSE_FO_contract_26032025.csv.gz',masterFileSha256:'a'.repeat(64),
   symbol:dataset.symbol,underlying:dataset.underlying,expiry:dataset.expiry,
   strike:dataset.strike,side:'CE',tickSize:0.05
  };

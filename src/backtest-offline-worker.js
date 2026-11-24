@@ -64,6 +64,16 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
     if (!validEvidence(evidence?.fiveMinute) || evidence.fiveMinute.resolution !== '5' || !validEvidence(evidence?.daily) || evidence.daily.resolution !== 'D') {
       throw new Error('FYERS API response evidence is missing or invalid for ' + symbol);
     }
+    const rawEvidence=data.rawResponseEvidence;
+    for (const [kind,proof] of [['fiveMinute',evidence.fiveMinute],['daily',evidence.daily]]) {
+      const rawFile=safeName(rawEvidence?.[kind]?.file);
+      const rawBytes=await readFile(path.join(input,rawFile));
+      const rawHash=sha256(rawBytes);
+      if (rawHash!==rawEvidence[kind].sha256 || rawHash!==proof.responseSha256) throw new Error('Original FYERS '+kind+' response SHA-256 mismatch for '+symbol);
+      let rawBody;
+      try { rawBody=JSON.parse(rawBytes.toString('utf8')); } catch { throw new Error('Original FYERS '+kind+' response is not valid JSON for '+symbol); }
+      if (rawBody.s!=='ok' || !Array.isArray(rawBody.candles)) throw new Error('Original FYERS '+kind+' response payload is invalid for '+symbol);
+    }
     const result = replay({
       symbol,
       fiveMinuteCandles: data.fiveMinuteCandles,

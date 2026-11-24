@@ -17,7 +17,7 @@ async function fixture(t) {
   await writeFile(path.join(inputDir, 'sbin.json'), data);
   await writeFile(path.join(inputDir, 'manifest.json'), JSON.stringify({
     format:'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1', source:'FYERS_HISTORICAL_API', actionable:false,
-    datasetId:'test-fixture', startTime:1, endTime:2, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{sha256:'b'.repeat(64)},NSE_CM:{sha256:'c'.repeat(64)}}}, requestPolicy:{sequential:true},
+    datasetId:'test-fixture', startTime:1, endTime:2, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',sha256:'b'.repeat(64)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',sha256:'c'.repeat(64)}}}, requestPolicy:{sequential:true},
     files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
   }));
   return { inputDir, outputDir };

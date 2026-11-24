@@ -27,7 +27,7 @@ function assertNseQuietWindow(epochMs) {
 }
 function optionStrike(symbol) {
   if (typeof symbol !== 'string' || !/^NSE:[A-Z0-9&._-]+(?:CE|PE)$/.test(symbol)) return null;
-  const match = symbol.match(/(\d+(?:\\.\d+)?)(?:CE|PE)$/);
+  const match = symbol.match(/(\d+(?:\.\d+)?)(?:CE|PE)$/);
   if (!match) return null;
   const strike = Number(match[1]);
   return Number.isFinite(strike) && strike > 0 ? strike : null;
@@ -165,9 +165,14 @@ export async function exportExpiredOptionPair({
   if (typeof underlying!=='string' || !/^NSE:[A-Z0-9&._-]+(?:-EQ|-INDEX)$/.test(underlying)) throw new Error('A verified NSE equity/index underlying is required');
   const expiryMs=parseDate(expiry), startMs=parseDate(start), endMs=parseDate(end);
   if (!(startMs<=endMs && endMs<=expiryMs && expiryMs<Date.parse(istDate(now)+'T00:00:00Z'))) throw new Error('Expired option research range must be historical and end on/before expiry');
+  if (start !== end) throw new Error('Historical ATM option export must be scoped to one trading date so a single underlying close cannot mislabel contracts across sessions');
   if ((endMs-startMs)/86400000>99) throw new Error('Expired F&O 5-minute request may cover at most 100 calendar dates');
   if (!Number.isFinite(Number(underlyingPrice)) || Number(underlyingPrice)<=0 ||
       !Number.isFinite(Number(selectionTime)) || Number(selectionTime)<=0) throw new Error('A positive completed historical underlying close and its timestamp are required');
+  const selectionDate=istDate(Number(selectionTime)*1000);
+  const selectionClock=new Date((Number(selectionTime)+19800)*1000);
+  const selectionMinute=selectionClock.getUTCHours()*60+selectionClock.getUTCMinutes();
+  if (selectionDate!==start || selectionMinute<560 || selectionMinute>930) throw new Error('Historical underlying close timestamp must be a completed NSE 5-minute candle close within the selected trading date');
   if (!outputDir || !Number.isInteger(minRequestGapMs) || minRequestGapMs<1000 || minRequestGapMs>60000 ||
       !Number.isInteger(maxIntradayRequests) || maxIntradayRequests<4 || maxIntradayRequests>10) {
     throw new Error('Output directory, safe request pacing and Standard-plan 4-to-10 request budget are required');
@@ -228,7 +233,7 @@ export async function exportExpiredOptionPair({
     const payload={
       format:FORMAT,source:'FYERS_EXPIRED_FO_API',symbol,underlying,expiry,strike,side,
       selection:{method:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',underlyingPrice:Number(underlyingPrice),selectionTime:Number(selectionTime),historicalAtmSelection:true},
-      requested:{start,end,resolution:'5'},timestampConvention:'FYERS_EPOCH_UNVERIFIED_BAR_BOUNDARY',
+      requested:{start,end,resolution:'5'},timestampConvention:'FYERS_EPOCH_BAR_START',
       columns:response.columns,candles,responseSha256:sha256(JSON.stringify(response)),
       candleSha256:sha256(JSON.stringify(candles)),retrievedAt:new Date(clock()).toISOString(),
       historicalBidAskDepthAvailable:false,actionable:false,ordersEnabled:false
@@ -247,7 +252,7 @@ export async function exportExpiredOptionPair({
       'Provider contract symbols and expiry are taken from FYERS expired-F&O discovery APIs.',
       'Strike selection uses the supplied completed underlying candle close; this is not a historical bid/ask or option-chain replay.',
       'FYERS expired-F&O API exposes candle OHLCV here; historical bid/ask depth and actual executable fills are not established.',
-      'Candle timestamp boundary convention must be verified before minute-accurate fill simulation.',
+      'FYERS History API support confirms candle epoch timestamps mark the start of each interval; this is the convention used for replay alignment.',
       'This export is data collection only; it does not calculate strategy performance or P&L.'
     ]
   };

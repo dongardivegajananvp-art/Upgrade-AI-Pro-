@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "backtest:offline": "node src/backtest-offline-worker.js"
   },
   "dependencies": {
     "fyers-api-v3": "2.4.1"

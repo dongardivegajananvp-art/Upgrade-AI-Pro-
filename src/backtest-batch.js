@@ -51,6 +51,7 @@ export function createHistoricalFnoBacktestRunner({
       blockedCount: job.blockedCount,
       signalCount: job.signalCount,
       strategySummary: { ...job.strategySummary },
+      strategyDiagnostics: JSON.parse(JSON.stringify(job.strategyDiagnostics)),
       currentSymbol: job.currentSymbol,
       storedSignalCount: job.signals.length,
       signalsTruncated: job.signalCount > job.signals.length,
@@ -109,6 +110,14 @@ export function createHistoricalFnoBacktestRunner({
           job.signalCount += Number(result.signalCount) || 0;
           for (const [strategy, count] of Object.entries(result.summary || {})) {
             job.strategySummary[strategy] = (job.strategySummary[strategy] || 0) + Number(count || 0);
+          }
+          for (const [strategy, counts] of Object.entries(result.strategyDiagnostics || {})) {
+            if (!job.strategyDiagnostics[strategy]) continue;
+            for (const [status, count] of Object.entries(counts || {})) {
+              if (Object.prototype.hasOwnProperty.call(job.strategyDiagnostics[strategy], status)) {
+                job.strategyDiagnostics[strategy][status] += Number(count || 0);
+              }
+            }
           }
           for (const signal of result.signals || []) {
             if (job.signals.length < job.maxStoredSignals) job.signals.push(signal);
@@ -180,6 +189,7 @@ export function createHistoricalFnoBacktestRunner({
         blockedCount: 0,
         signalCount: 0,
         strategySummary: Object.fromEntries(STRATEGY_IDS.map(strategy => [strategy, 0])),
+        strategyDiagnostics: Object.fromEntries(STRATEGY_IDS.map(strategy => [strategy, { blocked:0, rejected:0, detected:0 }])),
         signals: [],
         failures: [],
         failureCount: 0,

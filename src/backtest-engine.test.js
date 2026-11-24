@@ -36,7 +36,7 @@ test('historical signal replay refuses unverified or synthetic provenance', () =
 
 test('historical signal replay evaluates candle prefixes and never fabricates option P&L', () => {
   const result = runHistoricalSignalReplay(neutralData());
-  assert.equal(result.status, 'COMPLETE');
+  assert.equal(result.status, 'PARTIAL');
   assert.equal(result.mode, 'HISTORICAL_SIGNAL_REPLAY');
   assert.equal(result.actionable, false);
   assert.ok(result.evaluatedCandles > 0);
@@ -65,4 +65,15 @@ test('historical Top Gainer membership cannot be inferred from current gainers',
   const result = runHistoricalSignalReplay(input);
   assert.equal(result.status, 'DATA_UNAVAILABLE');
   assert.match(result.reason, /snapshot is malformed/);
+});
+
+
+test('historical replay reports PARTIAL when timestamp-matched Top Gainer snapshots are absent', () => {
+  const result = runHistoricalSignalReplay(neutralData());
+  assert.equal(result.status, 'PARTIAL');
+  assert.equal(result.topGainerCoverage.status, 'NOT_EVALUATED');
+  assert.equal(result.topGainerCoverage.matchedSnapshots, 0);
+  assert.ok(result.topGainerCoverage.missingSnapshots > 0);
+  assert.match(result.topGainerCoverage.reason, /snapshots are missing/);
+  assert.equal(result.tradePerformance, null);
 });

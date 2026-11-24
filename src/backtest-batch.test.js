@@ -73,8 +73,7 @@ test('batch reports missing data without inventing signals or P&L', async () => 
     replay: () => ({ status: 'DATA_UNAVAILABLE', actionable: false, reason: 'Missing candles', signals: [], summary: {} })
   });
   const started = runner.start({ universe: [{ symbol: 'NSE:SBIN-EQ' }] });
-  await tick();
-  const final = runner.get(started.job.id);
+  const final = await waitForTerminal(runner, started.job.id);
   assert.equal(final.status, 'DATA_UNAVAILABLE');
   assert.equal(final.signalCount, 0);
   assert.deepEqual(final.signals, []);

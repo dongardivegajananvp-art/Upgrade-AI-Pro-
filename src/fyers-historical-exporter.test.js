@@ -22,7 +22,7 @@ async function fixture(t){
   const root=await mkdtemp(path.join(os.tmpdir(),'uapro-fyers-export-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const masterFile=path.join(root,'master.json');
-  await writeFile(masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:true,retrievedAt:'2026-11-24T09:00:00Z',sourceFiles:{NSE_FO:{sha256:'a'.repeat(64)},NSE_CM:{sha256:'b'.repeat(64)}},symbols:[{symbol:'NSE:SBIN-EQ'}]}));
+  await writeFile(masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:true,retrievedAt:'2026-11-24T09:00:00Z',sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',sha256:'a'.repeat(64)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',sha256:'b'.repeat(64)}},symbols:[{symbol:'NSE:SBIN-EQ'}]}));
   return {root,masterFile,outputDir:path.join(root,'dataset')};
 }
 

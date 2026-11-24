@@ -7,6 +7,7 @@ import { exportFyersHistoricalDataset } from './fyers-historical-exporter.js';
 
 const MASTER='UPGRADE_AI_PRO_FYERS_NSE_FNO_MASTER_V1';
 const PROV='FYERS_HISTORICAL_API';
+const MASTER_PROV='FYERS_OFFICIAL_SYMBOL_MASTER';
 const NOW=Date.parse('2026-11-24T10:00:00Z');
 function dailyRows(){
   const rows=[];
@@ -21,7 +22,7 @@ async function fixture(t){
   const root=await mkdtemp(path.join(os.tmpdir(),'uapro-fyers-export-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const masterFile=path.join(root,'master.json');
-  await writeFile(masterFile,JSON.stringify({format:MASTER,source:PROV,verifiedOfficialMaster:true,retrievedAt:'2026-11-24T09:00:00Z',symbols:[{symbol:'NSE:SBIN-EQ'}]}));
+  await writeFile(masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:true,retrievedAt:'2026-11-24T09:00:00Z',sourceFiles:{NSE_FO:{sha256:'a'.repeat(64)},NSE_CM:{sha256:'b'.repeat(64)}},symbols:[{symbol:'NSE:SBIN-EQ'}]}));
   return {root,masterFile,outputDir:path.join(root,'dataset')};
 }
 
@@ -60,7 +61,7 @@ test('exporter halts on FYERS 429 without retrying or continuing universe',async
 
 test('exporter rejects unverified master and invalid candle rows instead of repairing them',async t=>{
  const dirs=await fixture(t);
- await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:PROV,verifiedOfficialMaster:false,symbols:['NSE:SBIN-EQ']}));
+ await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:false,sourceFiles:{NSE_FO:{sha256:'a'.repeat(64)},NSE_CM:{sha256:'b'.repeat(64)}},symbols:['NSE:SBIN-EQ']}));
  await assert.rejects(exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW}),/verified FYERS official/);
  await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:PROV,verifiedOfficialMaster:true,symbols:['NSE:SBIN-EQ']}));
  const invalid=await exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW,minRequestGapMs:1000,pause:async()=>{},fetchImpl:async()=>({status:200,ok:true,text:async()=>JSON.stringify({s:'ok',candles:[[1,1,1,1,1,1]]})})});

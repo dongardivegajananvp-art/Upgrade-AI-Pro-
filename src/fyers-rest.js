@@ -540,6 +540,44 @@ export function getRestDispatchReadiness(priority = REST_PRIORITY.SCANNER, path 
   });
 }
 
+export function getRestSafetyState(now = Date.now()) {
+  return {
+    cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
+    rateLimitDayKey,
+    rateLimitCountToday,
+    cloudflareRateLimitCountToday,
+    unknownRateLimitCountToday,
+    lastRateLimitAt,
+    lastRateLimitKind
+  };
+}
+
+// Restore only a future, bounded cooldown. A stale browser cookie can never
+// shorten a cooldown already known by this process; daily counters restore only
+// when their IST date matches the current session date.
+export function restoreRestSafetyState(state, now = Date.now()) {
+  if (!state || typeof state !== 'object') return false;
+  const currentDay = istDayKey(now);
+  if (state.rateLimitDayKey === currentDay) {
+    rateLimitDayKey = currentDay;
+    rateLimitCountToday = Math.max(rateLimitCountToday, Math.floor(Number(state.rateLimitCountToday) || 0));
+    cloudflareRateLimitCountToday = Math.max(cloudflareRateLimitCountToday, Math.floor(Number(state.cloudflareRateLimitCountToday) || 0));
+    unknownRateLimitCountToday = Math.max(unknownRateLimitCountToday, Math.floor(Number(state.unknownRateLimitCountToday) || 0));
+  }
+  if (typeof state.lastRateLimitAt === 'string' && Number.isFinite(Date.parse(state.lastRateLimitAt))) {
+    lastRateLimitAt = state.lastRateLimitAt;
+  }
+  if (typeof state.lastRateLimitKind === 'string') lastRateLimitKind = state.lastRateLimitKind;
+  const restoredUntil = Number(state.cooldownUntil);
+  if (!Number.isFinite(restoredUntil) || restoredUntil <= now || restoredUntil > now + 30 * 24 * 60 * 60 * 1000) return false;
+  cooldownUntil = Math.max(cooldownUntil, restoredUntil);
+  recoveryProbeRequired = true;
+  recoveryProbeAttempted = false;
+  lastRestStatus = 'RATE_LIMITED';
+  lastRestError = 'Restored encrypted FYERS REST cooldown from authenticated browser session until ' + new Date(cooldownUntil).toISOString();
+  return true;
+}
+
 export function getRestDiagnostics(now = Date.now()) {
   refreshRequestCounters(now);
   return {
@@ -576,8 +614,9 @@ export function getRestDiagnostics(now = Date.now()) {
     recoveryProbeAttempted,
     recoveryProbePolicy: 'ONE_PROBE_PER_START_OR_429_COOLDOWN; FAILED_PROBE_REQUIRES_OPERATOR_RESTART',
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
-    cooldownPersistence: 'PROCESS_LOCAL_ONLY',
-    restartSafe: false
+    cooldownPersistence: 'ENCRYPTED_AUTHENTICATED_BROWSER_COOKIE_PER_SESSION',
+    restartSafe: false,
+    restartSafeScope: 'BROWSER_SESSION_ONLY_NOT_SHARED_ACROSS_CLIENTS'
   };
 }
 

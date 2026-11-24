@@ -67,9 +67,16 @@ export async function exportFyersHistoricalDataset({
   if (!masterFile || !outputDir || !appId || !accessToken || typeof fetchImpl!=='function') throw new Error('Master file, output directory, FYERS app ID, access token and fetch implementation are required');
   if (!Number.isInteger(minRequestGapMs) || minRequestGapMs<1000 || minRequestGapMs>60000) throw new Error('Request pacing must be between 1000 and 60000 milliseconds');
   const output=path.resolve(outputDir);
-  const masterBytes=await readFile(path.resolve(masterFile));
+  const masterPath=path.resolve(masterFile);
+  const masterBytes=await readFile(masterPath);
   const master=JSON.parse(masterBytes.toString('utf8'));
   if (master.format!==MASTER_FORMAT || master.source!==MASTER_PROVENANCE || master.verifiedOfficialMaster!==true || !Array.isArray(master.symbols) || master.sourceFiles?.NSE_FO?.url!=='https://public.fyers.in/sym_details/NSE_FO_sym_master.json' || master.sourceFiles?.NSE_CM?.url!=='https://public.fyers.in/sym_details/NSE_CM_sym_master.json' || !/^[a-f0-9]{64}$/.test(master.sourceFiles?.NSE_FO?.sha256||'') || !/^[a-f0-9]{64}$/.test(master.sourceFiles?.NSE_CM?.sha256||'')) throw new Error('Input must be an explicitly verified FYERS official NSE F&O equity master export');
+  for (const name of ['NSE_FO','NSE_CM']) {
+    const source=master.sourceFiles[name];
+    if (typeof source.file!=='string' || path.basename(source.file)!==source.file || !source.file.endsWith('_sym_master.json')) throw new Error('Official FYERS '+name+' raw master filename is missing or invalid');
+    const raw=await readFile(path.join(path.dirname(masterPath),source.file));
+    if (sha256(raw)!==source.sha256) throw new Error('Official FYERS '+name+' raw master SHA-256 mismatch');
+  }
   const symbols=[...new Set(master.symbols.map(x=>String(x?.symbol||x).trim().toUpperCase()))].sort();
   if (!symbols.length || symbols.length>300 || symbols.some(s=>!SYMBOL.test(s))) throw new Error('Official master contains an empty, oversized or invalid NSE F&O equity universe');
   const endTime=Math.floor(now/1000);

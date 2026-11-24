@@ -9,7 +9,7 @@ import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } f
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
-import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getDailyHistory, getCachedResearchHistories, validateNseSymbol, getHistoricalBacktestHistory } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
@@ -19,7 +19,6 @@ import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
-import { createHistoricalFnoBacktestRunner } from './src/backtest-batch.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -69,9 +68,6 @@ let fnoStrategyScanLoggedRotation = null;
 let fnoStrategyScanRetryAt = 0;
 let fnoStrategyScanRetrySymbol = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
-const historicalFnoBacktest = createHistoricalFnoBacktestRunner({
-  fetchHistory: input => getHistoricalBacktestHistory({ ...input, priority: REST_PRIORITY.RESEARCH, source: 'fno-3m-backtest' })
-});
 // Per-underlying audit ledger: records actual scan attempts and explicit skips/failures.
 // It is diagnostic only and never upgrades stale/missing data to an actionable setup.
 const fnoSymbolScanLedger = new Map();
@@ -385,14 +381,7 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),REST_PRIORITY.CHART,'chart-history'));
-      if (url.pathname === '/api/backtest/historical-fno') {
-        const jobId = url.searchParams.get('id');
-        if (jobId) {
-          const job = historicalFnoBacktest.get(jobId);
-          return job ? send(res,200,job) : send(res,404,{status:'NOT_FOUND',reason:'Historical backtest job was not found in this process'});
-        }
-        return send(res,200,{status:'ID_REQUIRED',activeJob:historicalFnoBacktest.active(),note:'POST this endpoint to start the three-month official FYERS F&O stock replay; poll with ?id=jobId'});
-      }
+      if (url.pathname === '/api/backtest/historical-fno') return send(res,410,{status:'BACKTEST_ISOLATED',reason:'Historical backtests are not available inside the live trading process'});
       if (url.pathname === '/api/research-context') {
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
@@ -605,18 +594,7 @@ const server = http.createServer(async (req,res) => {
       return send(res,upstream429 ? 429 : 502,{status:upstream429 ? 'FYERS_UPSTREAM_RATE_LIMIT' : 'TOKEN_EXCHANGE_FAILED',reason:error.message});
     }
   }
-  if (req.method === 'POST' && url.pathname === '/api/backtest/historical-fno') {
-    const resumeId = url.searchParams.get('resume');
-    if (resumeId) {
-      const resumed = historicalFnoBacktest.resume(resumeId);
-      const job = historicalFnoBacktest.get(resumeId);
-      return send(res,resumed?202:409,{status:resumed?'RESUMED':'NOT_RESUMED',accepted:resumed,job,ordersEnabled:false,actionable:false});
-    }
-    if (!isFnoMasterCurrent()) return send(res,503,{status:'SYMBOL_MASTER_NOT_LOADED',reason:'Current-session official FYERS NSE F&O equity master is required'});
-    const snapshot = getFnoUniverseSnapshot();
-    const result = historicalFnoBacktest.start({ universe:snapshot.universe, months:3 });
-    return send(res,result.accepted?202:409,{status:result.accepted?'ACCEPTED':'NOT_STARTED',...result,ordersEnabled:false,actionable:false});
-  }
+  if (req.method === 'POST' && url.pathname === '/api/backtest/historical-fno') return send(res,410,{status:'BACKTEST_ISOLATED',reason:'Historical backtests must run in a separate worker and cannot use the live process'});
   if (req.method === 'POST' && url.pathname === '/api/select-underlying') {
     try {
       if (!isFnoMasterCurrent()) return send(res,503,{status:'UNDERLYING_NOT_VERIFIED',reason:'Current IST session official FYERS NSE F&O master is not verified'});

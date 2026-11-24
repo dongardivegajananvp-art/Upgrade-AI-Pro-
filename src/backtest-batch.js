@@ -69,7 +69,8 @@ export function createHistoricalFnoBacktestRunner({
       try {
         const data = await fetchHistory({
           symbol: item.symbol,
-          startTime: job.warmupStartTime,
+          startTime: job.fiveMinuteStartTime,
+          dailyStartTime: job.warmupStartTime,
           endTime: job.endTime
         });
         if (!data || data.dataProvenance !== 'FYERS_HISTORICAL_API') {
@@ -146,6 +147,7 @@ export function createHistoricalFnoBacktestRunner({
         startTime,
         endTime,
         warmupStartTime,
+        fiveMinuteStartTime: Math.floor(shiftCalendarDays(startDate.getTime(), -5) / 1000),
         universe: symbols,
         universeCount: symbols.length,
         processedCount: 0,

@@ -15,6 +15,7 @@ Independent NSE-only live trading workstation. No MCX code, routes, symbols, cac
 
 ## Local development
 
-Node.js 20+; run `npm test` and `npm start`.
+- Node.js 22.x (matches `package.json` and GitHub Actions).
+- Run `npm install`, `npm test`, and `npm start`.
 
-This repository is a clean foundation. It is not production-live until FYERS authentication, WebSocket freshness, scanner correctness, and end-to-end verification pass.
+This repository is not production-trading-ready until FYERS authentication, live WebSocket freshness, scanner correctness, Option Chain and Account Feed recovery, and end-to-end Entry verification pass during an NSE session.

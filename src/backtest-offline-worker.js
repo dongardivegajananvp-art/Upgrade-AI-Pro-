@@ -37,6 +37,9 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
     const filename=safeName(source.datasetFile);
     if (sha256(await readFile(path.join(input,filename)))!==source.sha256) throw new Error('Bundled official FYERS '+name+' master SHA-256 mismatch');
   }
+  if (manifest.complete !== true || Number(manifest.failureCount) !== 0 || Number(manifest.exportedCount) !== manifest.files?.length) {
+    throw new Error('Historical dataset manifest is incomplete or has failed exports; replay is blocked');
+  }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length > 300) {
     throw new Error('Dataset manifest must contain 1 to 300 symbol files');
   }

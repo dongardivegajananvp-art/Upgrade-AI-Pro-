@@ -26,7 +26,7 @@ async function fixture(run){
  for(const [key,file] of Object.entries(entries)){const bytes=Buffer.from(JSON.stringify(docs[key]));await writeFile(path.join(input,file),bytes);hashes[key]=hash(bytes);}
  const manifest={format:'UPGRADE_AI_PRO_OPTION_EXECUTION_DATASET_V1',source:'FYERS_EXPIRED_FO_API',actionable:false,ordersEnabled:false,complete:true,failureCount:0,datasetId:'test-fixture',entries:[{signalId:'s1',signalFile:entries.signal,signalSha256:hashes.signal,optionFile:entries.option,optionSha256:hashes.option,contractSpecFile:entries.spec,contractSpecSha256:hashes.spec}]};
  await writeFile(path.join(input,'manifest.json'),JSON.stringify(manifest));
- try{return await run({root,input,output,manifest,entries,hashes});}finally{await rm(root,{recursive:true,force:true});}
+ try{return await run({root,input,output,manifest,entries,hashes,contractSpec});}finally{await rm(root,{recursive:true,force:true});}
 }
 
 test('offline option worker verifies file hashes and produces non-actionable candle proxy report',async()=>{
@@ -60,4 +60,19 @@ test('offline option worker rejects overlapping input and output directories',as
  const root=await mkdtemp(path.join(os.tmpdir(),'offline-option-overlap-'));
  try{await assert.rejects(()=>runOfflineOptionExecutionDataset({inputDir:root,outputDir:path.join(root,'out')}),/non-overlapping/);}
  finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('offline option worker blocks a tick size that differs from the exact NSE contract-master row',async()=>{
+ await fixture(async ({input,output,manifest,entries,contractSpec})=>{
+  const csv='Instrument,Symbol,Expiry,Strike,OptionType,LotSize,TickSize,ISIN,UnderlyingSymbol\\nOPTSTK,SBIN,27-Mar-2025,800,CE,750,0.01,INE062A01020,SBIN\\n';
+  const bytes=gzipSync(csv);
+  await writeFile(path.join(input,contractSpec.masterFile),bytes);
+  const masterHash=hash(bytes);
+  const spec={...contractSpec,masterFileSha256:masterHash,sha256:masterHash};
+  const specBytes=Buffer.from(JSON.stringify(spec));
+  await writeFile(path.join(input,entries.spec),specBytes);
+  manifest.entries[0].contractSpecSha256=hash(specBytes);
+  await writeFile(path.join(input,'manifest.json'),JSON.stringify(manifest));
+  await assert.rejects(()=>runOfflineOptionExecutionDataset({inputDir:input,outputDir:output}),/tick size does not match the exact contract row/);
+ });
 });

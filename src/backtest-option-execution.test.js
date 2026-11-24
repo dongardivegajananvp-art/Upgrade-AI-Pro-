@@ -29,7 +29,7 @@ function fixture({future=[
   ]
  };
  const contractSpec={
-  source:'OFFICIAL_EXCHANGE_CONTRACT_MASTER',sha256:'a'.repeat(64),
+  source:'OFFICIAL_EXCHANGE_CONTRACT_MASTER',masterRowVerified:true,sha256:'a'.repeat(64),tradeDate:'2025-03-26',sourceUrl:'https://www.nseindia.com/all-reports-derivatives',masterFile:'NSE_FO_contract_26032025.csv.gz',masterFileSha256:'a'.repeat(64),
   symbol:dataset.symbol,underlying:dataset.underlying,expiry:dataset.expiry,
   strike:dataset.strike,side:'CE',tickSize:0.05
  };
@@ -65,7 +65,7 @@ test('offline option replay blocks missing historical contract tick-size evidenc
  delete contractSpec.tickSize;
  const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
  assert.equal(result.status,'DATA_UNAVAILABLE');
- assert.match(result.reason,/tick size are required/);
+ assert.match(result.reason,/Same-session official NSE daily F&O contract-master/);
 });
 
 test('offline option replay blocks selection from a different signal timestamp or underlying close',()=>{
@@ -124,4 +124,20 @@ test('offline option replay marks entry and stop touched in one below-trigger ba
  assert.equal(result.status,'UNRESOLVED');
  assert.match(result.reason,/event order is unknowable/);
  assert.equal(result.pnl,null);
+});
+
+test('offline option replay blocks a contract master from a different trade date',()=>{
+ const {dataset,contractSpec}=fixture();
+ contractSpec.tradeDate='2025-03-25';
+ const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
+ assert.equal(result.status,'DATA_UNAVAILABLE');
+ assert.match(result.reason,/Same-session official NSE daily F&O contract-master/);
+});
+
+test('offline option replay blocks missing official NSE daily master provenance',()=>{
+ const {dataset,contractSpec}=fixture();
+ delete contractSpec.masterFileSha256;
+ const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
+ assert.equal(result.status,'DATA_UNAVAILABLE');
+ assert.match(result.reason,/Same-session official NSE daily F&O contract-master/);
 });

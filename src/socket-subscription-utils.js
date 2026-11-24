@@ -1,3 +1,5 @@
+export const SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS = 2500;
+
 export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols = []) {
   const current = [...new Set((Array.isArray(currentSymbols) ? currentSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
   const desired = [...new Set((Array.isArray(desiredSymbols) ? desiredSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];

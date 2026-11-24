@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { createHistoricalFnoBacktestRunner } from './backtest-batch.js';
 
 const fixedNow = Date.parse('2026-11-24T05:00:00Z');
-const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+async function waitForTerminal(runner, jobId) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const job = runner.get(jobId);
+    if (job && !['QUEUED', 'RUNNING'].includes(job.status)) return job;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error('Historical backtest test job did not reach a terminal state');
+}
 
 test('three-month F&O batch accepts only unique official NSE equity symbols and exposes read-only state', async () => {
   const calls = [];
@@ -29,8 +36,7 @@ test('three-month F&O batch accepts only unique official NSE equity symbols and 
   assert.equal(started.job.actionable, false);
   assert.equal(started.job.ordersEnabled, false);
   assert.equal(runner.start({ months: 3, universe: [{ symbol: 'NSE:SBIN-EQ' }] }).accepted, false);
-  await tick();
-  const final = runner.get(started.job.id);
+  const final = await waitForTerminal(runner, started.job.id);
   assert.equal(final.status, 'COMPLETE');
   assert.equal(final.processedCount, 2);
   assert.equal(final.signalCount, 2);
@@ -46,8 +52,7 @@ test('batch blocks a symbol when the history adapter does not attest FYERS prove
     fetchHistory: async () => ({ dataProvenance: 'SYNTHETIC', fiveMinuteCandles: [], dailyCandles: [] })
   });
   const started = runner.start({ universe: [{ symbol: 'NSE:SBIN-EQ' }] });
-  await tick();
-  const final = runner.get(started.job.id);
+  const final = await waitForTerminal(runner, started.job.id);
   assert.equal(final.status, 'DATA_UNAVAILABLE');
   assert.equal(final.completedCount, 0);
   assert.equal(final.blockedCount, 1);

@@ -3,13 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
+import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
-import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
@@ -34,6 +34,16 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 function send(res, status, body, type='application/json; charset=utf-8') {
+  try {
+    const safetyCookie = res.__fyersRestSafetyCookieFactory?.();
+    if (safetyCookie) {
+      const existing = res.getHeader('set-cookie');
+      const cookies = Array.isArray(existing) ? existing : existing ? [existing] : [];
+      res.setHeader('set-cookie',[...cookies,safetyCookie]);
+    }
+  } catch (error) {
+    console.warn('[FYERS_REST] could not attach encrypted cooldown recovery cookie:',String(error?.message||error).slice(0,120));
+  }
   res.writeHead(status, { 'content-type': type, 'cache-control':'no-store', 'x-content-type-options':'nosniff', 'referrer-policy':'no-referrer' });
   if (Buffer.isBuffer(body) || body instanceof Uint8Array) return res.end(body);
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
@@ -334,7 +344,22 @@ const server = http.createServer(async (req,res) => {
   const hasFyersSession = Boolean(requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session, {
     appId:process.env.FYERS_APP_ID, appSecret:process.env.FYERS_SECRET_KEY
   }));
-  if (hasFyersSession) ensureFyersMarketStarted();
+  if (hasFyersSession) {
+    const appId=process.env.FYERS_APP_ID, appSecret=process.env.FYERS_SECRET_KEY;
+    const restoredSafety=restoreRestSafetyCookie(requestCookies.fyers_rest_safety,{appId,appSecret});
+    if (restoredSafety) restoreRestSafetyState(restoredSafety);
+    // Attach a cookie only when this process has a newer active cooldown than
+    // the browser already holds. This avoids rewriting Set-Cookie on 2s polling.
+    res.__fyersRestSafetyCookieFactory=()=>{
+      const state=getRestSafetyState();
+      const deadline=Number(state.cooldownUntil);
+      if (!Number.isFinite(deadline) || deadline<=Date.now()) return null;
+      if (restoredSafety && Number(restoredSafety.cooldownUntil)>=deadline) return null;
+      const cookie=createRestSafetyCookie({appId,appSecret,state});
+      return cookie ? `fyers_rest_safety=${cookie.value}; Max-Age=${cookie.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax` : null;
+    };
+    ensureFyersMarketStarted();
+  }
   // Public endpoints are limited to non-account market/status views and OAuth
   // entry/callback. All broker-backed data and workstation controls require the
   // caller's own cryptographically valid FYERS session cookie.

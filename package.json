@@ -11,7 +11,8 @@
     "test": "node --test",
     "backtest:offline": "node src/backtest-offline-worker.js",
     "backtest:export": "node src/fyers-historical-exporter.js",
-    "backtest:master": "node src/backtest-symbol-master-exporter.js"
+    "backtest:master": "node src/backtest-symbol-master-exporter.js",
+    "backtest:options:offline": "node src/backtest-option-offline-worker.js"
   },
   "dependencies": {
     "fyers-api-v3": "2.4.1"

@@ -271,8 +271,6 @@ export async function exportExpiredOptionPair({
   }
   if (pair.CE===pair.PE) throw new Error('FYERS expired CE/PE contract identity collision');
 
-  const root=path.resolve(outputDir);
-  await mkdir(root,{recursive:true});
   const contractResults={};
   for (const side of ['CE','PE']) {
     const symbol=pair[side];

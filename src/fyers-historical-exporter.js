@@ -86,7 +86,17 @@ export async function exportFyersHistoricalDataset({
   const fiveMinuteStartTime=Math.floor((startDate.getTime()-5*86400000)/1000);
   validateRange({startTime:fiveMinuteStartTime,dailyStartTime,endTime});
   await mkdir(output,{recursive:true});
-  const manifest={format:DATA_FORMAT,source:PROVENANCE,actionable:false,datasetId:'fyers-nse-fno-3m-'+endTime,createdAt:new Date(now).toISOString(),requested:{startTime,endTime,dailyStartTime,fiveMinuteStartTime},master:{sha256:sha256(masterBytes),retrievedAt:master.retrievedAt||null,source:MASTER_PROVENANCE,sourceFiles:master.sourceFiles},requestPolicy:{sequential:true,minGapMs:minRequestGapMs,retries:0},files:[],failures:[]};
+  const datasetMasterFiles={};
+  for (const name of ['NSE_FO','NSE_CM']) {
+    const source=master.sourceFiles[name];
+    const bytes=await readFile(path.join(path.dirname(masterPath),source.file));
+    const datasetFile='master-'+name+'_sym_master.json';
+    if (sha256(bytes)!==source.sha256) throw new Error('Official FYERS '+name+' master changed during export');
+    await writeFile(path.join(output,datasetFile+'.tmp'),bytes,{flag:'wx'});
+    await rename(path.join(output,datasetFile+'.tmp'),path.join(output,datasetFile));
+    datasetMasterFiles[name]={...source,datasetFile,sha256:sha256(bytes)};
+  }
+  const manifest={format:DATA_FORMAT,source:PROVENANCE,actionable:false,datasetId:'fyers-nse-fno-3m-'+endTime,createdAt:new Date(now).toISOString(),requested:{startTime,endTime,dailyStartTime,fiveMinuteStartTime},master:{sha256:sha256(masterBytes),retrievedAt:master.retrievedAt||null,source:MASTER_PROVENANCE,sourceFiles:datasetMasterFiles},requestPolicy:{sequential:true,minGapMs:minRequestGapMs,retries:0},files:[],failures:[]};
   let lastRequestAt=0;
   for (let index=0; index<symbols.length; index++) {
     const symbol=symbols[index];

@@ -42,6 +42,15 @@ export function verifyLoginState(state, cookieState) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// Atomically validate and consume one OAuth state in the process-local replay guard.
+export function consumeLoginState(state, cookieState, consumedStates, maxEntries = 2000) {
+  if (!(consumedStates instanceof Set) || !verifyLoginState(state, cookieState) || consumedStates.has(state)) return false;
+  consumedStates.add(state);
+  const limit = Math.max(1, Math.floor(Number(maxEntries) || 2000));
+  while (consumedStates.size > limit) consumedStates.delete(consumedStates.values().next().value);
+  return true;
+}
+
 // Persist the short-lived broker session in an encrypted, HttpOnly browser cookie.
 // This survives Render Free instance sleep/restarts without a paid database or disk.
 export function createSessionCookie({ appId, appSecret, now = Date.now() } = {}) {

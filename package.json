@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "backtest:offline": "node src/backtest-offline-worker.js"
+    "backtest:offline": "node src/backtest-offline-worker.js",
+    "backtest:export": "node src/fyers-historical-exporter.js"
   },
   "dependencies": {
     "fyers-api-v3": "2.4.1"

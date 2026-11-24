@@ -6,7 +6,7 @@ const FORMAT = 'UPGRADE_AI_PRO_FYERS_EXPIRED_OPTION_DATA_V1';
 const CORE_COLUMNS = ['timestamp','open','high','low','close','volume'];
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const ISO_DATE = /^\\d{4}-\\d{2}-\\d{2}$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function istDate(epochMs) {
   return new Date(Number(epochMs) + 19800000).toISOString().slice(0,10);
@@ -27,7 +27,7 @@ function assertNseQuietWindow(epochMs) {
 }
 function optionStrike(symbol) {
   if (typeof symbol !== 'string' || !/^NSE:[A-Z0-9&._-]+(?:CE|PE)$/.test(symbol)) return null;
-  const match = symbol.match(/(\\d+(?:\\.\\d+)?)(?:CE|PE)$/);
+  const match = symbol.match(/(\d+(?:\\.\d+)?)(?:CE|PE)$/);
   if (!match) return null;
   const strike = Number(match[1]);
   return Number.isFinite(strike) && strike > 0 ? strike : null;

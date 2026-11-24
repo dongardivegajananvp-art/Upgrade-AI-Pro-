@@ -66,3 +66,14 @@ test('historical Top Gainer membership cannot be inferred from current gainers',
   assert.equal(result.status, 'DATA_UNAVAILABLE');
   assert.match(result.reason, /snapshot is malformed/);
 });
+
+
+test('historical replay reports PARTIAL when timestamp-matched Top Gainer snapshots are absent', () => {
+  const result = runHistoricalSignalReplay(neutralData());
+  assert.equal(result.status, 'PARTIAL');
+  assert.equal(result.topGainerCoverage.status, 'NOT_EVALUATED');
+  assert.equal(result.topGainerCoverage.matchedSnapshots, 0);
+  assert.ok(result.topGainerCoverage.missingSnapshots > 0);
+  assert.match(result.topGainerCoverage.reason, /snapshots are missing/);
+  assert.equal(result.tradePerformance, null);
+});

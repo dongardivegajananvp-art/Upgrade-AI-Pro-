@@ -27,7 +27,7 @@ function assertNseQuietWindow(epochMs) {
 }
 function optionStrike(symbol) {
   if (typeof symbol !== 'string' || !/^NSE:[A-Z0-9&._-]+(?:CE|PE)$/.test(symbol)) return null;
-  const match = symbol.match(/(\d+(?:\\.\d+)?)(?:CE|PE)$/);
+  const match = symbol.match(/(\d+(?:\.\d+)?)(?:CE|PE)$/);
   if (!match) return null;
   const strike = Number(match[1]);
   return Number.isFinite(strike) && strike > 0 ? strike : null;

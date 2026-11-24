@@ -216,7 +216,7 @@ test('expired option exporter refuses a checkpoint whose cached response hash wa
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client}),/checkpoint response hash is invalid/);
   });
 });
-\ntest('expired option archive keeps the same contract across different historical session selections',async()=>{
+test('expired option archive keeps the same contract across different historical session selections',async()=>{
  await withOutput(async outputDir=>{
   const first=clientFixture();
   const second=clientFixture();

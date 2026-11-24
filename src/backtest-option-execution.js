@@ -6,8 +6,8 @@ const up=(v,t)=>Number((Math.ceil(v/t-1e-9)*t).toFixed(8));
 const down=(v,t)=>Number((Math.floor(v/t+1e-9)*t).toFixed(8));
 const norm=v=>String(v||'').toUpperCase().replace(/^NSE:/,'').replace(/-(EQ|INDEX)$/,'');
 const fail=reason=>({status:'DATA_UNAVAILABLE',actionable:false,ordersEnabled:false,reason,pnl:null,rMultiple:null});
-function validCandle(c){return c&&c.completed===true&&c.source==='FYERS_EXPIRED_FO_5M'&&['time','open','high','low','close','volume'].every(k=>finite(c[k]))&&Number(c.time)>0&&Number(c.open)>0&&Number(c.close)>0&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close))&&Number(c.volume)>=0;}
-function continuous(rows){return rows.every((r,i)=>i===0||(Number(r.time)-Number(rows[i-1].time)===BAR&&istDate(r.time)===istDate(rows[i-1].time)));}
+function validCandle(c){return c&&c.completed===true&&c.source==='FYERS_EXPIRED_FO_5M'&&['time','open','high','low','close','volume'].every(k=>finite(c[k]))&&Number(c.time)>0&&Number(c.open)>0&&Number(c.close)>0&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)>0&&Number(c.low)<=Math.min(Number(c.open),Number(c.close))&&Number(c.volume)>=0;}
+function isNseBar(row){const d=new Date((Number(row.time)+OFFSET)*1000);const minute=d.getUTCHours()*60+d.getUTCMinutes();return minute>=555&&minute<930&&(minute-555)%5===0;}\nfunction continuous(rows){return rows.every((r,i)=>isNseBar(r)&&(i===0||(Number(r.time)-Number(rows[i-1].time)===BAR&&istDate(r.time)===istDate(rows[i-1].time))));}
 
 /**
  * Conservative offline OHLC proxy for one completed underlying signal.
@@ -15,16 +15,16 @@ function continuous(rows){return rows.every((r,i)=>i===0||(Number(r.time)-Number
  * fees, liquidity, queue position and market impact are unavailable.
  */
 export function simulateExpiredOptionSignal({signal,optionDataset,contractSpec,topGainerMembership=[]}={}){
- if(!signal||!STRATEGIES.has(signal.strategy)||!['LONG','SHORT'].includes(signal.side)||!finite(signal.confirmedAt)||!finite(signal.evaluatedAt)||!finite(signal.underlyingClose)||Number(signal.evaluatedAt)!==Number(signal.confirmedAt)+BAR)return fail('A valid completed-candle nine-strategy signal with exact evaluation timestamp is required');
+ if(!signal||!STRATEGIES.has(signal.strategy)||!['LONG','SHORT'].includes(signal.side)||!finite(signal.confirmedAt)||!Number.isInteger(Number(signal.confirmedAt))||!finite(signal.evaluatedAt)||!Number.isInteger(Number(signal.evaluatedAt))||!finite(signal.underlyingClose)||!/^NSE:/.test(String(signal.symbol||''))||Number(signal.evaluatedAt)!==Number(signal.confirmedAt)+BAR)return fail('A valid completed-candle nine-strategy signal with exact evaluation timestamp is required');
  if(signal.dataMode!=='FYERS_HISTORICAL_CANDLE_REPLAY')return fail('Only FYERS historical-candle strategy signals are accepted');
  if(signal.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT'){
   const snap=Array.isArray(topGainerMembership)?topGainerMembership.find(x=>Number(x?.time)===Number(signal.confirmedAt)):null;
   if(!snap||!Array.isArray(snap.symbols)||!snap.symbols.map(x=>String(x).toUpperCase()).includes(String(signal.symbol).toUpperCase()))return fail('Timestamp-matched Top Gainer membership proof is missing; strategy is NOT_EVALUATED');
  }
- if(!optionDataset||optionDataset.source!=='FYERS_EXPIRED_FO_API'||optionDataset.timestampConvention!=='FYERS_EPOCH_BAR_START'||optionDataset.actionable!==false||optionDataset.ordersEnabled!==false)return fail('Verified FYERS expired-option candles with bar-start timestamps and non-actionable provenance are required');
+ if(!optionDataset||optionDataset.source!=='FYERS_EXPIRED_FO_API'||optionDataset.timestampConvention!=='FYERS_EPOCH_BAR_START'||optionDataset.integrityVerified!==true||optionDataset.actionable!==false||optionDataset.ordersEnabled!==false)return fail('Verified FYERS expired-option candles with bar-start timestamps and non-actionable provenance are required');
  const side=signal.side==='LONG'?'CE':'PE';
  if(optionDataset.side!==side||norm(optionDataset.underlying)!==norm(signal.symbol)||!finite(optionDataset.selection?.selectionTime)||Number(optionDataset.selection.selectionTime)!==Number(signal.evaluatedAt)||!finite(optionDataset.selection?.underlyingPrice)||Math.abs(Number(optionDataset.selection.underlyingPrice)-Number(signal.underlyingClose))>1e-8||optionDataset.selection.method!=='NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE')return fail('Option side, underlying, or historical ATM selection timestamp/price does not match the signal');
- if(!contractSpec||contractSpec.source!=='OFFICIAL_EXCHANGE_CONTRACT_MASTER'||!/^[a-f0-9]{64}$/.test(contractSpec.sha256||'')||contractSpec.symbol!==optionDataset.symbol||contractSpec.side!==side||norm(contractSpec.underlying)!==norm(signal.symbol)||String(contractSpec.expiry)!==String(optionDataset.expiry)||Number(contractSpec.strike)!==Number(optionDataset.strike)||!finite(contractSpec.tickSize)||Number(contractSpec.tickSize)<=0)return fail('Matching official historical contract-master evidence and tick size are required; no tick size is guessed');
+ if(!contractSpec||contractSpec.source!=='OFFICIAL_EXCHANGE_CONTRACT_MASTER'||!/^[a-f0-9]{64}$/.test(contractSpec.sha256||'')||contractSpec.symbol!==optionDataset.symbol||contractSpec.side!==side||norm(contractSpec.underlying)!==norm(signal.symbol)||String(contractSpec.expiry)!==String(optionDataset.expiry)||String(contractSpec.expiry)<istDate(signal.evaluatedAt)||Number(contractSpec.strike)!==Number(optionDataset.strike)||!finite(contractSpec.tickSize)||Number(contractSpec.tickSize)<=0)return fail('Matching official historical contract-master evidence and tick size are required; no tick size is guessed');
  const rows=optionDataset.candles;
  if(!Array.isArray(rows)||rows.length<4||!rows.every(validCandle))return fail('At least four verified completed FYERS option candles are required');
  const sorted=rows.slice().sort((a,b)=>Number(a.time)-Number(b.time));

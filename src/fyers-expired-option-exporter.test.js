@@ -107,7 +107,7 @@ test('expired option exporter rejects invalid ranges, unknown contract lists and
   await withOutput(async outputDir=>{
     const {client}=clientFixture();
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,maxIntradayRequests:3}),/4-to-10 request budget/);
-    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,end:'2025-03-28'}),/one trading date/);
+    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,end:'2025-03-27'}),/one trading date/);
     client.history_underlying_symbols=async()=>({s:'ok',data:{expiry_date:expiry,contracts:{options:[]}}});
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client}),/no parseable option strikes/);
   });

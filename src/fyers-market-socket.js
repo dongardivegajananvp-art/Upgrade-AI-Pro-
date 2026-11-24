@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -429,7 +429,6 @@ export function startMarketSocket() {
         optionSubscriptionStatus = 'SUBSCRIPTION_QUEUED';
         optionSubscriptionError = null;
       }
-      socket.autoreconnect(10);
       console.info('[FYERS_DATA] connected; subscription reconciliation queued:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
     });
     socket.on('message', message => {
@@ -489,7 +488,8 @@ export function startMarketSocket() {
       // Per-symbol fresh ticks, not this set, prove that the feed has resumed.
       console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
     });
-    socket.connect();
+    // Configure the SDK's reconnect handler before opening the transport.
+    connectWithAutoReconnect(socket, 10);
     return { status: socketStatus };
   } catch (error) {
     socketStatus = 'ERROR';

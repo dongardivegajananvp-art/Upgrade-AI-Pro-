@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
-import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil } from './fyers-rest.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
@@ -166,4 +166,95 @@ test('global FYERS REST budget counts every endpoint and preserves interactive h
   assert.equal(getRestRequestWindowWaitMs(requests, now, 3, 60_000, REST_PRIORITY.CHART, Number.POSITIVE_INFINITY), 0);
   assert.ok(getRestRequestWindowWaitMs(requests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART-1) > 0);
   assert.equal(getRestRequestWindowWaitMs(requests.slice(0,5), now, 6), 0);
+});
+
+
+test('background REST scheduling rotates fairly across Account, scanner and research classes', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const jobs = [
+    {id:'research',priority:REST_PRIORITY.RESEARCH,sequence:1},
+    {id:'scanner',priority:REST_PRIORITY.SCANNER,sequence:2},
+    {id:'account',priority:REST_PRIORITY.ACCOUNT,sequence:3}
+  ];
+  const eligible = () => true;
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, eligible)].id, 'research');
+  const recent = [
+    {at:new Date(now-30_000).toISOString(),priority:REST_PRIORITY.RESEARCH},
+    {at:new Date(now-20_000).toISOString(),priority:REST_PRIORITY.ACCOUNT}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, recent, now, eligible)].id, 'scanner');
+  const withScanner = [...recent,{at:new Date(now-10_000).toISOString(),priority:REST_PRIORITY.SCANNER}];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, withScanner, now, eligible)].id, 'research');
+});
+
+test('interactive REST jobs keep priority over fair background classes', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const jobs = [
+    {id:'scanner',priority:REST_PRIORITY.SCANNER,sequence:1},
+    {id:'chart',priority:REST_PRIORITY.CHART,sequence:2},
+    {id:'entry',priority:REST_PRIORITY.ENTRY,sequence:3}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, () => true)].id, 'entry');
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, job => job.id !== 'entry')].id, 'chart');
+});
+
+test('fair REST selector never chooses a request rejected by the budget gate', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const jobs = [
+    {id:'scanner',priority:REST_PRIORITY.SCANNER,sequence:1},
+    {id:'account',priority:REST_PRIORITY.ACCOUNT,sequence:2}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs, [], now, job => job.id === 'account')].id, 'account');
+  assert.equal(findFairRestQueueIndex(jobs, [], now, () => false), -1);
+});
+
+
+test('queued REST work has strict freshness deadlines by request class', () => {
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ENTRY), 10_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.OPTION_CHAIN), 15_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.CHART), 30_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ACCOUNT), 30_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.SCANNER), 10_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.WARMUP), 120_000);
+});
+
+
+test('queued REST requests expire at the exact age boundary and reject invalid timestamps', () => {
+  assert.equal(isRestQueueExpired(1000, 10999, 10_000), false);
+  assert.equal(isRestQueueExpired(1000, 11000, 10_000), true);
+  assert.equal(isRestQueueExpired(Number.NaN, 11000, 10_000), true);
+  assert.equal(isRestQueueExpired(1000, 11000, 0), true);
+});
+
+
+test('endpoint health is based on real HTTP and FYERS API responses, never connection state', () => {
+  const now = Date.UTC(2026, 10, 23, 5, 0, 0);
+  const health = buildRestEndpointHealth([
+    {path:'/options-chain-v3',status:200,apiStatus:'ok',responseCode:200,at:new Date(now-1000).toISOString(),durationMs:240,source:'option-chain-panel'},
+    {path:'/api/v3/positions',status:429,apiStatus:'error',responseCode:1015,at:new Date(now-2000).toISOString(),durationMs:90,source:'account-positions'}
+  ], now);
+  assert.equal(health.optionChain.status,'SUCCESS');
+  assert.equal(health.optionChain.ok,true);
+  assert.equal(health.optionChain.ageMs,1000);
+  assert.equal(health.positions.status,'ERROR');
+  assert.equal(health.positions.httpStatus,429);
+  assert.equal(health.orderbook.status,'NOT_VERIFIED');
+  assert.equal(health.orderbook.ok,false);
+});
+
+
+test('encrypted browser safety state restores a future cooldown monotonically',()=>{
+  const now=Date.UTC(2026,10,24,5,0,0);
+  const firstUntil=now+120000;
+  assert.equal(restoreRestSafetyState({
+    cooldownUntil:firstUntil,rateLimitDayKey:'2026-11-24',rateLimitCountToday:2,
+    cloudflareRateLimitCountToday:1,unknownRateLimitCountToday:0,
+    lastRateLimitAt:new Date(now).toISOString(),lastRateLimitKind:'CLOUDFLARE_1015'
+  },now),true);
+  assert.equal(getRestDiagnostics(now).cooldownUntil,firstUntil);
+  assert.equal(getRestDiagnostics(now).recoveryProbeRequired,true);
+  assert.equal(restoreRestSafetyState({cooldownUntil:now+60000,rateLimitDayKey:'2026-11-24',rateLimitCountToday:1},now),true);
+  assert.equal(getRestDiagnostics(now).cooldownUntil,firstUntil);
+  assert.equal(getRestSafetyState(now).cooldownUntil,firstUntil);
+  assert.equal(restoreRestSafetyState({cooldownUntil:now-1},now),false);
 });

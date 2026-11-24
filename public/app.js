@@ -123,20 +123,20 @@ async function refreshUniverseScan() {
     container.append(coverageAudit);
     if(!isNseRegularSession(Date.now())) {
       const historicalHeading=document.createElement('div');historicalHeading.className='empty-inline';
-      historicalHeading.textContent='LAST SESSION HISTORICAL RESEARCH · NOT LIVE · NOT ACTIONABLE';
+      historicalHeading.textContent='LAST SESSION RESEARCH CANDIDATES · NOT LIVE · NOT ACTIONABLE';
       container.append(historicalHeading);
       const historicalResponse=await fetch('/api/research/historical-universe',{cache:'no-store'});
       const historical=await readJsonResponse(historicalResponse,'HISTORICAL F&O RESEARCH');
       if(!historicalResponse.ok)throw new Error(historical.reason||'Historical research unavailable');
       const historicalStatus=document.createElement('small');
       historicalStatus.className='empty-inline';
-      historicalStatus.textContent=(historical.candidateCount||0)+' HISTORICAL CANDIDATES · '+(historical.evaluatedCount||0)+' CANDLE SETS EVALUATED · '+(historical.blockedCount||0)+' MISSING HISTORY · '+(historical.universeCount||0)+' OFFICIAL F&O';
+      historicalStatus.textContent=(historical.candidateCount||0)+' LAST SESSION RESEARCH CANDIDATES · '+(historical.evaluatedCount||0)+' CANDLE SETS EVALUATED · '+(historical.blockedCount||0)+' MISSING HISTORY · '+(historical.universeCount||0)+' OFFICIAL F&O';
       container.append(historicalStatus);
       for(const item of historical.candidates||[]) {
         const card=document.createElement('button');card.type='button';card.className='research-card historical-research-card';
         const head=document.createElement('div');head.className='research-card-head';
         const title=document.createElement('strong');title.textContent=item.symbol+' · '+item.strategy+' · '+item.side;
-        const state=document.createElement('b');state.textContent='HISTORICAL';
+        const state=document.createElement('b');state.textContent='LAST SESSION RESEARCH CANDIDATE · NOT LIVE';
         head.append(title,state);
         const details=document.createElement('small');
         details.textContent='Last verified 5m candle: '+new Date((Number(item.asOfCandleTime)+19800)*1000).toISOString().replace('T',' ').slice(0,16)+' IST · Underlying close ₹'+showNumber(item.underlyingPrice)+' · Breakout level ₹'+showNumber(item.breakoutLevel);

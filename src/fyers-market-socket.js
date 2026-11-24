@@ -1,8 +1,9 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect, formatSocketCloseDetail } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
 import { shouldActivateFnoSliceOnFeedRecovery } from './fno-feed-readiness.js';
 export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
@@ -13,9 +14,9 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
 // Three indices + twenty rotating equities + one selected option = at most 24.
 const MAX_UNDERLYING_SLOTS = 20;
-// Eight new-symbol history reads per 60-second slice fit the 4-second REST
-// scheduler gap while doubling rolling F&O coverage without increasing socket load.
-// Sixteen symbols overlap the next socket slice for repeated live-tick windows.
+// The shared REST governor permits only a small background budget. Keep the
+// history-backed scanner to one new symbol per minute until WebSocket-built
+// candles replace per-symbol history reads; socket observation still rotates 20 slots.
 const SCAN_PER_SLICE = FNO_SCAN_PER_SLICE;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
@@ -34,6 +35,7 @@ let selectedUnderlyingSymbol = null;
 let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
 const ticks = new Map();
+const fnoWebsocketCandles = createFnoWebsocketCandleBuilder({maxSymbols:300,maxCandlesPerSymbol:120});
 // Bounded, rate-limited observability: first tick per symbol, then at most once/minute.
 const tickTelemetryLoggedAt = new Map();
 let optionFirstTickLoggedFor = null;
@@ -57,6 +59,7 @@ let resetRateLimitAfterSubscriptionFlush = false;
 let socketConnectedAt = null;
 let socketLastConnectedAt = null;
 let socketLastClosedAt = null;
+let socketLastCloseDetail = null;
 let socketLastMessageAt = null;
 let socketLastTickAt = null;
 let socketLastTickExchangeTime = null;
@@ -199,6 +202,7 @@ function accept(item) {
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   const sessionWasReady = sessionFeedReady(tick.receivedAt);
   ticks.set(symbol, tick);
+  if (universe.some(item => item.symbol === symbol)) fnoWebsocketCandles.ingest(symbol,tick);
   if (shouldActivateFnoSliceOnFeedRecovery(sessionWasReady, sessionFeedReady(tick.receivedAt), universe.length)) {
     console.info('[FYERS_DATA] fresh index feed restored; activating first F&O slice immediately');
     applyFnoRotation(false);
@@ -426,7 +430,6 @@ export function startMarketSocket() {
         optionSubscriptionStatus = 'SUBSCRIPTION_QUEUED';
         optionSubscriptionError = null;
       }
-      socket.autoreconnect(10);
       console.info('[FYERS_DATA] connected; subscription reconciliation queued:', subscriptions.length, 'symbols; initial connection:', isFirstConnection);
     });
     socket.on('message', message => {
@@ -475,18 +478,24 @@ export function startMarketSocket() {
       }
       console.error('[FYERS_DATA] socket error:', lastError);
     });
-    socket.on('close', () => {
+    socket.on('close', (...details) => {
       socketCloseCount++;
       socketLastClosedAt = new Date().toISOString();
+      socketLastCloseDetail = formatSocketCloseDetail(details);
       socketConnectedAt = null;
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
       // FYERS Data Socket auto-reconnect is expected to restore prior SDK requests.
       // Keep the SDK-requested set to avoid duplicate sends; it is not an exchange ACK.
       // Per-symbol fresh ticks, not this set, prove that the feed has resumed.
-      console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
+      console.warn('[FYERS_DATA] socket closed:', JSON.stringify({
+        at:socketLastClosedAt, detail:socketLastCloseDetail,
+        reconnectCount:socketReconnectCount, closeCount:socketCloseCount,
+        errorCount:socketErrorCount
+      }));
     });
-    socket.connect();
+    // Configure the SDK's reconnect handler before opening the transport.
+    connectWithAutoReconnect(socket, 10);
     return { status: socketStatus };
   } catch (error) {
     socketStatus = 'ERROR';
@@ -505,6 +514,8 @@ export function getMarketData(now = Date.now()) {
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   const activeFnoTicks = activeFnoSymbols.map(symbol => ({ symbol, tick: ticks.get(symbol) || null }));
+  const activeCandleSnapshots=activeFnoSymbols.map(symbol=>fnoWebsocketCandles.snapshot(symbol));
+  const websocketCandleCoverage={activeSymbols:activeFnoSymbols.length,withObservations:activeCandleSnapshots.filter(item=>item.completedCandles.length||item.liveCandle).length,withCompletedBars:activeCandleSnapshots.filter(item=>item.completedCandles.length>0).length,contiguousBars:activeCandleSnapshots.reduce((sum,item)=>sum+item.contiguousCompletedCount,0),actionable:false,volumeVerified:false};
   const fnoTickCoverage = {
     activeSymbols: activeFnoSymbols.length,
     withTick: activeFnoTicks.filter(item => item.tick).length,
@@ -525,7 +536,7 @@ export function getMarketData(now = Date.now()) {
     socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
     socketDiagnostics: {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,
-      lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt,
+      lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt, lastCloseDetail:socketLastCloseDetail,
       lastMessageAt: socketLastMessageAt, lastTickAt: socketLastTickAt,
       lastTickExchangeTime: socketLastTickExchangeTime,
       lastTickAgeSeconds: socketLastTickAt ? Math.max(0, Math.floor((now - socketLastTickAt) / 1000)) : null,
@@ -550,6 +561,7 @@ export function getMarketData(now = Date.now()) {
       status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','RATE_LIMITED_WAIT','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
       lastError, universeCount: universe.length, activeCount: activeFnoSymbols.length,
       observedCount: rolling.observedCount, freshCount: rolling.freshCount, coverageComplete: rolling.coverageComplete,
+      websocketCandleCoverage,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
       rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
       subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
@@ -563,6 +575,7 @@ export function getFnoUniverseSnapshot() {
   return {
     universe: universe.map(item => ({ ...item })),
     ticks: new Map(universe.map(item => [item.symbol, ticks.get(item.symbol)]).filter(([, tick]) => Boolean(tick))),
+    websocketCandles: new Map(activeFnoSymbols.map(symbol=>[symbol,fnoWebsocketCandles.snapshot(symbol)])),
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,

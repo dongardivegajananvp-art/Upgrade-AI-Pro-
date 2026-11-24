@@ -165,3 +165,126 @@ export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), m
   if (recent.length < limit) return 0;
   return Math.max(0, recent[0] + window - current);
 }
+
+
+// Select background work fairly inside the conservative shared REST budget.
+// Interactive jobs retain strict priority; background classes share service so
+// research/context cannot permanently outrank Account Feed or the F&O scanner.
+export function getRestRequestClass(job = {}) {
+  const priority = Number(job.priority) || 0;
+  if (priority >= REST_PRIORITY.CHART) return 'INTERACTIVE';
+  if (priority === REST_PRIORITY.ACCOUNT) return 'ACCOUNT';
+  if (priority === REST_PRIORITY.SCANNER) return 'SCANNER';
+  return 'RESEARCH';
+}
+
+export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Date.now(), isEligible = () => true, windowMs = 60_000) {
+  const eligible = jobs.map((job, index) => ({ job, index }))
+    .filter(({ job }) => Boolean(isEligible(job)));
+  if (!eligible.length) return -1;
+  const interactive = eligible.filter(({ job }) => getRestRequestClass(job) === 'INTERACTIVE');
+  if (interactive.length) {
+    interactive.sort((a, b) => Number(b.job.priority || 0) - Number(a.job.priority || 0) ||
+      Number(a.job.sequence || 0) - Number(b.job.sequence || 0));
+    return interactive[0].index;
+  }
+  const current = Number(now);
+  const stats = new Map();
+  for (const request of recentRequests) {
+    const at = Date.parse(request?.at);
+    if (!Number.isFinite(at) || at > current || current - at >= windowMs) continue;
+    const requestClass = getRestRequestClass({ priority: request?.priority });
+    if (requestClass === 'INTERACTIVE') continue;
+    const row = stats.get(requestClass) || { count: 0, lastAt: 0 };
+    row.count += 1;
+    row.lastAt = Math.max(row.lastAt, at);
+    stats.set(requestClass, row);
+  }
+  eligible.sort((a, b) => {
+    const aClass = getRestRequestClass(a.job);
+    const bClass = getRestRequestClass(b.job);
+    const aStats = stats.get(aClass) || { count: 0, lastAt: 0 };
+    const bStats = stats.get(bClass) || { count: 0, lastAt: 0 };
+    return aStats.count - bStats.count || aStats.lastAt - bStats.lastAt ||
+      Number(b.job.priority || 0) - Number(a.job.priority || 0) ||
+      Number(a.job.sequence || 0) - Number(b.job.sequence || 0);
+  });
+  return eligible[0].index;
+}
+
+
+// Queue age limits prevent requests whose UI/market context has expired from
+// being submitted upstream after a long rate-governor wait.
+export function getRestQueueMaxAgeMs(priority = 0) {
+  const value = Number(priority) || 0;
+  if (value >= REST_PRIORITY.ENTRY) return 10_000;
+  if (value >= REST_PRIORITY.OPTION_CHAIN) return 15_000;
+  if (value >= REST_PRIORITY.CHART) return 30_000;
+  if (value >= REST_PRIORITY.ACCOUNT) return 30_000;
+  if (value >= REST_PRIORITY.SCANNER) return 10_000;
+  return 120_000;
+}
+
+export function isRestQueueExpired(enqueuedAt, now = Date.now(), maxAgeMs = 0) {
+  const queuedAt = Number(enqueuedAt);
+  const current = Number(now);
+  const maxAge = Math.max(0, Number(maxAgeMs) || 0);
+  return !Number.isFinite(queuedAt) || !Number.isFinite(current) || current - queuedAt >= maxAge;
+}
+
+export function buildRestEndpointHealth(requests = [], now = Date.now()) {
+  const latest = path => {
+    const row = [...requests].reverse().find(item => item?.path === path && Number.isFinite(Number(item?.status)));
+    if (!row) return { status: 'NOT_VERIFIED', ok: false, at: null, ageMs: null, source: null };
+    const httpStatus = Number(row.status);
+    const apiStatus = row.apiStatus || null;
+    const responseCode = row.responseCode ?? null;
+    const ok = httpStatus >= 200 && httpStatus < 300 && apiStatus !== 'error' &&
+      !(responseCode !== null && Number(responseCode) < 0);
+    const at = Date.parse(row.at);
+    return {
+      status: ok ? 'SUCCESS' : 'ERROR', ok,
+      httpStatus, apiStatus, responseCode,
+      at: row.at || null, ageMs: Number.isFinite(at) ? Math.max(0, Number(now) - at) : null,
+      durationMs: Number.isFinite(Number(row.durationMs)) ? Number(row.durationMs) : null,
+      source: row.source || null
+    };
+  };
+  return {
+    optionChain: latest('/options-chain-v3'),
+    positions: latest('/api/v3/positions'),
+    orderbook: latest('/api/v3/orders')
+  };
+}
+
+export function findRestQueueDuplicate(jobs = [], coalesceKey) {
+  if (typeof coalesceKey !== 'string' || !coalesceKey) return -1;
+  return jobs.findIndex(job => job?.coalesceKey === coalesceKey);
+}
+
+export function buildRestDispatchGate({
+  cooldownActive = false, recoveryProbeRequired = false, priority = 0,
+  recoveryProbeAllowed = true, queueDepth = 0, minGapWaitMs = 0,
+  totalWindowWaitMs = 0, backgroundWindowWaitMs = 0, historyWindowWaitMs = 0
+} = {}) {
+  const blockers = [];
+  if (cooldownActive) blockers.push('COOLDOWN_ACTIVE');
+  if (recoveryProbeRequired && !recoveryProbeAllowed) blockers.push('RECOVERY_PROBE_REQUIRED');
+  if (Number(queueDepth) > 0) blockers.push('QUEUE_NOT_EMPTY');
+  if (Number(minGapWaitMs) > 0) blockers.push('MIN_GAP_WAIT');
+  if (Number(totalWindowWaitMs) > 0) blockers.push('TOTAL_WINDOW_BUDGET_WAIT');
+  if (Number(backgroundWindowWaitMs) > 0) blockers.push('BACKGROUND_WINDOW_BUDGET_WAIT');
+  if (Number(historyWindowWaitMs) > 0) blockers.push('HISTORY_WINDOW_BUDGET_WAIT');
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    waitMs: Math.max(0, Number(minGapWaitMs)||0, Number(totalWindowWaitMs)||0,
+      Number(backgroundWindowWaitMs)||0, Number(historyWindowWaitMs)||0)
+  };
+}
+
+export function buildRestCoalesceKey({method='GET',url,authorization=''}={}) {
+  const verb=String(method||'GET').toUpperCase();
+  if(verb!=='GET'||typeof url!=='string'||!url)return null;
+  return verb+':'+url+':auth:'+String(authorization||'');
+}

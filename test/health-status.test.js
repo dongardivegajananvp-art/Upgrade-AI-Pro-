@@ -74,3 +74,24 @@ test('health endpoint exposes scanner progress, F&O coverage, REST cooldown and 
   assert.equal(status.runtimeMemory.rssBytes, 400000000);
   assert.equal(status.orders, 'DISABLED');
 });
+
+test('health separates Account Feed, Option Chain and setup readiness from process liveness', () => {
+  const status=buildHealthStatus({
+    market:{socketStatus:'CONNECTED',indices:{},fno:{}},
+    rest:{endpointHealth:{
+      positions:{status:'SUCCESS',ok:true,httpStatus:200},
+      orderbook:{status:'ERROR',ok:false,httpStatus:429},
+      optionChain:{status:'SUCCESS',ok:true,httpStatus:200}
+    }},
+    ordersEnabled:false
+  });
+  assert.equal(status.ok,true);
+  assert.equal(status.processLiveness,'ALIVE');
+  assert.equal(status.accountFeed.status,'ERROR');
+  assert.equal(status.accountFeed.positions.ok,true);
+  assert.equal(status.accountFeed.orderbook.httpStatus,429);
+  assert.equal(status.optionChain.status,'SUCCESS');
+  assert.equal(status.setupReadiness.status,'NOT_EVALUATED');
+  assert.ok(status.setupReadiness.blockers.includes('COMPLETED_OPTION_CANDLES_REQUIRED'));
+  assert.equal(status.setupReadiness.orders,'DISABLED');
+});

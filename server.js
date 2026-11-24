@@ -3,13 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie } from './src/fyers-auth.js';
+import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
-import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
@@ -34,6 +34,16 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 function send(res, status, body, type='application/json; charset=utf-8') {
+  try {
+    const safetyCookie = res.__fyersRestSafetyCookieFactory?.();
+    if (safetyCookie) {
+      const existing = res.getHeader('set-cookie');
+      const cookies = Array.isArray(existing) ? existing : existing ? [existing] : [];
+      res.setHeader('set-cookie',[...cookies,safetyCookie]);
+    }
+  } catch (error) {
+    console.warn('[FYERS_REST] could not attach encrypted cooldown recovery cookie:',String(error?.message||error).slice(0,120));
+  }
   res.writeHead(status, { 'content-type': type, 'cache-control':'no-store', 'x-content-type-options':'nosniff', 'referrer-policy':'no-referrer' });
   if (Buffer.isBuffer(body) || body instanceof Uint8Array) return res.end(body);
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
@@ -55,6 +65,8 @@ let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
 let fnoStrategyScanRotation = null;
 let fnoStrategyScanLoggedRotation = null;
+let fnoStrategyScanRetryAt = 0;
+let fnoStrategyScanRetrySymbol = null;
 const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
 // Per-underlying audit ledger: records actual scan attempts and explicit skips/failures.
 // It is diagnostic only and never upgrades stale/missing data to an actionable setup.
@@ -65,6 +77,7 @@ function startFnoStrategyScanner() {
   fnoStrategyScanStats.status='RUNNING';
   fnoStrategyScanTimer=setInterval(async () => {
     if (fnoStrategyScanBusy) return;
+    if (Date.now() < fnoStrategyScanRetryAt) { fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET'; return; }
     if (!isNseRegularSession(Date.now())) {
       fnoStrategyScanStats.status='OUTSIDE_NSE_SESSION';
       return;
@@ -94,7 +107,9 @@ function startFnoStrategyScanner() {
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
     // Daily/15m warmups so research preparation cannot starve F&O coverage.
-    const shouldWarmup=fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
+    const retryPendingActive=Boolean(fnoStrategyScanRetrySymbol && active.includes(fnoStrategyScanRetrySymbol) &&
+      isFreshFnoTick(snapshot.ticks.get(fnoStrategyScanRetrySymbol),Date.now()));
+    const shouldWarmup=!retryPendingActive && fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
     if (shouldWarmup) {
       const warmupSymbol=fnoResearchWarmupQueue.take();
       fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
@@ -130,21 +145,39 @@ function startFnoStrategyScanner() {
     }
     if (fnoStrategyScanCursor>=scanLimit) return;
     const scanSymbols=getFnoSliceScanSymbols(active,scanLimit);
-    const symbol=scanSymbols[fnoStrategyScanCursor++];
+    const normalSymbol=scanSymbols[fnoStrategyScanCursor] || null;
+    const retryCandidate=retryPendingActive;
+    const symbol=retryCandidate ? fnoStrategyScanRetrySymbol : normalSymbol;
+    if(!symbol) return;
+    let scanTick=snapshot.ticks.get(symbol)||null;
+    if(!isFreshFnoTick(scanTick,Date.now())) {
+      fnoStrategyScanRetrySymbol=symbol;
+      fnoStrategyScanStats.status='WAITING_FOR_FRESH_FNO_TICK';
+      fnoStrategyScanStats.lastReason='Fresh FYERS underlying/futures tick is required; history request not queued';
+      return;
+    }
+    const dispatchGate=getRestDispatchReadiness(REST_PRIORITY.SCANNER,'/history');
+    if(!dispatchGate.ready) {
+      fnoStrategyScanRetrySymbol=symbol;
+      fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET';
+      fnoStrategyScanStats.lastReason='Scanner request held before queue admission: '+dispatchGate.blockers.join(',');
+      return;
+    }
+    if(!retryCandidate) fnoStrategyScanCursor++;
+    fnoStrategyScanStats.status='RUNNING';
     const scanStartedAt=Date.now();
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
-    let scanTick=null;
     try {
-      // Do not spend a FYERS History REST request when this underlying has no
-      // fresh exchange tick. Missing/stale live data remains fail-closed NO TRADE.
+      // Re-read immediately before requesting history; the tick must still be fresh.
       const latest=getFnoUniverseSnapshot();
       scanTick=latest.ticks.get(symbol)||null;
       if(!isFreshFnoTick(scanTick,Date.now())) {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
       }
       const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'fno-scanner-5m');
+      const websocketObservation=latest.websocketCandles?.get(symbol)||null;
       const tick=scanTick;
       const market=getMarketData();
       const research=detectNineStrategySetup({
@@ -153,6 +186,7 @@ function startFnoStrategyScanner() {
         researchEnabled:false,now:Date.now()
       });
       fnoStrategyScanStats.scannedCount++;
+      if(retryCandidate) { fnoStrategyScanRetrySymbol=null; fnoStrategyScanRetryAt=0; }
       fnoStrategyScanStats.lastSymbol=symbol;
       fnoStrategyScanStats.lastStatus=research.status;
       fnoStrategyScanStats.lastReason=research.reason||null;
@@ -165,7 +199,8 @@ function startFnoStrategyScanner() {
         tickFresh:Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&Date.now()/1000-Number(tick.exchangeTime)>=-3&&Date.now()/1000-Number(tick.exchangeTime)<=10),
         tickExchangeTime:tick?.exchangeTime||null,tickReceivedAt:tick?.receivedAt||null,
         candleCount:history.candles.length,lastCompletedCandleTime:history.candles.at(-1)?.time||null,
-        source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[]
+        source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[],
+        websocketObservation:{status:websocketObservation?.status||'NO_OBSERVATIONS',completedCount:websocketObservation?.completedCandles?.length||0,contiguousCompletedCount:websocketObservation?.contiguousCompletedCount||0,volumeVerified:Boolean(websocketObservation?.volumeVerified),actionable:Boolean(websocketObservation?.actionable)}
       });
       if(research.status==='UNDERLYING_SETUP_CONFIRMED') {
         const queued=fnoResearchWarmupQueue.enqueue(symbol);
@@ -179,17 +214,28 @@ function startFnoStrategyScanner() {
         }
       }
     } catch(error) {
+      const errorMessage=String(error.message||'F&O history scan failed');
+      const retryable=/queued request expired|queue capacity|queue is full|cooldown active|recovery probe required|429/i.test(errorMessage);
+      if(retryable) {
+        fnoStrategyScanRetrySymbol=symbol;
+        const retryDiagnostics=getRestDiagnostics();
+        fnoStrategyScanRetryAt=retryDiagnostics.cooldownUntil ? Date.parse(retryDiagnostics.cooldownUntil) : Date.now()+10_000;
+        fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET';
+      } else if(retryCandidate) {
+        fnoStrategyScanRetrySymbol=null;
+        fnoStrategyScanRetryAt=0;
+      }
       fnoStrategyScanStats.lastSymbol=symbol;
-      fnoStrategyScanStats.lastStatus='DATA_UNAVAILABLE_NO_TRADE';
+      fnoStrategyScanStats.lastStatus=retryable?'RETRY_QUEUED':'DATA_UNAVAILABLE_NO_TRADE';
       fnoStrategyScanStats.lastReason=String(error.message||'F&O history scan failed').slice(0,180);
       fnoStrategyScanStats.lastScanAt=new Date().toISOString();
       fnoSymbolScanLedger.set(symbol,{
-        symbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:fnoStrategyScanStats.lastReason,
+        symbol,status:fnoStrategyScanStats.lastStatus,reason:fnoStrategyScanStats.lastReason,
         attemptedAt:new Date(scanStartedAt).toISOString(),scannedAt:fnoStrategyScanStats.lastScanAt,
         attemptCount:fnoSymbolScanLedger.get(symbol)?.attemptCount||1,
         tickFresh:isFreshFnoTick(scanTick,Date.now()),
         tickExchangeTime:scanTick?.exchangeTime||null,
-        source:isFreshFnoTick(scanTick,Date.now())?'FYERS_HISTORY_BLOCKED':'FYERS_SCAN_BLOCKED'
+        source:retryable?'FYERS_REST_RETRY_PENDING':isFreshFnoTick(scanTick,Date.now())?'FYERS_HISTORY_BLOCKED':'FYERS_SCAN_BLOCKED'
       });
     } finally {
       fnoStrategyScanBusy=false;
@@ -202,6 +248,7 @@ function startFnoStrategyScanner() {
         tickFresh:scanRecord.tickFresh??false,
         tickExchangeTime:scanRecord.tickExchangeTime||null,
         lastCompletedCandleTime:scanRecord.lastCompletedCandleTime||null,
+        websocketObservation:scanRecord.websocketObservation||null,
         candleCount:scanRecord.candleCount||0,
         evaluatedStrategyCount:Array.isArray(scanRecord.strategyLedger)?scanRecord.strategyLedger.filter(row=>row.status!=='BLOCKED').length:0,
         blockedStrategyCount:Array.isArray(scanRecord.strategyLedger)?scanRecord.strategyLedger.filter(row=>row.status==='BLOCKED').length:0,
@@ -279,7 +326,7 @@ function ensureFyersMarketStarted() {
       fnoUniverseLoadedDate = date;
       fnoUniverseLoadRetryAt = 0;
       startFnoStrategyScanner();
-      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 12, 'master date:', requestedDate);
+      console.info('[FYERS_SCANNER] official NSE F&O master diagnostics:', JSON.stringify(diagnostics), 'active socket slots:', coverage.activeCount, 'independent strategy scan slots:', coverage.scanPerSlice || 1, 'master date:', requestedDate);
       return true;
     }).catch(error => {
       fnoUniverseLoadRetryAt = Date.now() + 30_000;
@@ -297,7 +344,22 @@ const server = http.createServer(async (req,res) => {
   const hasFyersSession = Boolean(requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session, {
     appId:process.env.FYERS_APP_ID, appSecret:process.env.FYERS_SECRET_KEY
   }));
-  if (hasFyersSession) ensureFyersMarketStarted();
+  if (hasFyersSession) {
+    const appId=process.env.FYERS_APP_ID, appSecret=process.env.FYERS_SECRET_KEY;
+    const restoredSafety=restoreRestSafetyCookie(requestCookies.fyers_rest_safety,{appId,appSecret});
+    if (restoredSafety) restoreRestSafetyState(restoredSafety);
+    // Attach a cookie only when this process has a newer active cooldown than
+    // the browser already holds. This avoids rewriting Set-Cookie on 2s polling.
+    res.__fyersRestSafetyCookieFactory=()=>{
+      const state=getRestSafetyState();
+      const deadline=Number(state.cooldownUntil);
+      if (!Number.isFinite(deadline) || deadline<=Date.now()) return null;
+      if (restoredSafety && Number(restoredSafety.cooldownUntil)>=deadline) return null;
+      const cookie=createRestSafetyCookie({appId,appSecret,state});
+      return cookie ? `fyers_rest_safety=${cookie.value}; Max-Age=${cookie.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax` : null;
+    };
+    ensureFyersMarketStarted();
+  }
   // Public endpoints are limited to non-account market/status views and OAuth
   // entry/callback. All broker-backed data and workstation controls require the
   // caller's own cryptographically valid FYERS session cookie.
@@ -319,6 +381,7 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),REST_PRIORITY.CHART,'chart-history'));
+      if (url.pathname === '/api/backtest/historical-fno') return send(res,410,{status:'BACKTEST_ISOLATED',reason:'Historical backtests are not available inside the live trading process'});
       if (url.pathname === '/api/research-context') {
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
@@ -346,13 +409,13 @@ const server = http.createServer(async (req,res) => {
           });
           const row={symbol:item.symbol,name:item.name||item.underlying||item.symbol,status:result.status,reason:result.reason||null,strategyLedger:result.strategyLedger||[],strategy:result.strategy||null,side:result.side||null,breakoutLevel:result.breakoutLevel||null,confirmedAt:result.confirmedAt||null,underlyingPrice:result.underlyingPrice||null,asOfCandleTime:last.time,source:'FYERS_VERIFIED_COMPLETED_5M_HISTORY'};
           evaluations.push(row);
-          if(result.status==='UNDERLYING_SETUP_CONFIRMED') candidates.push({...row,status:'HISTORICAL_RESEARCH_CANDIDATE'});
+          if(result.status==='UNDERLYING_SETUP_CONFIRMED') candidates.push({...row,status:'LAST_SESSION_RESEARCH_CANDIDATE'});
         }
         candidates.sort((a,b)=>Number(b.confirmedAt||0)-Number(a.confirmedAt||0));
         return send(res,200,{status:candidates.length?'HISTORICAL_CANDIDATES_AVAILABLE':'NO_HISTORICAL_CANDIDATE',mode:'HISTORICAL_ONLY_NOT_LIVE',universeCount:snapshot.universe?.length||0,evaluatedCount:evaluations.filter(row=>row.status!=='BLOCKED').length,blockedCount:evaluations.filter(row=>row.status==='BLOCKED').length,candidateCount:candidates.length,candidates:candidates.slice(0,20),evaluations,note:'Historical FYERS completed candles only. No live tick, option quote, option candle, entry, stop or target is inferred. This list is research-only and cannot authorize a trade.'});
       }
       if (url.pathname === '/api/research/universe') {
-        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',marketSession:isNseRegularSession(Date.now())?'OPEN':'CLOSED',scannerStatus:'WAITING_FOR_OFFICIAL_MASTER',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:4,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
+        if (!isFnoMasterCurrent()) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',marketSession:isNseRegularSession(Date.now())?'OPEN':'CLOSED',scannerStatus:'WAITING_FOR_OFFICIAL_MASTER',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,top3:[],scanner:fnoStrategyScanStats,scanPerSlice:1,note:'Current IST session official FYERS NSE F&O master is pending; no prior-session universe is ranked.'});
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();
@@ -505,13 +568,11 @@ const server = http.createServer(async (req,res) => {
     const authCode = url.searchParams.get('auth_code');
     const cookies = parseCookies(req.headers.cookie || '');
     const clearStateCookie = 'fyers_oauth_state=; Max-Age=0; Path=/api/fyers; HttpOnly; Secure; SameSite=Lax';
-    if (!verifyLoginState(state,cookies.fyers_oauth_state) || consumedOAuthStates.has(state)) {
+    if (!consumeLoginState(state,cookies.fyers_oauth_state,consumedOAuthStates)) {
       console.warn('[FYERS_OAUTH] callback rejected: state missing, mismatched or already consumed');
       res.setHeader('set-cookie',clearStateCookie);
       return send(res,400,{status:'REJECTED',reason:'OAuth state is missing, mismatched or already used. Start Connect once again.'});
     }
-    consumedOAuthStates.add(state);
-    if (consumedOAuthStates.size > 2000) consumedOAuthStates.delete(consumedOAuthStates.values().next().value);
     res.setHeader('set-cookie',clearStateCookie);
     if (!authCode) {
       console.warn('[FYERS_OAUTH] callback missing auth_code');
@@ -533,6 +594,7 @@ const server = http.createServer(async (req,res) => {
       return send(res,upstream429 ? 429 : 502,{status:upstream429 ? 'FYERS_UPSTREAM_RATE_LIMIT' : 'TOKEN_EXCHANGE_FAILED',reason:error.message});
     }
   }
+  if (req.method === 'POST' && url.pathname === '/api/backtest/historical-fno') return send(res,410,{status:'BACKTEST_ISOLATED',reason:'Historical backtests must run in a separate worker and cannot use the live process'});
   if (req.method === 'POST' && url.pathname === '/api/select-underlying') {
     try {
       if (!isFnoMasterCurrent()) return send(res,503,{status:'UNDERLYING_NOT_VERIFIED',reason:'Current IST session official FYERS NSE F&O master is not verified'});

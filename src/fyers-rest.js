@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -15,6 +15,7 @@ let recoveryProbeRequired = REST_RECOVERY_REQUIRED_ON_START;
 // probe stays closed; no queued interactive request may turn into a retry storm.
 let recoveryProbeAttempted = false;
 const restQueue = [];
+const inFlightRestJobs = new Map();
 let restQueueSequence = 0;
 let drainingRestQueue = false;
 let lastRestStatus = 'IDLE';
@@ -101,23 +102,49 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a, b) => a.time - b.time);
 }
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function settleRestJob(job, succeeded, value) {
+  if (job?.coalesceKey && inFlightRestJobs.get(job.coalesceKey) === job) inFlightRestJobs.delete(job.coalesceKey);
+  const waiters = Array.isArray(job?.waiters) ? job.waiters.splice(0) : [];
+  const settle = succeeded ? 'resolve' : 'reject';
+  job?.[settle]?.(value);
+  for (const waiter of waiters) waiter?.[settle]?.(value);
+}
+function expireQueuedRestJobs(now = Date.now()) {
+  for (let index = restQueue.length - 1; index >= 0; index -= 1) {
+    const job = restQueue[index];
+    if (!isRestQueueExpired(job.enqueuedAt, now, job.maxQueueAgeMs)) continue;
+    restQueue.splice(index, 1);
+    const error = new Error('FYERS REST queued request expired before upstream submission; stale work was discarded');
+    lastRestStatus = 'QUEUE_EXPIRED';
+    lastRestError = error.message;
+    settleRestJob(job, false, error);
+    console.warn('[FYERS_REST] queued request expired before upstream submission:', JSON.stringify({
+      path: job.url.pathname, source: job.source, priority: job.priority,
+      queuedForMs: now - job.enqueuedAt
+    }));
+  }
+}
 async function drainRestQueue() {
   if (drainingRestQueue) return;
   drainingRestQueue = true;
   try {
     while (restQueue.length) {
+      expireQueuedRestJobs();
+      if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
         const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
-        for (const job of restQueue.splice(0)) job.reject(error);
+        for (const job of restQueue.splice(0)) settleRestJob(job, false, error);
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
       const delay = getRestWaitMs(Date.now(), nextRequestAt);
       if (delay) await wait(delay);
+      expireQueuedRestJobs();
+      if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
         const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
-        for (const job of restQueue.splice(0)) job.reject(error);
+        for (const job of restQueue.splice(0)) settleRestJob(job, false, error);
         lastRestStatus = 'RATE_LIMITED';
         break;
       }
@@ -126,7 +153,7 @@ async function drainRestQueue() {
         const recoveryIndex = restQueue.findIndex(job => canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority }));
         if (recoveryIndex < 0) {
           const error = new Error('FYERS REST recovery probe required; background request was held before upstream submission');
-          for (const pending of restQueue.splice(0)) pending.reject(error);
+          for (const pending of restQueue.splice(0)) settleRestJob(pending, false, error);
           lastRestStatus = 'RECOVERY_PROBE_REQUIRED';
           break;
         }
@@ -139,7 +166,7 @@ async function drainRestQueue() {
       // entire FYERS REST origin, while reserving half the conservative budget
       // for selected chart/option/Entry work. Account, scanner, research and
       // warmup remain lower priority and cannot consume those interactive slots.
-      const eligibleIndex = restQueue.findIndex(job => {
+      const eligibleIndex = findFairRestQueueIndex(restQueue, recentUpstreamRequests, Date.now(), job => {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
         const totalWindowWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
         const backgroundWindowWait = job.priority < REST_PRIORITY.CHART
@@ -179,6 +206,7 @@ async function drainRestQueue() {
       lastRequestPath = job.url.pathname;
       lastRequestPriority = job.priority;
       const requestStartedAt = Date.now();
+      if (job.coalesceKey) inFlightRestJobs.set(job.coalesceKey, job);
       if (recoveryProbeRequired) recoveryProbeAttempted = true;
       const requestRecord = recordUpstreamRequest(requestStartedAt, job.source, job.url.pathname, job.priority);
       try {
@@ -196,7 +224,16 @@ async function drainRestQueue() {
         let body = {};
         try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
         lastRestMeta.responseCode = body.code ?? null;
+        requestRecord.responseCode = lastRestMeta.responseCode;
+        requestRecord.apiStatus = body.s || null;
         lastRestMeta.responseMessage = String(body.message || body.error || '').slice(0, 160) || null;
+        console.info('[FYERS_REST] upstream response:', JSON.stringify({
+          path: job.url.pathname, source: job.source, priority: job.priority,
+          status: response.status, responseCode: lastRestMeta.responseCode,
+          durationMs: requestRecord.durationMs,
+          queueWaitMs: Math.max(0, requestStartedAt - job.enqueuedAt),
+          ok: response.ok && body.s !== 'error' && !(Number(body.code) < 0)
+        }));
         if (response.status === 429) {
           refreshRequestCounters(Date.now());
           lastRateLimitKind = classifyRestRateLimit({
@@ -251,22 +288,22 @@ async function drainRestQueue() {
             ...requestContext,
             cooldownUntil: new Date(cooldownUntil).toISOString()
           }));
-          job.reject(new Error(lastRestError));
+          settleRestJob(job, false, new Error(lastRestError));
           const queuedError = new Error('FYERS REST cooldown active; queued request was not sent upstream');
-          for (const pending of restQueue.splice(0)) pending.reject(queuedError);
+          for (const pending of restQueue.splice(0)) settleRestJob(pending, false, queuedError);
           break;
         }
         if (!response.ok || body.s === 'error' || Number(body.code) < 0 || (recoveryProbeRequired && body.s !== 'ok')) {
           lastRestStatus = 'ERROR';
           lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
-          job.reject(new Error(lastRestError));
+          settleRestJob(job, false, new Error(lastRestError));
           continue;
         }
         lastRestStatus = 'OK';
         lastRestError = null;
         recoveryProbeRequired = false;
         recoveryProbeAttempted = false;
-        job.resolve(body);
+        settleRestJob(job, true, body);
       } catch (error) {
         requestRecord.status = 'NETWORK_ERROR';
         requestRecord.durationMs = Date.now() - requestStartedAt;
@@ -274,7 +311,7 @@ async function drainRestQueue() {
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
         lastRestStatus = 'ERROR';
         lastRestError = String(error?.message || 'FYERS REST request failed').slice(0,180);
-        job.reject(error);
+        settleRestJob(job, false, error);
       }
     }
   } finally {
@@ -284,7 +321,27 @@ async function drainRestQueue() {
 }
 function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
   return new Promise((resolve, reject) => {
-    const job = { url, options, priority: Number(priority) || 0, source:String(source || 'UNCLASSIFIED'), sequence: ++restQueueSequence, resolve, reject };
+    const normalizedPriority = Number(priority) || 0;
+    const requestMethod=String(options?.method||'GET').toUpperCase();
+    const authorization=new Headers(options?.headers||{}).get('authorization')||'';
+    const coalesceKey=buildRestCoalesceKey({method:requestMethod,url:url.href,authorization});
+    const duplicateIndex = findRestQueueDuplicate(restQueue, coalesceKey);
+    if (duplicateIndex >= 0) {
+      const existing = restQueue[duplicateIndex];
+      existing.waiters.push({ resolve, reject });
+      if (normalizedPriority > existing.priority) {
+        existing.priority = normalizedPriority;
+        existing.source = String(source || existing.source);
+        existing.maxQueueAgeMs = Math.min(existing.maxQueueAgeMs, getRestQueueMaxAgeMs(normalizedPriority));
+      }
+      return;
+    }
+    const inFlight = inFlightRestJobs.get(coalesceKey);
+    if (inFlight) {
+      inFlight.waiters.push({ resolve, reject });
+      return;
+    }
+    const job = { url, options, priority: normalizedPriority, source:String(source || 'UNCLASSIFIED'), sequence: ++restQueueSequence, enqueuedAt:Date.now(), maxQueueAgeMs:getRestQueueMaxAgeMs(normalizedPriority), coalesceKey, waiters:[], resolve, reject };
     const admission = admitRestJob(restQueue, job, MAX_REST_QUEUE_SIZE);
     if (!admission.accepted) {
       reject(new Error('FYERS REST queue is full; request was rejected before upstream submission'));
@@ -292,7 +349,7 @@ function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
     }
     restQueue.splice(0, restQueue.length, ...admission.queue);
     if (admission.dropped) {
-      admission.dropped.reject(new Error('FYERS REST queue capacity reached; lower-priority request was displaced before upstream submission'));
+      settleRestJob(admission.dropped, false, new Error('FYERS REST queue capacity reached; lower-priority request was displaced before upstream submission'));
     }
     void drainRestQueue();
   });
@@ -460,6 +517,67 @@ export async function getFyersOptionChain(symbol, strikecount = 10, timestamp = 
 }
 export async function getFyersPositions() { return fyersGet(API_BASE, '/positions', {}, REST_PRIORITY.ACCOUNT, 'account-positions'); }
 export async function getFyersOrderbook() { return fyersGet(API_BASE, '/orders', {}, REST_PRIORITY.ACCOUNT, 'account-orderbook'); }
+export function getRestDispatchReadiness(priority = REST_PRIORITY.SCANNER, path = '/history', now = Date.now()) {
+  const background = Number(priority) < REST_PRIORITY.CHART;
+  const recoveryProbeAllowed = canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority });
+  return buildRestDispatchGate({
+    cooldownActive: isRestCooldownActive(now, cooldownUntil),
+    recoveryProbeRequired,
+    recoveryProbeAllowed,
+    priority,
+    queueDepth: restQueue.length + (drainingRestQueue ? 1 : 0),
+    minGapWaitMs: getRestWaitMs(now, nextRequestAt),
+    totalWindowWaitMs: getRestRequestWindowWaitMs(recentUpstreamRequests, now, 6),
+    backgroundWindowWaitMs: background
+      ? getRestRequestWindowWaitMs(recentUpstreamRequests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+      : 0,
+    historyWindowWaitMs: path === '/history'
+      ? Math.max(
+          getHistoryRequestWindowWaitMs(recentUpstreamRequests, now, 8),
+          background ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) : 0
+        )
+      : 0
+  });
+}
+
+export function getRestSafetyState(now = Date.now()) {
+  return {
+    cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
+    rateLimitDayKey,
+    rateLimitCountToday,
+    cloudflareRateLimitCountToday,
+    unknownRateLimitCountToday,
+    lastRateLimitAt,
+    lastRateLimitKind
+  };
+}
+
+// Restore only a future, bounded cooldown. A stale browser cookie can never
+// shorten a cooldown already known by this process; daily counters restore only
+// when their IST date matches the current session date.
+export function restoreRestSafetyState(state, now = Date.now()) {
+  if (!state || typeof state !== 'object') return false;
+  const currentDay = istDayKey(now);
+  if (state.rateLimitDayKey === currentDay) {
+    rateLimitDayKey = currentDay;
+    rateLimitCountToday = Math.max(rateLimitCountToday, Math.floor(Number(state.rateLimitCountToday) || 0));
+    cloudflareRateLimitCountToday = Math.max(cloudflareRateLimitCountToday, Math.floor(Number(state.cloudflareRateLimitCountToday) || 0));
+    unknownRateLimitCountToday = Math.max(unknownRateLimitCountToday, Math.floor(Number(state.unknownRateLimitCountToday) || 0));
+  }
+  if (typeof state.lastRateLimitAt === 'string' && Number.isFinite(Date.parse(state.lastRateLimitAt))) {
+    lastRateLimitAt = state.lastRateLimitAt;
+  }
+  if (typeof state.lastRateLimitKind === 'string') lastRateLimitKind = state.lastRateLimitKind;
+  const restoredUntil = Number(state.cooldownUntil);
+  if (!Number.isFinite(restoredUntil) || restoredUntil <= now || restoredUntil > now + 30 * 24 * 60 * 60 * 1000) return false;
+  cooldownUntil = Math.max(cooldownUntil, restoredUntil);
+  recoveryProbeRequired = true;
+  recoveryProbeAttempted = false;
+  lastRestStatus = 'RATE_LIMITED';
+  lastRestError = 'Restored encrypted FYERS REST cooldown from authenticated browser session until ' + new Date(cooldownUntil).toISOString();
+  return true;
+}
+
 export function getRestDiagnostics(now = Date.now()) {
   refreshRequestCounters(now);
   return {
@@ -470,6 +588,7 @@ export function getRestDiagnostics(now = Date.now()) {
     lastRequestSource,
     requestSources:[...requestSourceStats.values()].map(item=>({...item})).sort((a,b)=>b.requestsToday-a.requestsToday),
     recentRequests:recentUpstreamRequests.slice(-20).map(item=>({...item})),
+    endpointHealth: buildRestEndpointHealth(recentUpstreamRequests, now),
     lastRateLimitAt,
     minGapMs: MIN_REST_GAP_MS,
     rollingWindowLimitPerMinute: 6,
@@ -495,8 +614,9 @@ export function getRestDiagnostics(now = Date.now()) {
     recoveryProbeAttempted,
     recoveryProbePolicy: 'ONE_PROBE_PER_START_OR_429_COOLDOWN; FAILED_PROBE_REQUIRES_OPERATOR_RESTART',
     cooldownUntil: cooldownUntil > now ? cooldownUntil : null,
-    cooldownPersistence: 'PROCESS_LOCAL_ONLY',
-    restartSafe: false
+    cooldownPersistence: 'ENCRYPTED_AUTHENTICATED_BROWSER_COOKIE_PER_SESSION',
+    restartSafe: false,
+    restartSafeScope: 'BROWSER_SESSION_ONLY_NOT_SHARED_ACROSS_CLIENTS'
   };
 }
 
@@ -507,5 +627,78 @@ export function getCachedResearchHistories() {
     fiveMinute: new Map([...fiveMinuteCache].map(([symbol, entry]) => [symbol, entry.value])),
     daily: new Map([...dailyCache].map(([symbol, entry]) => [symbol, entry.value])),
     fifteenMinute: new Map([...fifteenMinuteCache].map(([symbol, entry]) => [symbol, entry.value]))
+  };
+}
+
+
+function istDateFromEpochSeconds(seconds) {
+  return new Date((Number(seconds) + 19800000) * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Fetch a bounded historical backtest dataset from FYERS /data/history.
+ * Intraday and daily windows are separate because FYERS documents different
+ * per-request limits (100 days intraday, 366 days daily).
+ */
+export function validateHistoricalBacktestRange({ startTime, dailyStartTime, endTime } = {}) {
+  const start = Number(startTime);
+  const dailyStart = Number(dailyStartTime);
+  const end = Number(endTime);
+  if (![start, dailyStart, end].every(Number.isFinite) || dailyStart <= 0 || start <= 0 || end <= start || dailyStart > start) {
+    throw new Error('Historical backtest date range is invalid');
+  }
+  const intradayDays = (end - start) / 86400;
+  const dailyDays = (end - dailyStart) / 86400;
+  if (intradayDays > 100 || dailyDays > 366) {
+    throw new Error('Requested FYERS history range exceeds documented per-request limits');
+  }
+  return { intradayDays, dailyDays };
+}
+
+export async function getHistoricalBacktestHistory({
+  symbol,
+  startTime,
+  dailyStartTime,
+  endTime,
+  priority = REST_PRIORITY.RESEARCH,
+  source = 'historical-backtest'
+} = {}) {
+  if (!validateNseSymbol(symbol)) throw new Error('Historical backtest requires a valid NSE equity symbol');
+  const start = Number(startTime);
+  const dailyStart = Number(dailyStartTime);
+  const end = Number(endTime);
+  validateHistoricalBacktestRange({ startTime: start, dailyStartTime: dailyStart, endTime: end });
+  const from5m = istDateFromEpochSeconds(start);
+  const fromDaily = istDateFromEpochSeconds(dailyStart);
+  const to = istDateFromEpochSeconds(end);
+  const [fiveMinuteBody, dailyBody] = await Promise.all([
+    fyersGet(DATA_BASE, '/history', {
+      symbol, resolution: '5', date_format: '1', range_from: from5m, range_to: to
+    }, priority, source + '-5m'),
+    fyersGet(DATA_BASE, '/history', {
+      symbol, resolution: 'D', date_format: '1', range_from: fromDaily, range_to: to
+    }, priority, source + '-daily')
+  ]);
+  if (fiveMinuteBody.s !== 'ok' || !Array.isArray(fiveMinuteBody.candles)) {
+    throw new Error('FYERS did not return a successful 5-minute historical response');
+  }
+  if (dailyBody.s !== 'ok' || !Array.isArray(dailyBody.candles)) {
+    throw new Error('FYERS did not return a successful daily historical response');
+  }
+  const endMs = end * 1000;
+  const fiveMinuteCandles = normalizeFiveMinuteCandles(fiveMinuteBody.candles, endMs)
+    .filter(candle => candle.time >= start && candle.time <= end);
+  const dailyCandles = normalizeDailyCandles(dailyBody.candles, endMs)
+    .filter(candle => candle.time >= dailyStart && candle.time <= end);
+  if (!fiveMinuteCandles.length) throw new Error('FYERS returned no completed 5-minute candles for the requested backtest range');
+  if (dailyCandles.length < 50) throw new Error('FYERS returned fewer than 50 completed daily warm-up candles');
+  return {
+    symbol,
+    fiveMinuteCandles,
+    dailyCandles,
+    dataProvenance: 'FYERS_HISTORICAL_API',
+    sources: ['FYERS_HISTORY_5M', 'FYERS_DAILY_HISTORY'],
+    requested: { fiveMinuteFrom: from5m, dailyFrom: fromDaily, to },
+    retrievedAt: new Date().toISOString()
   };
 }

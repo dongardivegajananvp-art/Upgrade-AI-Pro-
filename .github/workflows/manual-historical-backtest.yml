@@ -1,0 +1,69 @@
+name: Manual isolated FYERS historical backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RUN_HISTORICAL_BACKTEST to start the three-month NSE F&O export"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-ai-pro-historical-backtest
+  cancel-in-progress: false
+
+jobs:
+  historical-replay:
+    if: ${{ inputs.confirm == 'RUN_HISTORICAL_BACKTEST' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Validate isolated-run secrets before any FYERS request
+        env:
+          FYERS_APP_ID: ${{ secrets.FYERS_APP_ID }}
+          FYERS_ACCESS_TOKEN: ${{ secrets.FYERS_ACCESS_TOKEN }}
+        run: |
+          test -n "$FYERS_APP_ID" || { echo "Missing repository secret FYERS_APP_ID"; exit 1; }
+          test -n "$FYERS_ACCESS_TOKEN" || { echo "Missing repository secret FYERS_ACCESS_TOKEN"; exit 1; }
+          echo "::add-mask::$FYERS_APP_ID"
+          echo "::add-mask::$FYERS_ACCESS_TOKEN"
+
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Download current official FYERS NSE F&O master
+        run: npm run backtest:master -- ./backtest-data
+
+      - name: Export three months of official FYERS historical candles
+        env:
+          FYERS_APP_ID: ${{ secrets.FYERS_APP_ID }}
+          FYERS_ACCESS_TOKEN: ${{ secrets.FYERS_ACCESS_TOKEN }}
+        run: npm run backtest:export -- ./backtest-data/official-master.json ./backtest-data
+
+      - name: Require complete three-month F&O universe before replay
+        run: node --input-type=module -e "import fs from 'node:fs'; const m=JSON.parse(fs.readFileSync('backtest-data/manifest.json','utf8')); if (m.complete !== true) throw new Error('Historical export is partial; full-universe replay is blocked'); if (m.failureCount !== 0) throw new Error('Historical export contains failed symbols; replay is blocked'); console.log('Complete export verified:',m.exportedCount,'symbols');"
+
+      - name: Run isolated offline nine-strategy signal replay
+        run: npm run backtest:offline -- ./backtest-data ./backtest-results
+
+      - name: Upload auditable dataset and replay output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-ai-pro-fyers-historical-backtest-${{ github.run_id }}
+          path: |
+            backtest-data/
+            backtest-results/
+          if-no-files-found: warn
+          retention-days: 7

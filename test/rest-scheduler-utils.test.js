@@ -5,7 +5,8 @@ import {
   getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil,
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
-  sortRestQueue, admitRestJob
+  sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
+  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -174,4 +175,97 @@ test('history endpoint is capped at eight requests per rolling minute without bl
   assert.equal(getHistoryRequestWindowWaitMs(requests, 76000), 0);
   assert.equal(getHistoryRequestWindowWaitMs([{at:new Date(40000).toISOString(),path:'/quotes'}], 41000), 0);
   assert.equal(getHistoryRequestWindowWaitMs(requests, 41000, 9), 0);
+});
+
+
+test('background REST queue selects the least-served Account, Scanner and Research class', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const jobs=[
+    {id:'research',priority:40,sequence:1},
+    {id:'scanner',priority:10,sequence:2},
+    {id:'account',priority:20,sequence:3}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,()=>true)].id,'research');
+  const recent=[
+    {at:new Date(now-30000).toISOString(),priority:40},
+    {at:new Date(now-20000).toISOString(),priority:20}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,recent,now,()=>true)].id,'scanner');
+  const allServed=[...recent,{at:new Date(now-10000).toISOString(),priority:10}];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,allServed,now,()=>true)].id,'research');
+});
+
+test('interactive Entry and Chart work retain priority over fair background classes', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const jobs=[
+    {id:'scanner',priority:10,sequence:1},
+    {id:'chart',priority:80,sequence:2},
+    {id:'entry',priority:100,sequence:3}
+  ];
+  assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,()=>true)].id,'entry');
+  assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,job=>job.id!=='entry')].id,'chart');
+});
+
+test('queued REST requests expire at their exact deadline and invalid timestamps fail closed', () => {
+  assert.equal(getRestQueueMaxAgeMs(100),10000);
+  assert.equal(getRestQueueMaxAgeMs(90),15000);
+  assert.equal(getRestQueueMaxAgeMs(80),30000);
+  assert.equal(getRestQueueMaxAgeMs(20),30000);
+  assert.equal(getRestQueueMaxAgeMs(10),10000);
+  assert.equal(getRestQueueMaxAgeMs(-20),120000);
+  assert.equal(isRestQueueExpired(1000,10999,10000),false);
+  assert.equal(isRestQueueExpired(1000,11000,10000),true);
+  assert.equal(isRestQueueExpired(Number.NaN,11000,10000),true);
+});
+
+test('Option Chain and Account Feed endpoint health requires actual successful responses', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const health=buildRestEndpointHealth([
+    {path:'/options-chain-v3',status:200,apiStatus:'ok',responseCode:200,at:new Date(now-1000).toISOString(),durationMs:240,source:'option-chain-panel'},
+    {path:'/api/v3/positions',status:429,apiStatus:'error',responseCode:1015,at:new Date(now-2000).toISOString(),durationMs:90,source:'account-positions'}
+  ],now);
+  assert.equal(health.optionChain.status,'SUCCESS');
+  assert.equal(health.optionChain.ageMs,1000);
+  assert.equal(health.positions.status,'ERROR');
+  assert.equal(health.positions.httpStatus,429);
+  assert.equal(health.orderbook.status,'NOT_VERIFIED');
+  assert.equal(health.orderbook.ok,false);
+});
+
+test('identical pending FYERS REST requests are discoverable for coalescing', () => {
+  const jobs=[
+    {coalesceKey:'GET:https://api-t1.fyers.in/data/options-chain-v3?symbol=NSE%3AABC'},
+    {coalesceKey:'GET:https://api-t1.fyers.in/api/v3/positions'}
+  ];
+  assert.equal(findRestQueueDuplicate(jobs,jobs[0].coalesceKey),0);
+  assert.equal(findRestQueueDuplicate(jobs,'GET:https://api-t1.fyers.in/data/history'),-1);
+  assert.equal(findRestQueueDuplicate(jobs,''),-1);
+});
+
+test('scanner dispatch gate holds work when queue, cooldown, pacing or budgets are not ready', () => {
+  const ready=buildRestDispatchGate({});
+  assert.equal(ready.ready,true);
+  assert.deepEqual(ready.blockers,[]);
+  const held=buildRestDispatchGate({
+    cooldownActive:true,queueDepth:2,minGapWaitMs:4000,
+    totalWindowWaitMs:12000,backgroundWindowWaitMs:30000,historyWindowWaitMs:15000
+  });
+  assert.equal(held.ready,false);
+  assert.ok(held.blockers.includes('COOLDOWN_ACTIVE'));
+  assert.ok(held.blockers.includes('QUEUE_NOT_EMPTY'));
+  assert.equal(held.waitMs,30000);
+  const recovery=buildRestDispatchGate({recoveryProbeRequired:true,recoveryProbeAllowed:false});
+  assert.ok(recovery.blockers.includes('RECOVERY_PROBE_REQUIRED'));
+});
+
+test('REST coalescing is limited to same-authenticated GET requests', () => {
+  const url='https://api-t1.fyers.in/api/v3/positions';
+  assert.equal(buildRestCoalesceKey({method:'GET',url,authorization:'Bearer token-A'}),
+    'GET:'+url+':auth:Bearer token-A');
+  assert.notEqual(
+    buildRestCoalesceKey({method:'GET',url,authorization:'Bearer token-A'}),
+    buildRestCoalesceKey({method:'GET',url,authorization:'Bearer token-B'})
+  );
+  assert.equal(buildRestCoalesceKey({method:'POST',url,authorization:'Bearer token-A'}),null);
+  assert.equal(buildRestCoalesceKey({method:'GET',url:''}),null);
 });

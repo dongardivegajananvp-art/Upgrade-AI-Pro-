@@ -42,6 +42,15 @@ export function verifyLoginState(state, cookieState) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// Atomically validate and consume one OAuth state in the process-local replay guard.
+export function consumeLoginState(state, cookieState, consumedStates, maxEntries = 2000) {
+  if (!(consumedStates instanceof Set) || !verifyLoginState(state, cookieState) || consumedStates.has(state)) return false;
+  consumedStates.add(state);
+  const limit = Math.max(1, Math.floor(Number(maxEntries) || 2000));
+  while (consumedStates.size > limit) consumedStates.delete(consumedStates.values().next().value);
+  return true;
+}
+
 // Persist the short-lived broker session in an encrypted, HttpOnly browser cookie.
 // This survives Render Free instance sleep/restarts without a paid database or disk.
 export function createSessionCookie({ appId, appSecret, now = Date.now() } = {}) {
@@ -87,6 +96,63 @@ export function restoreSessionCookie(value, { appId, appSecret, now = Date.now()
     return true;
   } catch {
     return false;
+  }
+}
+
+// Persist an active REST cooldown in a small encrypted browser cookie. Render Free
+// has no durable local disk; this lets the authenticated workstation restore the
+// exact FYERS Retry-After/backoff deadline after an instance restart without a DB.
+const REST_SAFETY_COOKIE_VERSION = 1;
+function restSafetyKey(appId, appSecret) {
+  if (!appId || !appSecret) throw new Error('FYERS REST safety encryption configuration is missing');
+  return createHash('sha256').update(`upgrade-ai-pro:fyers-rest-safety:v${REST_SAFETY_COOKIE_VERSION}:${appId}:${appSecret}`).digest();
+}
+export function createRestSafetyCookie({ appId, appSecret, state = {}, now = Date.now() } = {}) {
+  const cooldownUntil = Number(state.cooldownUntil);
+  if (!Number.isFinite(cooldownUntil) || cooldownUntil <= now) return null;
+  const maxDeadline = now + 30 * 24 * 60 * 60 * 1000;
+  const boundedCooldownUntil = Math.min(cooldownUntil, maxDeadline);
+  const expiresAt = Math.min(maxDeadline, Math.max(now + 24 * 60 * 60 * 1000, boundedCooldownUntil + 60 * 60 * 1000));
+  const safeState = {
+    cooldownUntil: boundedCooldownUntil,
+    rateLimitDayKey: typeof state.rateLimitDayKey === 'string' ? state.rateLimitDayKey.slice(0,10) : null,
+    rateLimitCountToday: Math.max(0, Math.floor(Number(state.rateLimitCountToday) || 0)),
+    cloudflareRateLimitCountToday: Math.max(0, Math.floor(Number(state.cloudflareRateLimitCountToday) || 0)),
+    unknownRateLimitCountToday: Math.max(0, Math.floor(Number(state.unknownRateLimitCountToday) || 0)),
+    lastRateLimitAt: typeof state.lastRateLimitAt === 'string' ? state.lastRateLimitAt.slice(0,40) : null,
+    lastRateLimitKind: typeof state.lastRateLimitKind === 'string' ? state.lastRateLimitKind.slice(0,40) : null
+  };
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', restSafetyKey(appId, appSecret), iv);
+  const payload = Buffer.from(JSON.stringify({ v:REST_SAFETY_COOKIE_VERSION, issuedAt:now, expiresAt, state:safeState }));
+  const encrypted = Buffer.concat([cipher.update(payload), cipher.final()]);
+  const packed = Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url');
+  return { value:packed, maxAge:Math.max(60,Math.floor((expiresAt-now)/1000)), expiresAt };
+}
+export function restoreRestSafetyCookie(value, { appId, appSecret, now = Date.now() } = {}) {
+  if (typeof value !== 'string' || value.length < 40 || value.length > 1800) return null;
+  try {
+    const packed = Buffer.from(value,'base64url');
+    if (packed.toString('base64url') !== value || packed.length < 29) return null;
+    const decipher = createDecipheriv('aes-256-gcm',restSafetyKey(appId,appSecret),packed.subarray(0,12));
+    decipher.setAuthTag(packed.subarray(12,28));
+    const payload = JSON.parse(Buffer.concat([decipher.update(packed.subarray(28)),decipher.final()]).toString('utf8'));
+    const state = payload.state;
+    if (payload.v !== REST_SAFETY_COOKIE_VERSION || !Number.isFinite(payload.issuedAt) ||
+        !Number.isFinite(payload.expiresAt) || now >= payload.expiresAt || payload.issuedAt > now + 60000 ||
+        !state || typeof state !== 'object' || !Number.isFinite(Number(state.cooldownUntil)) ||
+        Number(state.cooldownUntil) <= 0 || Number(state.cooldownUntil) > now + 30 * 24 * 60 * 60 * 1000) return null;
+    return {
+      cooldownUntil:Number(state.cooldownUntil),
+      rateLimitDayKey:typeof state.rateLimitDayKey === 'string' ? state.rateLimitDayKey : null,
+      rateLimitCountToday:Math.max(0,Math.floor(Number(state.rateLimitCountToday)||0)),
+      cloudflareRateLimitCountToday:Math.max(0,Math.floor(Number(state.cloudflareRateLimitCountToday)||0)),
+      unknownRateLimitCountToday:Math.max(0,Math.floor(Number(state.unknownRateLimitCountToday)||0)),
+      lastRateLimitAt:typeof state.lastRateLimitAt === 'string' ? state.lastRateLimitAt : null,
+      lastRateLimitKind:typeof state.lastRateLimitKind === 'string' ? state.lastRateLimitKind : null
+    };
+  } catch {
+    return null;
   }
 }
 

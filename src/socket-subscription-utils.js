@@ -69,3 +69,22 @@ export function pruneSymbolMap(map, allowedSymbols = [], maxSize = 300) {
 export function isGenericSubscriptionAck(item) {
   return Boolean(item && typeof item === 'object' && !Array.isArray(item) && item.type === 'sub' && Number(item.code) === 200);
 }
+// FYERS Node DataSocket reconnect policy must be configured before opening the
+// transport. Keep this ordering in one testable helper so a disconnect cannot
+// leave the SDK running without its reconnect handler.
+export function connectWithAutoReconnect(socket, retryCount = 10) {
+  if (!socket || typeof socket.autoreconnect !== 'function' || typeof socket.connect !== 'function') {
+    throw new TypeError('FYERS DataSocket must expose autoreconnect() and connect()');
+  }
+  socket.autoreconnect(Math.min(50, Math.max(1, Math.floor(Number(retryCount) || 10))));
+  socket.connect();
+  return true;
+}
+export function formatSocketCloseDetail(details = []) {
+  if (!Array.isArray(details) || details.length === 0) return null;
+  const parts = details.map(value => {
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }).filter(Boolean);
+  return parts.join(' | ').slice(0, 240) || null;
+}

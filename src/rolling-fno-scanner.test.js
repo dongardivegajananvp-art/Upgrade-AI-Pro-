@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildRollingFnoLeaderboard, buildFnoRotationSlice,
+  buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE,
   getNextFnoRotationIndex, getFnoScanBatchSize
 } from './rolling-fno-scanner.js';
 
@@ -44,4 +44,11 @@ test('rolling leaderboard excludes stale and old-session observations from live 
   assert.equal(result.freshCount,1);
   assert.equal(result.observedCount,2);
   assert.equal(result.coverageComplete,false);
+});
+
+
+test('history-backed scanner advertises one new symbol per minute under the guarded REST budget',()=>{
+  assert.equal(FNO_SCAN_PER_SLICE,1);
+  assert.equal(getFnoScanBatchSize(218,0),1);
+  assert.equal(getFnoScanBatchSize(218,217),1);
 });

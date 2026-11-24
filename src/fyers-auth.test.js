@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLoginUrl, verifyLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie } from './fyers-auth.js';
+import { createLoginUrl, verifyLoginState, consumeLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
 
 test('FYERS login URL includes configured redirect and cryptographic state',()=>{
  const login=createLoginUrl({appId:'TEST-100',redirectUri:'https://example.test/api/fyers/auth/callback'});
@@ -49,4 +49,38 @@ test('FYERS session survives process-memory loss through an encrypted HttpOnly c
  } finally {
    globalThis.fetch=originalFetch;
  }
+});
+
+
+test('FYERS REST cooldown survives restart through an encrypted browser safety cookie',()=>{
+ const now=Date.UTC(2026,10,24,5,0,0);
+ const state={cooldownUntil:now+120000,rateLimitDayKey:'2026-11-24',rateLimitCountToday:2,cloudflareRateLimitCountToday:1,unknownRateLimitCountToday:0,lastRateLimitAt:new Date(now).toISOString(),lastRateLimitKind:'CLOUDFLARE_1015'};
+ const cookie=createRestSafetyCookie({appId:'TEST-100',appSecret:'test-secret',state,now});
+ assert.ok(cookie&&cookie.value.length>40);
+ assert.equal(cookie.value.includes(String(state.cooldownUntil)),false);
+ assert.deepEqual(restoreRestSafetyCookie(cookie.value,{appId:'TEST-100',appSecret:'test-secret',now:now+1000}),state);
+ assert.equal(restoreRestSafetyCookie(cookie.value,{appId:'OTHER-100',appSecret:'test-secret',now}),null);
+ assert.equal(restoreRestSafetyCookie(cookie.value,{appId:'TEST-100',appSecret:'wrong-secret',now}),null);
+ const tampered=cookie.value.slice(0,-1)+(cookie.value.endsWith('x')?'y':'x');
+ assert.equal(restoreRestSafetyCookie(tampered,{appId:'TEST-100',appSecret:'test-secret',now}),null);
+ assert.equal(restoreRestSafetyCookie(cookie.value,{appId:'TEST-100',appSecret:'test-secret',now:cookie.expiresAt}),null);
+});
+
+test('FYERS REST safety cookie is not created when no active cooldown exists',()=>{
+ assert.equal(createRestSafetyCookie({appId:'TEST-100',appSecret:'test-secret',state:{cooldownUntil:null},now:1000}),null);
+});
+
+
+test('OAuth callback state is validated and consumed exactly once with bounded replay memory',()=>{
+ const states=new Set();
+ const state='a'.repeat(48);
+ assert.equal(consumeLoginState(state,'b'.repeat(48),states),false);
+ assert.equal(states.size,0);
+ assert.equal(consumeLoginState(state,state,states),true);
+ assert.equal(states.has(state),true);
+ assert.equal(consumeLoginState(state,state,states),false);
+ const bounded=new Set();
+ for(let i=0;i<5;i++) assert.equal(consumeLoginState(i.toString(16).padStart(48,'0'),i.toString(16).padStart(48,'0'),bounded,3),true);
+ assert.equal(bounded.size,3);
+ assert.equal(bounded.has('0'.repeat(48)),false);
 });

@@ -97,7 +97,7 @@ async function loadCheckpoint(file, identity) {
       throw new Error('FYERS expired-option checkpoint identity/format is invalid; refusing unsafe resume');
     }
     for (const [key, item] of Object.entries(saved.responses)) {
-      if (!item || !item.response || item.sha256 !== sha256(JSON.stringify(item.response))) {
+      if (!item || !item.response || typeof item.completedAt !== 'string' || !Number.isFinite(Date.parse(item.completedAt)) || item.sha256 !== sha256(JSON.stringify(item.response))) {
         throw new Error('FYERS expired-option checkpoint response hash is invalid for ' + key);
       }
     }
@@ -241,7 +241,7 @@ export async function exportExpiredOptionPair({
     const cacheable = (response?.s==='ok' && response?.data && typeof response.data==='object') ||
       (['ok','no_data'].includes(response?.s) && Array.isArray(response?.candles));
     if (cacheable) {
-      checkpoint.responses[label]={response,sha256:sha256(JSON.stringify(response))};
+      checkpoint.responses[label]={response,sha256:sha256(JSON.stringify(response)),completedAt:new Date(clock()).toISOString()};
       await saveCheckpoint(checkpointFile,checkpoint);
     }
     return response;
@@ -286,7 +286,7 @@ export async function exportExpiredOptionPair({
       selection:{method:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',underlyingPrice:Number(underlyingPrice),selectionTime:Number(selectionTime),historicalAtmSelection:true},
       requested:{start,end,resolution:'5'},timestampConvention:'FYERS_EPOCH_BAR_START',
       columns:response.columns,candles,responseSha256:sha256(JSON.stringify(response)),
-      candleSha256:sha256(JSON.stringify(candles)),retrievedAt:new Date(clock()).toISOString(),
+      candleSha256:sha256(JSON.stringify(candles)),retrievedAt:checkpoint.responses['fno_historical_data_'+side].completedAt,
       historicalBidAskDepthAvailable:false,actionable:false,ordersEnabled:false
     };
     const filename=symbol.replace(':','_')+'-'+start+'-'+String(selectionTime)+'.json';

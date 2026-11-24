@@ -51,6 +51,20 @@ test('offline worker rejects modified files and provenance mismatch', async t =>
   await assert.rejects(runOfflineHistoricalDataset({ ...dirs }), /SHA-256 mismatch/);
 });
 
+test('offline worker rejects normalized candles that disagree with original FYERS response', async t => {
+  const dirs = await fixture(t);
+  const dataPath=path.join(dirs.inputDir,'sbin.json');
+  const data=JSON.parse(await readFile(dataPath,'utf8'));
+  data.fiveMinuteCandles=[{time:1,open:1,high:1,low:1,close:1,volume:1,completed:true,source:'FYERS_HISTORY_5M'}];
+  const bytes=Buffer.from(JSON.stringify(data));
+  await writeFile(dataPath,bytes);
+  const manifestPath=path.join(dirs.inputDir,'manifest.json');
+  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
+  manifest.files[0].sha256=digest(bytes);
+  await writeFile(manifestPath,JSON.stringify(manifest));
+  await assert.rejects(runOfflineHistoricalDataset({ ...dirs }), /Normalized candle data does not match original FYERS response/);
+});
+
 test('offline worker rejects modified original FYERS response bytes', async t => {
   const dirs = await fixture(t);
   await writeFile(path.join(dirs.inputDir,'sbin-5m-response.json'),JSON.stringify({s:'ok',candles:[[1,1,1,1,1,1]]}));

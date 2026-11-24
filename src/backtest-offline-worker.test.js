@@ -51,6 +51,12 @@ test('offline worker rejects modified files and provenance mismatch', async t =>
   await assert.rejects(runOfflineHistoricalDataset({ ...dirs }), /SHA-256 mismatch/);
 });
 
+test('offline worker rejects modified original FYERS response bytes', async t => {
+  const dirs = await fixture(t);
+  await writeFile(path.join(dirs.inputDir,'sbin-5m-response.json'),JSON.stringify({s:'ok',candles:[]}));
+  await assert.rejects(runOfflineHistoricalDataset({ ...dirs }), /Original FYERS fiveMinute response SHA-256 mismatch/);
+});
+
 test('offline worker rejects path traversal and overlapping input/output locations', async t => {
   const dirs = await fixture(t);
   const manifestPath = path.join(dirs.inputDir, 'manifest.json');

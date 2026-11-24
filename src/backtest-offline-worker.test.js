@@ -13,8 +13,12 @@ async function fixture(t) {
   const outputDir = path.join(root, 'output');
   await mkdir(inputDir);
   t.after(() => rm(root, { recursive: true, force: true }));
-  const data = Buffer.from(JSON.stringify({ symbol:'NSE:SBIN-EQ', source:'FYERS_HISTORICAL_API', dataProvenance:'FYERS_HISTORICAL_API', fiveMinuteCandles:[], dailyCandles:[], topGainerMembership:[],apiEvidence:{fiveMinute:{endpoint:'/data/history',resolution:'5',httpStatus:200,responseSha256:'b'.repeat(64),retrievedAt:'2026-11-24T10:00:00Z'},daily:{endpoint:'/data/history',resolution:'D',httpStatus:200,responseSha256:'c'.repeat(64),retrievedAt:'2026-11-24T10:00:00Z'}} }));
+  const data = Buffer.from(JSON.stringify({ symbol:'NSE:SBIN-EQ', source:'FYERS_HISTORICAL_API', dataProvenance:'FYERS_HISTORICAL_API', fiveMinuteCandles:[], dailyCandles:[], topGainerMembership:[],rawResponseEvidence:{fiveMinute:{file:'sbin-5m-response.json',sha256:digest(fiveRaw)},daily:{file:'sbin-daily-response.json',sha256:digest(dailyRaw)}},apiEvidence:{fiveMinute:{endpoint:'/data/history',resolution:'5',httpStatus:200,responseSha256:digest(fiveRaw),retrievedAt:'2026-11-24T10:00:00Z'},daily:{endpoint:'/data/history',resolution:'D',httpStatus:200,responseSha256:digest(dailyRaw),retrievedAt:'2026-11-24T10:00:00Z'}} }));
   await writeFile(path.join(inputDir, 'sbin.json'), data);
+  const fiveRaw=Buffer.from(JSON.stringify({s:'ok',candles:[]}));
+  const dailyRaw=Buffer.from(JSON.stringify({s:'ok',candles:[]}));
+  await writeFile(path.join(inputDir,'sbin-5m-response.json'),fiveRaw);
+  await writeFile(path.join(inputDir,'sbin-daily-response.json'),dailyRaw);
   const foMaster=Buffer.from('{\"official\":\"fo\"}');
   const cmMaster=Buffer.from('{\"official\":\"cm\"}');
   await writeFile(path.join(inputDir,'master-NSE_FO_sym_master.json'),foMaster);

@@ -16,7 +16,7 @@ function fixture({future=[
   candle(1200,114,117,112,116)
 ]}={}) {
  const dataset={
-  source:'FYERS_EXPIRED_FO_API',timestampConvention:'FYERS_EPOCH_BAR_START',
+  source:'FYERS_EXPIRED_FO_API',timestampConvention:'FYERS_EPOCH_BAR_START',integrityVerified:true,
   actionable:false,ordersEnabled:false,symbol:'NSE:SBIN25MAR800CE',
   underlying:'NSE:SBIN-EQ',expiry:'2025-03-27',strike:800,side:'CE',
   selection:{method:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',selectionTime:signal.evaluatedAt,underlyingPrice:signal.underlyingClose},

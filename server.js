@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, verifyLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
+import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
@@ -567,13 +567,11 @@ const server = http.createServer(async (req,res) => {
     const authCode = url.searchParams.get('auth_code');
     const cookies = parseCookies(req.headers.cookie || '');
     const clearStateCookie = 'fyers_oauth_state=; Max-Age=0; Path=/api/fyers; HttpOnly; Secure; SameSite=Lax';
-    if (!verifyLoginState(state,cookies.fyers_oauth_state) || consumedOAuthStates.has(state)) {
+    if (!consumeLoginState(state,cookies.fyers_oauth_state,consumedOAuthStates)) {
       console.warn('[FYERS_OAUTH] callback rejected: state missing, mismatched or already consumed');
       res.setHeader('set-cookie',clearStateCookie);
       return send(res,400,{status:'REJECTED',reason:'OAuth state is missing, mismatched or already used. Start Connect once again.'});
     }
-    consumedOAuthStates.add(state);
-    if (consumedOAuthStates.size > 2000) consumedOAuthStates.delete(consumedOAuthStates.values().next().value);
     res.setHeader('set-cookie',clearStateCookie);
     if (!authCode) {
       console.warn('[FYERS_OAUTH] callback missing auth_code');

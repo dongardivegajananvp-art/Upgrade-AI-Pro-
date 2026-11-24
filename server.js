@@ -606,6 +606,12 @@ const server = http.createServer(async (req,res) => {
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/backtest/historical-fno') {
+    const resumeId = url.searchParams.get('resume');
+    if (resumeId) {
+      const resumed = historicalFnoBacktest.resume(resumeId);
+      const job = historicalFnoBacktest.get(resumeId);
+      return send(res,resumed?202:409,{status:resumed?'RESUMED':'NOT_RESUMED',accepted:resumed,job,ordersEnabled:false,actionable:false});
+    }
     if (!isFnoMasterCurrent()) return send(res,503,{status:'SYMBOL_MASTER_NOT_LOADED',reason:'Current-session official FYERS NSE F&O equity master is required'});
     const snapshot = getFnoUniverseSnapshot();
     const result = historicalFnoBacktest.start({ universe:snapshot.universe, months:3 });

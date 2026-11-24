@@ -86,3 +86,14 @@ Compatibility is therefore **partially verified, not universally certified**. CI
 - The production socket emitted repeated close events at approximately two-minute intervals and reconnected about five to six seconds later. The deployed close handler logged no close-event payload, so the upstream close cause cannot be identified from these logs. PR #89 adds bounded close-detail capture, but this diagnostic change is not deployed.
 - The socket received index messages immediately after connecting, but their exchange timestamps were from 2026-11-23 and were 18–24 hours old in the inspected window. Since 2026-11-24 was an NSE holiday, those messages are expected to fail the live freshness gate. They must not be treated as fresh market ticks.
 - No code or production configuration was changed as part of this log review. OAuth fresh-flow validation, socket close-cause attribution, and next-open-session feed acceptance remain release gates.
+
+
+## 2026-11-24 historical replay foundation
+
+- Added `src/backtest-engine.js` to replay completed NSE 5-minute FYERS historical candles through the existing nine-strategy detector at each candle close.
+- Replay passes only the candle prefix available at that timestamp and anchors historical freshness checks to the replay clock; future candles are not exposed to earlier evaluations.
+- Replay fails closed unless the dataset is explicitly identified as `FYERS_HISTORICAL_API`, the NSE symbol is valid, OHLCV rows are valid and ordered, daily warm-up history is present, and 5-minute session continuity is intact.
+- Historical Top Gainer membership is not inferred from today's Top Gainers. The engine accepts only timestamp-matched membership snapshots.
+- This first increment is intentionally **underlying signal replay only**. It does not create option fills, entries, stops, targets, P&L, win rate or profit factor. Those require timestamp-correct historical option contracts and option OHLCV/quote data, plus explicit fill, spread, slippage and brokerage assumptions.
+- Every result is labelled `HISTORICAL_SIGNAL_REPLAY`, `actionable:false`, and `optionExecution:NOT_SIMULATED`. No live scanner, order path, or production config is changed.
+- Automated tests cover provenance rejection, no-look-ahead replay, malformed Top Gainer snapshots, and gap rejection. Test fixtures are not market-performance evidence.

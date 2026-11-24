@@ -36,7 +36,7 @@ test('historical signal replay refuses unverified or synthetic provenance', () =
 
 test('historical signal replay evaluates candle prefixes and never fabricates option P&L', () => {
   const result = runHistoricalSignalReplay(neutralData());
-  assert.equal(result.status, 'COMPLETE');
+  assert.equal(result.status, 'PARTIAL');
   assert.equal(result.mode, 'HISTORICAL_SIGNAL_REPLAY');
   assert.equal(result.actionable, false);
   assert.ok(result.evaluatedCandles > 0);

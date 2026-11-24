@@ -105,6 +105,8 @@ export function runHistoricalSignalReplay({
 
   const summary = Object.fromEntries(STRATEGIES.map(strategy => [strategy, 0]));
   const strategyDiagnostics = Object.fromEntries(STRATEGIES.map(strategy => [strategy, { blocked:0, rejected:0, detected:0 }]));
+  let topGainerSnapshotsMatched = 0;
+  let topGainerSnapshotsMissing = 0;
   const signals = [];
   const seen = new Set();
   let evaluatedCandles = 0;
@@ -122,6 +124,8 @@ export function runHistoricalSignalReplay({
     }
     evaluatedCandles += 1;
     const members = membershipByTime.get(candleTime);
+    if (members) topGainerSnapshotsMatched += 1;
+    else topGainerSnapshotsMissing += 1;
     const isTopGainer = Boolean(members && members.has(symbol.toUpperCase()));
     const result = detectNineStrategySetup({
       underlyingCandles: prefix,
@@ -162,7 +166,7 @@ export function runHistoricalSignalReplay({
   }
 
   return {
-    status: 'COMPLETE',
+    status: topGainerSnapshotsMissing > 0 ? 'PARTIAL' : 'COMPLETE',
     mode: 'HISTORICAL_SIGNAL_REPLAY',
     actionable: false,
     symbol,
@@ -172,6 +176,12 @@ export function runHistoricalSignalReplay({
     endTime: end,
     evaluatedCandles,
     skippedWarmupCandles,
+    topGainerCoverage: {
+      status: topGainerSnapshotsMissing === 0 ? 'COMPLETE' : 'NOT_EVALUATED',
+      matchedSnapshots: topGainerSnapshotsMatched,
+      missingSnapshots: topGainerSnapshotsMissing,
+      reason: topGainerSnapshotsMissing > 0 ? 'Timestamp-matched historical Top Gainer membership snapshots are missing; this strategy cannot be evaluated for those candles' : null
+    },
     signalCount: signals.length,
     signals,
     summary,

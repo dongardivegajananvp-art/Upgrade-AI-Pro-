@@ -13,11 +13,12 @@ async function fixture(t) {
   const outputDir = path.join(root, 'output');
   await mkdir(inputDir);
   t.after(() => rm(root, { recursive: true, force: true }));
-  const data = Buffer.from(JSON.stringify({ symbol:'NSE:SBIN-EQ', source:'FYERS_HISTORICAL_API', dataProvenance:'FYERS_HISTORICAL_API', fiveMinuteCandles:[], dailyCandles:[], topGainerMembership:[] }));
+  const data = Buffer.from(JSON.stringify({ symbol:'NSE:SBIN-EQ', source:'FYERS_HISTORICAL_API', dataProvenance:'FYERS_HISTORICAL_API', fiveMinuteCandles:[], dailyCandles:[], topGainerMembership:[],apiEvidence:{fiveMinute:{endpoint:'/data/history',resolution:'5',httpStatus:200,responseSha256:'b'.repeat(64),retrievedAt:'2026-11-24T10:00:00Z'},daily:{endpoint:'/data/history',resolution:'D',httpStatus:200,responseSha256:'c'.repeat(64),retrievedAt:'2026-11-24T10:00:00Z'}} }));
   await writeFile(path.join(inputDir, 'sbin.json'), data);
   await writeFile(path.join(inputDir, 'manifest.json'), JSON.stringify({
     format:'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1', source:'FYERS_HISTORICAL_API', actionable:false,
-    datasetId:'test-fixture', startTime:1, endTime:2, files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
+    datasetId:'test-fixture', startTime:1, endTime:2, master:{source:'FYERS_HISTORICAL_API',sha256:'a'.repeat(64)}, requestPolicy:{sequential:true},
+    files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
   }));
   return { inputDir, outputDir };
 }

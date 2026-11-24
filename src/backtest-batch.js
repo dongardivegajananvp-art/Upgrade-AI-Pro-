@@ -2,6 +2,12 @@ import { runHistoricalSignalReplay } from './backtest-engine.js';
 
 const SYMBOL_PATTERN = /^NSE:[A-Z0-9&._-]{1,48}-EQ$/;
 const DAY_MS = 86400000;
+const STRATEGY_IDS = [
+  'EMA20_EMA50_TREND', 'TOP_GAINER_MOMENTUM_BREAKOUT', 'DAILY_TREND_5M_PULLBACK',
+  'DAY_HIGH_LOW_BREAK_RETEST', 'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
+  'BULLISH_CONTINUATION', 'BEARISH_CONTINUATION', 'FLAG_BREAKOUT_VOLUME',
+  'OPENING_RANGE_BREAKOUT'
+];
 
 function istDateKey(epochMs) {
   return new Date(Number(epochMs) + 19800000).toISOString().slice(0, 10);
@@ -45,6 +51,10 @@ export function createHistoricalFnoBacktestRunner({
       blockedCount: job.blockedCount,
       signalCount: job.signalCount,
       strategySummary: { ...job.strategySummary },
+      currentSymbol: job.currentSymbol,
+      storedSignalCount: job.signals.length,
+      signalsTruncated: job.signalCount > job.signals.length,
+      estimatedMinimumMinutesAtGuardedBudget: Math.ceil((job.universeCount * 2) / 3),
       signals: job.signals.slice(),
       failures: job.failures.slice(0, 100),
       failureCount: job.failureCount,
@@ -154,7 +164,7 @@ export function createHistoricalFnoBacktestRunner({
         completedCount: 0,
         blockedCount: 0,
         signalCount: 0,
-        strategySummary: {},
+        strategySummary: Object.fromEntries(STRATEGY_IDS.map(strategy => [strategy, 0])),
         signals: [],
         failures: [],
         failureCount: 0,

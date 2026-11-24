@@ -65,7 +65,7 @@ test('offline option replay blocks missing historical contract tick-size evidenc
  delete contractSpec.tickSize;
  const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
  assert.equal(result.status,'DATA_UNAVAILABLE');
- assert.match(result.reason,/tick size are required/);
+ assert.match(result.reason,/Same-session official NSE daily F&O contract-master/);
 });
 
 test('offline option replay blocks selection from a different signal timestamp or underlying close',()=>{

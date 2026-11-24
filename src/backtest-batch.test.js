@@ -43,7 +43,7 @@ test('three-month F&O batch accepts only unique official NSE equity symbols and 
   assert.equal(final.strategySummary.EMA20_EMA50_TREND, 2);
   assert.equal(calls.length, 2);
   assert.ok(calls.every(call => call.startTime < call.endTime));
-  assert.ok(final.limitations.some(value => /option P&L backtest/.test(value)));
+  assert.ok(final.limitations.some(value => /option-trade P&L backtest/.test(value)));
 });
 
 test('batch blocks a symbol when the history adapter does not attest FYERS provenance', async () => {
@@ -104,5 +104,5 @@ test('batch pauses without skipping symbols on a FYERS cooldown and resumes at t
   const final = await waitForTerminal(runner, started.job.id);
   assert.equal(final.status, 'COMPLETE');
   assert.equal(final.processedCount, 2);
-  assert.deepEqual(fetched, ['NSE:SBIN-EQ', 'NSE:SBIN-EQ', 'NSE:RELIANCE-EQ']);
+  assert.deepEqual(fetched, ['NSE:RELIANCE-EQ', 'NSE:RELIANCE-EQ', 'NSE:SBIN-EQ']);
 });

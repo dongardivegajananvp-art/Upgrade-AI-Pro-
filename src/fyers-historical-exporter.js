@@ -118,7 +118,7 @@ export async function exportFyersHistoricalDataset({
         error.stopExport=true; throw error;
       }
       if (!response.ok || body.s!=='ok' || !Array.isArray(body.candles)) throw new Error('FYERS history failed for '+symbol+' '+resolution+' (HTTP '+response.status+', code '+String(body.code??'n/a')+')');
-      return {body,proof:{endpoint:'/data/history',resolution,rangeFrom:istDate(from),rangeTo:istDate(endTime),httpStatus:response.status,responseSha256:sha256(raw),retrievedAt:new Date().toISOString()}};
+      return {body,raw,proof:{endpoint:'/data/history',resolution,rangeFrom:istDate(from),rangeTo:istDate(endTime),httpStatus:response.status,responseSha256:sha256(raw),retrievedAt:new Date().toISOString()}};
     };
     try {
       const five=await fetchCandles('5',fiveMinuteStartTime);
@@ -126,11 +126,18 @@ export async function exportFyersHistoricalDataset({
       const fiveMinuteCandles=normalizeFiveMinute(five.body.candles,fiveMinuteStartTime,endTime,Math.floor(now/1000));
       const dailyCandles=normalizeDaily(daily.body.candles,dailyStartTime,endTime,Math.floor(now/1000));
       if (!fiveMinuteCandles.length || dailyCandles.length<50) throw new Error('FYERS returned insufficient completed candles; no file accepted');
-      const data={symbol,source:PROVENANCE,dataProvenance:PROVENANCE,fiveMinuteCandles,dailyCandles,topGainerMembership:[],requested:manifest.requested,retrievedAt:new Date().toISOString(),apiEvidence:{fiveMinute:five.proof,daily:daily.proof}};
+      const stem=symbol.replace(/^NSE:/,'').replace(/-EQ$/,'').toLowerCase();
+      const rawEvidence={fiveMinute:{file:stem+'-5m-response.json',sha256:sha256(five.raw)},daily:{file:stem+'-daily-response.json',sha256:sha256(daily.raw)}};
+      for (const evidence of Object.values(rawEvidence)) {
+        const responseBytes=Buffer.from(evidence===rawEvidence.fiveMinute?five.raw:daily.raw);
+        await writeFile(path.join(output,evidence.file+'.tmp'),responseBytes,{flag:'wx'});
+        await rename(path.join(output,evidence.file+'.tmp'),path.join(output,evidence.file));
+      }
+      const data={symbol,source:PROVENANCE,dataProvenance:PROVENANCE,fiveMinuteCandles,dailyCandles,topGainerMembership:[],requested:manifest.requested,retrievedAt:new Date().toISOString(),apiEvidence:{fiveMinute:five.proof,daily:daily.proof},rawResponseEvidence:rawEvidence};
       const bytes=Buffer.from(JSON.stringify(data));
-      const filename=symbol.replace(/^NSE:/,'').replace(/-EQ$/,'').toLowerCase()+'.json';
+      const filename=stem+'.json';
       await atomicJson(path.join(output,filename),data);
-      manifest.files.push({symbol,file:filename,sha256:sha256(bytes),fiveMinuteCount:fiveMinuteCandles.length,dailyCount:dailyCandles.length,apiEvidence:data.apiEvidence});
+      manifest.files.push({symbol,file:filename,sha256:sha256(bytes),fiveMinuteCount:fiveMinuteCandles.length,dailyCount:dailyCandles.length,apiEvidence:data.apiEvidence,rawResponseEvidence:rawEvidence});
     } catch(error) {
       manifest.failures.push({symbol,reason:String(error?.message||error).slice(0,240)});
       if (error.stopExport) break;

@@ -45,7 +45,7 @@ async function withOutput(run) {
 }
 const base=outputDir=>({
   client:null,underlying,expiry,start,end,underlyingPrice:23012,
-  selectionTime:stamp,outputDir,now,clock:quietSafeClock,
+  selectionTime:stamp,outputDir,budgetDir:outputDir,now,clock:quietSafeClock,
   pause:async()=>{},minRequestGapMs:1000,maxIntradayRequests:10
 });
 

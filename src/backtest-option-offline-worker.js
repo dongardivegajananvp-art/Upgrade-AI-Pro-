@@ -47,3 +47,16 @@ export async function runOfflineOptionExecutionDataset({inputDir,outputDir}={}){
  await rename(temporary,target);
  return {path:target,report};
 }
+
+if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
+ const [inputDir,outputDir]=process.argv.slice(2);
+ runOfflineOptionExecutionDataset({inputDir,outputDir})
+  .then(({path:resultPath,report})=>{
+   process.stdout.write(JSON.stringify({status:report.status,resultPath,sampleCount:report.summary.sampleCount,winRate:report.summary.winRate,performanceClass:report.performanceClass,actionable:false,ordersEnabled:false})+'\\n');
+   if(report.status!=='COMPLETE')process.exitCode=2;
+  })
+  .catch(error=>{
+   process.stderr.write(JSON.stringify({status:'DATA_UNAVAILABLE',reason:String(error?.message||error).slice(0,300),actionable:false,ordersEnabled:false})+'\\n');
+   process.exitCode=1;
+  });
+}

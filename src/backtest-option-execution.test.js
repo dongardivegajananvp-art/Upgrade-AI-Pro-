@@ -86,7 +86,7 @@ test('Top Gainer execution requires timestamp-matched membership snapshot',()=>{
 
 test('offline option replay blocks unresolved candle gaps and missing post-signal trigger bars',()=>{
  const {dataset,contractSpec}=fixture();
- dataset.candles[3].time+=300;
+ dataset.candles[4].time+=300;
  const result=simulateExpiredOptionSignal({signal,optionDataset:dataset,contractSpec});
  assert.equal(result.status,'DATA_UNAVAILABLE');
  assert.match(result.reason,/gap/);

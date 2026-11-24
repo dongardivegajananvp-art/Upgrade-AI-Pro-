@@ -25,6 +25,7 @@ async function fixture(t) {
   await writeFile(path.join(inputDir,'master-NSE_CM_sym_master.json'),cmMaster);
   await writeFile(path.join(inputDir, 'manifest.json'), JSON.stringify({
     format:'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1', source:'FYERS_HISTORICAL_API', actionable:false,
+    complete:true, exportedCount:1, failureCount:0, failures:[],
     datasetId:'test-fixture', requested:{startTime:1760000000,endTime:1761000000}, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',datasetFile:'master-NSE_FO_sym_master.json',sha256:digest(foMaster)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',datasetFile:'master-NSE_CM_sym_master.json',sha256:digest(cmMaster)}}}, requestPolicy:{sequential:true},
     files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
   }));

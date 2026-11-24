@@ -41,6 +41,8 @@ test('historical signal replay evaluates candle prefixes and never fabricates op
   assert.equal(result.actionable, false);
   assert.ok(result.evaluatedCandles > 0);
   assert.equal(result.tradePerformance, null);
+  assert.equal(Object.keys(result.strategyDiagnostics).length, 9);
+  assert.ok(result.strategyDiagnostics.TOP_GAINER_MOMENTUM_BREAKOUT.blocked > 0);
   assert.ok(result.signals.every(signal =>
     signal.optionExecution === 'NOT_SIMULATED' &&
     signal.entry === null && signal.stopLoss === null &&

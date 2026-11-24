@@ -35,6 +35,12 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
   if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length > 300) {
     throw new Error('Dataset manifest must contain 1 to 300 symbol files');
   }
+  const replayRange = manifest.requested || { startTime: manifest.startTime, endTime: manifest.endTime };
+  const replayStartTime = Number(replayRange?.startTime);
+  const replayEndTime = Number(replayRange?.endTime);
+  if (!Number.isFinite(replayStartTime) || !Number.isFinite(replayEndTime) || replayStartTime <= 0 || replayEndTime <= replayStartTime) {
+    throw new Error('Dataset manifest is missing a valid requested replay start/end range');
+  }
   const seen = new Set();
   const results = [];
   for (const entry of manifest.files) {
@@ -59,8 +65,8 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
       dailyCandles: data.dailyCandles,
       topGainerMembership: data.topGainerMembership || [],
       dataProvenance: data.dataProvenance,
-      startTime: manifest.startTime,
-      endTime: manifest.endTime
+      startTime: replayStartTime,
+      endTime: replayEndTime
     });
     if (result.actionable !== false || result.mode !== 'HISTORICAL_SIGNAL_REPLAY') {
       throw new Error('Replay engine returned an unexpected actionable or non-historical result');

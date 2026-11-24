@@ -64,7 +64,7 @@ test('offline option worker rejects overlapping input and output directories',as
 
 test('offline option worker blocks a tick size that differs from the exact NSE contract-master row',async()=>{
  await fixture(async ({input,output,manifest,entries,contractSpec})=>{
-  const csv='Instrument,Symbol,Expiry,Strike,OptionType,LotSize,TickSize,ISIN,UnderlyingSymbol\\nOPTSTK,SBIN,27-Mar-2025,800,CE,750,0.01,INE062A01020,SBIN\\n';
+  const csv='Instrument,Symbol,Expiry,Strike,OptionType,LotSize,TickSize,ISIN,UnderlyingSymbol\nOPTSTK,SBIN,27-Mar-2025,800,CE,750,0.01,INE062A01020,SBIN\n';
   const bytes=gzipSync(csv);
   await writeFile(path.join(input,contractSpec.masterFile),bytes);
   const masterHash=hash(bytes);

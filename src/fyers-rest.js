@@ -629,3 +629,68 @@ export function getCachedResearchHistories() {
     fifteenMinute: new Map([...fifteenMinuteCache].map(([symbol, entry]) => [symbol, entry.value]))
   };
 }
+
+
+function istDateFromEpochSeconds(seconds) {
+  return new Date((Number(seconds) + 19800000) * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Fetch a bounded historical backtest dataset from FYERS /data/history.
+ * Intraday and daily windows are separate because FYERS documents different
+ * per-request limits (100 days intraday, 366 days daily).
+ */
+export async function getHistoricalBacktestHistory({
+  symbol,
+  startTime,
+  dailyStartTime,
+  endTime,
+  priority = REST_PRIORITY.RESEARCH,
+  source = 'historical-backtest'
+} = {}) {
+  if (!validateNseSymbol(symbol)) throw new Error('Historical backtest requires a valid NSE equity symbol');
+  const start = Number(startTime);
+  const dailyStart = Number(dailyStartTime);
+  const end = Number(endTime);
+  if (![start, dailyStart, end].every(Number.isFinite) || dailyStart <= 0 || start <= 0 || end <= start || dailyStart > start) {
+    throw new Error('Historical backtest date range is invalid');
+  }
+  const intradayDays = (end - start) / 86400;
+  const dailyDays = (end - dailyStart) / 86400;
+  if (intradayDays > 100 || dailyDays > 366) {
+    throw new Error('Requested FYERS history range exceeds documented per-request limits');
+  }
+  const from5m = istDateFromEpochSeconds(start);
+  const fromDaily = istDateFromEpochSeconds(dailyStart);
+  const to = istDateFromEpochSeconds(end);
+  const [fiveMinuteBody, dailyBody] = await Promise.all([
+    fyersGet(DATA_BASE, '/history', {
+      symbol, resolution: '5', date_format: '1', range_from: from5m, range_to: to
+    }, priority, source + '-5m'),
+    fyersGet(DATA_BASE, '/history', {
+      symbol, resolution: 'D', date_format: '1', range_from: fromDaily, range_to: to
+    }, priority, source + '-daily')
+  ]);
+  if (fiveMinuteBody.s !== 'ok' || !Array.isArray(fiveMinuteBody.candles)) {
+    throw new Error('FYERS did not return a successful 5-minute historical response');
+  }
+  if (dailyBody.s !== 'ok' || !Array.isArray(dailyBody.candles)) {
+    throw new Error('FYERS did not return a successful daily historical response');
+  }
+  const endMs = end * 1000;
+  const fiveMinuteCandles = normalizeFiveMinuteCandles(fiveMinuteBody.candles, endMs)
+    .filter(candle => candle.time >= start && candle.time <= end);
+  const dailyCandles = normalizeDailyCandles(dailyBody.candles, endMs)
+    .filter(candle => candle.time >= dailyStart && candle.time <= end);
+  if (!fiveMinuteCandles.length) throw new Error('FYERS returned no completed 5-minute candles for the requested backtest range');
+  if (dailyCandles.length < 50) throw new Error('FYERS returned fewer than 50 completed daily warm-up candles');
+  return {
+    symbol,
+    fiveMinuteCandles,
+    dailyCandles,
+    dataProvenance: 'FYERS_HISTORICAL_API',
+    sources: ['FYERS_HISTORY_5M', 'FYERS_DAILY_HISTORY'],
+    requested: { fiveMinuteFrom: from5m, dailyFrom: fromDaily, to },
+    retrievedAt: new Date().toISOString()
+  };
+}

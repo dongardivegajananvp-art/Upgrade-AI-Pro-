@@ -10,7 +10,8 @@ export const FYERS_MASTER_URLS = Object.freeze({
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 async function atomicWrite(file,bytes){const temp=file+'.tmp';await writeFile(temp,bytes,{flag:'wx'});await rename(temp,file);}
 function parseMaster(raw,label){let value;try{value=JSON.parse(raw.toString('utf8'));}catch{throw new Error('FYERS '+label+' symbol master is not valid JSON');}if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length<10)throw new Error('FYERS '+label+' symbol master is empty or malformed');return value;}
-export function buildNseFnoEquityUniverse(foMaster,cmMaster){\n if(!foMaster||typeof foMaster!=='object'||Array.isArray(foMaster)||Object.keys(foMaster).length<10||!cmMaster||typeof cmMaster!=='object'||Array.isArray(cmMaster)||Object.keys(cmMaster).length<10)throw new Error('Official FYERS NSE symbol masters are empty or malformed');
+export function buildNseFnoEquityUniverse(foMaster,cmMaster){
+ if(!foMaster||typeof foMaster!=='object'||Array.isArray(foMaster)||Object.keys(foMaster).length<10||!cmMaster||typeof cmMaster!=='object'||Array.isArray(cmMaster)||Object.keys(cmMaster).length<10)throw new Error('Official FYERS NSE symbol masters are empty or malformed');
  const fnoTokens=new Map();
  for(const [key,row] of Object.entries(foMaster)){if(!row||typeof row!=='object')continue;const token=String(row.underFyTok||'').trim();const ticker=String(row.symTicker||key).trim().toUpperCase();if(token&&ticker.startsWith('NSE:')&&(row.tradeStatus===undefined||Number(row.tradeStatus)===1))fnoTokens.set(token,(fnoTokens.get(token)||0)+1);}
  const symbols=[],seen=new Set();

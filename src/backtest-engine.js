@@ -67,6 +67,7 @@ export function runHistoricalSignalReplay({
     reason,
     signals: [],
     summary: Object.fromEntries(STRATEGIES.map(strategy => [strategy, 0])),
+    strategyDiagnostics: Object.fromEntries(STRATEGIES.map(strategy => [strategy, { blocked:0, rejected:0, detected:0 }])),
     tradePerformance: null
   });
 
@@ -103,6 +104,7 @@ export function runHistoricalSignalReplay({
   }
 
   const summary = Object.fromEntries(STRATEGIES.map(strategy => [strategy, 0]));
+  const strategyDiagnostics = Object.fromEntries(STRATEGIES.map(strategy => [strategy, { blocked:0, rejected:0, detected:0 }]));
   const signals = [];
   const seen = new Set();
   let evaluatedCandles = 0;
@@ -130,6 +132,12 @@ export function runHistoricalSignalReplay({
       historicalAsOf: asOf,
       maxCandleAgeSeconds: 0
     });
+    for (const row of result.strategyLedger || []) {
+      const diagnostic = strategyDiagnostics[row.strategy];
+      if (diagnostic && Object.prototype.hasOwnProperty.call(diagnostic, String(row.status || '').toLowerCase())) {
+        diagnostic[String(row.status).toLowerCase()] += 1;
+      }
+    }
     if (result.status !== 'UNDERLYING_SETUP_CONFIRMED') continue;
     const key = result.strategy + ':' + Number(result.confirmedAt);
     if (seen.has(key)) continue;
@@ -167,6 +175,7 @@ export function runHistoricalSignalReplay({
     signalCount: signals.length,
     signals,
     summary,
+    strategyDiagnostics,
     tradePerformance: null,
     limitations: [
       'Historical underlying strategy signals only; this is not a full option-trade backtest.',

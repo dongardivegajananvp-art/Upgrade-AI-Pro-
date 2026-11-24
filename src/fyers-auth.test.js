@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLoginUrl, verifyLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
+import { createLoginUrl, verifyLoginState, consumeLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
 
 test('FYERS login URL includes configured redirect and cryptographic state',()=>{
  const login=createLoginUrl({appId:'TEST-100',redirectUri:'https://example.test/api/fyers/auth/callback'});
@@ -68,4 +68,19 @@ test('FYERS REST cooldown survives restart through an encrypted browser safety c
 
 test('FYERS REST safety cookie is not created when no active cooldown exists',()=>{
  assert.equal(createRestSafetyCookie({appId:'TEST-100',appSecret:'test-secret',state:{cooldownUntil:null},now:1000}),null);
+});
+
+
+test('OAuth callback state is validated and consumed exactly once with bounded replay memory',()=>{
+ const states=new Set();
+ const state='a'.repeat(48);
+ assert.equal(consumeLoginState(state,'b'.repeat(48),states),false);
+ assert.equal(states.size,0);
+ assert.equal(consumeLoginState(state,state,states),true);
+ assert.equal(states.has(state),true);
+ assert.equal(consumeLoginState(state,state,states),false);
+ const bounded=new Set();
+ for(let i=0;i<5;i++) assert.equal(consumeLoginState(i.toString(16).padStart(48,'0'),i.toString(16).padStart(48,'0'),bounded,3),true);
+ assert.equal(bounded.size,3);
+ assert.equal(bounded.has('0'.repeat(48)),false);
 });

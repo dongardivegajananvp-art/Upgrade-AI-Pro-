@@ -238,7 +238,7 @@ export async function exportExpiredOptionPair({
       candleSha256:sha256(JSON.stringify(candles)),retrievedAt:new Date(clock()).toISOString(),
       historicalBidAskDepthAvailable:false,actionable:false,ordersEnabled:false
     };
-    const filename=symbol.replace(':','_')+'.json';
+    const filename=symbol.replace(':','_')+'-'+start+'-'+String(selectionTime)+'.json';
     await writeOnce(path.join(root,filename),payload);
     contractResults[side]={file:filename,status:candles.length?'EXPORTED':'NO_DATA',candleCount:candles.length};
   }
@@ -256,6 +256,6 @@ export async function exportExpiredOptionPair({
       'This export is data collection only; it does not calculate strategy performance or P&L.'
     ]
   };
-  await writeOnce(path.join(root,'collection-'+expiry+'-'+String(strike)+'.json'),report);
+  await writeOnce(path.join(root,'collection-'+expiry+'-'+String(strike)+'-'+start+'-'+String(selectionTime)+'.json'),report);
   return {report,outputDir:root};
 }

@@ -241,3 +241,20 @@ test('endpoint health is based on real HTTP and FYERS API responses, never conne
   assert.equal(health.orderbook.status,'NOT_VERIFIED');
   assert.equal(health.orderbook.ok,false);
 });
+
+
+test('encrypted browser safety state restores a future cooldown monotonically',()=>{
+  const now=Date.UTC(2026,10,24,5,0,0);
+  const firstUntil=now+120000;
+  assert.equal(restoreRestSafetyState({
+    cooldownUntil:firstUntil,rateLimitDayKey:'2026-11-24',rateLimitCountToday:2,
+    cloudflareRateLimitCountToday:1,unknownRateLimitCountToday:0,
+    lastRateLimitAt:new Date(now).toISOString(),lastRateLimitKind:'CLOUDFLARE_1015'
+  },now),true);
+  assert.equal(getRestDiagnostics(now).cooldownUntil,new Date(firstUntil).toISOString());
+  assert.equal(getRestDiagnostics(now).recoveryProbeRequired,true);
+  assert.equal(restoreRestSafetyState({cooldownUntil:now+60000,rateLimitDayKey:'2026-11-24',rateLimitCountToday:1},now),true);
+  assert.equal(getRestDiagnostics(now).cooldownUntil,new Date(firstUntil).toISOString());
+  assert.equal(getRestSafetyState(now).cooldownUntil,firstUntil);
+  assert.equal(restoreRestSafetyState({cooldownUntil:now-1},now),false);
+});

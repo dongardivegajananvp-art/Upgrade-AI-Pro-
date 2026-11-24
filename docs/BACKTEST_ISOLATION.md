@@ -2,41 +2,56 @@
 
 ## Safety boundary
 
-The historical replay worker is a separate Node.js process invoked with `npm run backtest:offline -- <input-dir> <output-dir>`. It imports only the historical replay engine and Node.js filesystem/crypto modules. It does not import the live server, FYERS REST governor/client, WebSocket, scanner, account feed, order manager, or live state.
+There are two separate commands and processes:
 
-Run this worker on a separate local machine/process or isolated compute environment. Do not run it as a child process inside the production live server. The output directory must be separate from and non-overlapping with the input directory. The worker never calls FYERS or any network endpoint.
+- `npm run backtest:export -- <official-master.json> <dataset-dir>` downloads historical candles using only the explicitly supplied FYERS credentials. Run this on a separate machine/process, preferably outside NSE market hours. It does not import the live server, FYERS REST governor, WebSocket, scanner, account feed, or order manager.
+- `npm run backtest:offline -- <dataset-dir> <results-dir>` performs local replay. It has no network client and reads only the exported files.
 
-## Dataset layout
+Never run either command as a child process inside the live trading server. The live production process remains independent. The exporter uses its own sequential HTTP calls and pacing; it does not share or consume the live app's in-memory REST governor. A separate process does not mean FYERS account-level limits are independent: the broker may apply shared account/app quotas, so export only off-market, monitor responses, and stop immediately on HTTP 429/401/403. The exporter makes no automatic retries.
 
-The input directory must contain:
+## Credentials
 
-- `manifest.json`
-- one JSON file per NSE F&O equity symbol, each named by a safe basename
+Set `FYERS_APP_ID` and `FYERS_ACCESS_TOKEN` as environment variables in the isolated shell only. Do not commit them, put them in command arguments, or paste them into logs. The access token is read directly from the environment; it is never written to the dataset or report. Authenticate through the user's normal FYERS OAuth process and use the resulting valid token. The exporter does not change the live workstation's authentication/session.
 
-Manifest example:
+## Official instrument master input
+
+The exporter requires a JSON file created from the official FYERS NSE F&O equity instrument master, with this explicit schema:
 
 ```json
 {
-  "format": "UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1",
+  "format": "UPGRADE_AI_PRO_FYERS_NSE_FNO_MASTER_V1",
   "source": "FYERS_HISTORICAL_API",
-  "actionable": false,
-  "datasetId": "descriptive-id",
-  "startTime": 0,
-  "endTime": 0,
-  "files": [
-    { "symbol": "NSE:SBIN-EQ", "file": "sbin.json", "sha256": "64-lowercase-hex-characters" }
-  ]
+  "verifiedOfficialMaster": true,
+  "retrievedAt": "ISO-8601 timestamp",
+  "symbols": ["NSE:SBIN-EQ"]
 }
 ```
 
-Each symbol file must include `symbol`, `source: "FYERS_HISTORICAL_API"`, `dataProvenance: "FYERS_HISTORICAL_API"`, `fiveMinuteCandles`, `dailyCandles`, and optional timestamp-matched `topGainerMembership`. The SHA-256 value is calculated over the exact file bytes.
+The `verifiedOfficialMaster` flag is an operator assertion, not a cryptographic proof. Before export, independently verify that the symbols were extracted from the current official FYERS master, restricted to NSE equity F&O instruments. Do not substitute a manually guessed list or current Top Gainers.
 
-## Important provenance limitation
+## Export behavior
 
-A SHA-256 check detects file changes after a manifest was created; it does **not** prove that a file genuinely came from FYERS. The current worker therefore validates provenance labels, integrity, symbols, and replay-engine candle gates, but it cannot independently authenticate the broker origin. Do not label a dataset as official until a separate, audited FYERS historical downloader/exporter records the exact API response and provenance. Synthetic/sample data must never be used. Missing or invalid candles remain `DATA_UNAVAILABLE`.
+For each official symbol, sequentially fetches FYERS `/data/history` resolution `5` and `D`. The requested replay period is three calendar months; 5-minute history includes five extra calendar days for warm-up, and daily history includes 120 extra calendar days. Requests are sequential with a conservative 4-second default spacing, configurable only within 1–60 seconds. This spacing is an app-side precaution, not a statement of FYERS quota. FYERS documented request limits are checked locally (100 days intraday and 366 days daily). A 429/401/403 stops the export immediately with no retry.
 
-## Output
+The exporter stores normalized completed candles plus SHA-256 hashes of each exact raw FYERS response, request resolution/date range, HTTP status and retrieval timestamp. Invalid rows, duplicate timestamps, missing candles, insufficient daily warm-up or non-JSON/error responses are rejected. No candles are interpolated or synthesized. Failed symbols are listed in the manifest; a partial dataset must not be represented as a complete-universe backtest.
 
-Results are written atomically to the separate output directory. Reports are marked `OFFLINE_HISTORICAL_SIGNAL_REPLAY`, `actionable: false`, `ordersEnabled: false`, and `liveStateTouched: false`. This is underlying-signal replay only; it does not calculate option fills, entry/SL/target, P&L, win rate, or profit factor.
+The dataset manifest also stores the exact instrument-master file hash. The offline worker verifies dataset-file hashes and checks that the FYERS response evidence fields are present and correctly shaped before replay.
 
-No production service, deployment, merge, or live order flow is changed by running this worker.
+**Provenance caveat:** hashes establish integrity after export; they do not independently prove broker origin because a local operator could fabricate both data and manifest. The raw API response hashes and metadata improve auditability, but they are not a FYERS digital signature. Retain the original export environment/logs and do not manually edit files. The operator must ensure the input master is official.
+
+## Run commands
+
+Example on an isolated machine after installing the repository dependencies and setting credentials securely in that shell:
+
+```sh
+npm run backtest:export -- ./official-master.json ./fyers-dataset
+npm run backtest:offline -- ./fyers-dataset ./backtest-results
+```
+
+Use the offline replay only when the export manifest reports `complete: true`. The exporter currently gathers underlying equity candles only. Historical Top Gainer membership is not reconstructed; the Top Gainer strategy is evaluated only if timestamp-matched historical membership snapshots are later added from a verified source. No present-day gainer list is backfilled into history.
+
+## Output and limitations
+
+Results are written atomically to the separate output directory. Reports are marked `OFFLINE_HISTORICAL_SIGNAL_REPLAY`, `actionable: false`, `ordersEnabled: false`, and `liveStateTouched: false`. This is underlying-signal replay only; it does not calculate historical option contract fills, option entry/SL/target, P&L, win rate, or profit factor. It does not claim a complete options strategy backtest.
+
+No production service, deployment, merge, or live order flow is changed by running these tools. No paid service is required.

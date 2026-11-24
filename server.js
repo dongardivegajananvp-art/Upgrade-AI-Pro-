@@ -408,7 +408,7 @@ const server = http.createServer(async (req,res) => {
           });
           const row={symbol:item.symbol,name:item.name||item.underlying||item.symbol,status:result.status,reason:result.reason||null,strategyLedger:result.strategyLedger||[],strategy:result.strategy||null,side:result.side||null,breakoutLevel:result.breakoutLevel||null,confirmedAt:result.confirmedAt||null,underlyingPrice:result.underlyingPrice||null,asOfCandleTime:last.time,source:'FYERS_VERIFIED_COMPLETED_5M_HISTORY'};
           evaluations.push(row);
-          if(result.status==='UNDERLYING_SETUP_CONFIRMED') candidates.push({...row,status:'HISTORICAL_RESEARCH_CANDIDATE'});
+          if(result.status==='UNDERLYING_SETUP_CONFIRMED') candidates.push({...row,status:'LAST_SESSION_RESEARCH_CANDIDATE'});
         }
         candidates.sort((a,b)=>Number(b.confirmedAt||0)-Number(a.confirmedAt||0));
         return send(res,200,{status:candidates.length?'HISTORICAL_CANDIDATES_AVAILABLE':'NO_HISTORICAL_CANDIDATE',mode:'HISTORICAL_ONLY_NOT_LIVE',universeCount:snapshot.universe?.length||0,evaluatedCount:evaluations.filter(row=>row.status!=='BLOCKED').length,blockedCount:evaluations.filter(row=>row.status==='BLOCKED').length,candidateCount:candidates.length,candidates:candidates.slice(0,20),evaluations,note:'Historical FYERS completed candles only. No live tick, option quote, option candle, entry, stop or target is inferred. This list is research-only and cannot authorize a trade.'});

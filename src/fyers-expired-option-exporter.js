@@ -241,7 +241,7 @@ export async function exportExpiredOptionPair({
     format:FORMAT,source:'FYERS_EXPIRED_FO_API',status:Object.values(contractResults).every(x=>x.status==='EXPORTED')?'PAIR_EXPORTED':'PARTIAL',
     underlying,expiry,strike,selectionTime:Number(selectionTime),selectionMethod:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',
     requested:{start,end,resolution:'5'},contracts:pair,contractResults,requestCount:requestLog.length,
-    requestBudget:{providerDailyLimit:DAILY_REQUEST_LIMIT,usedToday:dailyBudget?.used??0,remainingToday:dailyBudget?.remaining??DAILY_REQUEST_LIMIT,invocationLimit:maxIntradayRequests,usedThisInvocation:requestLog.length,ledgerFile:dailyBudget?.ledgerFile??null},
+    requestBudget:{maxIntradayRequests,used:dailyBudget?.used??0,remaining:dailyBudget?.remaining??DAILY_REQUEST_LIMIT,providerDailyLimit:DAILY_REQUEST_LIMIT,usedToday:dailyBudget?.used??0,remainingToday:dailyBudget?.remaining??DAILY_REQUEST_LIMIT,invocationLimit:maxIntradayRequests,usedThisInvocation:requestLog.length,ledgerFile:dailyBudget?.ledgerFile??null},
     requestEvidence:requestLog,actionable:false,ordersEnabled:false,liveStateTouched:false,
     limitations:[
       'Provider contract symbols and expiry are taken from FYERS expired-F&O discovery APIs.',

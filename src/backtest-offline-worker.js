@@ -74,6 +74,25 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
       try { rawBody=JSON.parse(rawBytes.toString('utf8')); } catch { throw new Error('Original FYERS '+kind+' response is not valid JSON for '+symbol); }
       if (rawBody.s!=='ok' || !Array.isArray(rawBody.candles)) throw new Error('Original FYERS '+kind+' response payload is invalid for '+symbol);
     }
+    const expectedFromRaw = (kind, source) => {
+      const rawBytes = source.bytes;
+      const body = JSON.parse(rawBytes.toString('utf8'));
+      const rows = body.candles;
+      if (!Array.isArray(rows)) throw new Error('Original FYERS '+kind+' candles array is missing for '+symbol);
+      return rows.map(row => {
+        if (!Array.isArray(row) || row.length < 6) throw new Error('Original FYERS '+kind+' candle row is malformed for '+symbol);
+        const [time,open,high,low,close,volume] = row.map(Number);
+        if (![time,open,high,low,close,volume].every(Number.isFinite)) throw new Error('Original FYERS '+kind+' candle row contains non-numeric values for '+symbol);
+        return {time,open,high,low,close,volume,completed:true,source:kind==='fiveMinute'?'FYERS_HISTORY_5M':'FYERS_DAILY_HISTORY'};
+      }).sort((a,b)=>a.time-b.time);
+    };
+    const fiveRawBytes = await readFile(path.join(input, safeName(rawEvidence.fiveMinute.file)));
+    const dailyRawBytes = await readFile(path.join(input, safeName(rawEvidence.daily.file)));
+    const fiveExpected = expectedFromRaw('fiveMinute',{bytes:fiveRawBytes});
+    const dailyExpected = expectedFromRaw('daily',{bytes:dailyRawBytes});
+    if (JSON.stringify(fiveExpected)!==JSON.stringify(data.fiveMinuteCandles) || JSON.stringify(dailyExpected)!==JSON.stringify(data.dailyCandles)) {
+      throw new Error('Normalized candle data does not match original FYERS response for '+symbol);
+    }
     const result = replay({
       symbol,
       fiveMinuteCandles: data.fiveMinuteCandles,

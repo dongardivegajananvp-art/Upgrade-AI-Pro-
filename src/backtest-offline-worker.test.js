@@ -17,7 +17,7 @@ async function fixture(t) {
   await writeFile(path.join(inputDir, 'sbin.json'), data);
   await writeFile(path.join(inputDir, 'manifest.json'), JSON.stringify({
     format:'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1', source:'FYERS_HISTORICAL_API', actionable:false,
-    datasetId:'test-fixture', startTime:1, endTime:2, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',sha256:'b'.repeat(64)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',sha256:'c'.repeat(64)}}}, requestPolicy:{sequential:true},
+    datasetId:'test-fixture', requested:{startTime:1760000000,endTime:1761000000}, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',sha256:'b'.repeat(64)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',sha256:'c'.repeat(64)}}}, requestPolicy:{sequential:true},
     files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
   }));
   return { inputDir, outputDir };
@@ -25,12 +25,14 @@ async function fixture(t) {
 
 test('offline worker replays hash-verified FYERS files and writes results outside input', async t => {
   const dirs = await fixture(t);
-  const out = await runOfflineHistoricalDataset({ ...dirs, replay: ({symbol}) => ({status:'DATA_UNAVAILABLE',mode:'HISTORICAL_SIGNAL_REPLAY',actionable:false,symbol,signals:[]}) });
+  let replayRange = null;
+  const out = await runOfflineHistoricalDataset({ ...dirs, replay: ({symbol,startTime,endTime}) => { replayRange={startTime,endTime}; return {status:'DATA_UNAVAILABLE',mode:'HISTORICAL_SIGNAL_REPLAY',actionable:false,symbol,signals:[]}; } });
   assert.equal(out.report.mode, 'OFFLINE_HISTORICAL_SIGNAL_REPLAY');
   assert.equal(out.report.actionable, false);
   assert.equal(out.report.ordersEnabled, false);
   assert.equal(out.report.liveStateTouched, false);
   assert.equal(out.report.symbolCount, 1);
+  assert.deepEqual(replayRange,{startTime:1760000000,endTime:1761000000});
   assert.ok(out.path.startsWith(dirs.outputDir + path.sep));
   assert.equal(JSON.parse(await readFile(out.path, 'utf8')).results[0].symbol, 'NSE:SBIN-EQ');
 });

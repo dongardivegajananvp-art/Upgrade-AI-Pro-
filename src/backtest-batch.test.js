@@ -79,3 +79,30 @@ test('batch reports missing data without inventing signals or P&L', async () => 
   assert.deepEqual(final.signals, []);
   assert.equal(final.ordersEnabled, false);
 });
+
+test('batch pauses without skipping symbols on a FYERS cooldown and resumes at the same symbol', async () => {
+  let firstAttempt = true;
+  const fetched = [];
+  const runner = createHistoricalFnoBacktestRunner({
+    now: () => fixedNow,
+    fetchHistory: async ({ symbol }) => {
+      fetched.push(symbol);
+      if (firstAttempt) {
+        firstAttempt = false;
+        throw new Error('FYERS REST cooldown active; no upstream request was sent');
+      }
+      return { dataProvenance: 'FYERS_HISTORICAL_API', fiveMinuteCandles: [], dailyCandles: [] };
+    },
+    replay: () => ({ status: 'COMPLETE', actionable: false, signalCount: 0, summary: {}, signals: [] })
+  });
+  const started = runner.start({ universe: [{ symbol: 'NSE:SBIN-EQ' }, { symbol: 'NSE:RELIANCE-EQ' }] });
+  const paused = await waitForTerminal(runner, started.job.id);
+  assert.equal(paused.status, 'PAUSED_UPSTREAM_GUARD');
+  assert.equal(paused.processedCount, 0);
+  assert.equal(paused.nextIndex, 0);
+  assert.equal(runner.resume(started.job.id), true);
+  const final = await waitForTerminal(runner, started.job.id);
+  assert.equal(final.status, 'COMPLETE');
+  assert.equal(final.processedCount, 2);
+  assert.deepEqual(fetched, ['NSE:SBIN-EQ', 'NSE:SBIN-EQ', 'NSE:RELIANCE-EQ']);
+});

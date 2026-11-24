@@ -9,6 +9,10 @@ function filename(value){
  if(typeof value!=='string'||!/^[A-Za-z0-9._-]{1,120}\.json$/.test(value)||value.includes('..'))throw new Error('Offline option dataset filename is invalid');
  return value;
 }
+function masterFilename(value){
+ if(typeof value!=='string'||!/^NSE_FO_contract_\\d{8}\\.csv\\.gz$/.test(value))throw new Error('Official NSE daily F&O master filename is invalid');
+ return value;
+}
 async function readVerified(root,name,expected,label){
  const file=filename(name),bytes=await readFile(path.join(root,file));
  if(!/^[a-f0-9]{64}$/.test(expected||'')||sha(bytes)!==expected)throw new Error(label+' SHA-256 mismatch');
@@ -27,7 +31,7 @@ export async function runOfflineOptionExecutionDataset({inputDir,outputDir}={}){
   const signal=await readVerified(input,entry.signalFile,entry.signalSha256,'Underlying signal');
   const optionDataset=await readVerified(input,entry.optionFile,entry.optionSha256,'Expired option data');
   const contractSpec=await readVerified(input,entry.contractSpecFile,entry.contractSpecSha256,'Historical contract specification');
-  const masterName=filename(contractSpec.masterFile);
+  const masterName=masterFilename(contractSpec.masterFile);
   const masterBytes=await readFile(path.join(input,masterName));
   if(!/^[a-f0-9]{64}$/.test(contractSpec.masterFileSha256||'')||sha(masterBytes)!==contractSpec.masterFileSha256||contractSpec.sha256!==contractSpec.masterFileSha256)throw new Error('Official NSE daily F&O contract-master SHA-256 mismatch');
   const topGainerMembership=entry.topGainerFile?await readVerified(input,entry.topGainerFile,entry.topGainerSha256,'Top Gainer membership'):[];

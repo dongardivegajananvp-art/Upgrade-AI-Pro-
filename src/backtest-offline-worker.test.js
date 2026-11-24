@@ -25,6 +25,7 @@ async function fixture(t) {
   await writeFile(path.join(inputDir,'master-NSE_CM_sym_master.json'),cmMaster);
   await writeFile(path.join(inputDir, 'manifest.json'), JSON.stringify({
     format:'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1', source:'FYERS_HISTORICAL_API', actionable:false,
+    complete:true, exportedCount:1, failureCount:0, failures:[],
     datasetId:'test-fixture', requested:{startTime:1760000000,endTime:1761000000}, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',datasetFile:'master-NSE_FO_sym_master.json',sha256:digest(foMaster)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',datasetFile:'master-NSE_CM_sym_master.json',sha256:digest(cmMaster)}}}, requestPolicy:{sequential:true},
     files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
   }));
@@ -43,6 +44,24 @@ test('offline worker replays hash-verified FYERS files and writes results outsid
   assert.deepEqual(replayRange,{startTime:1760000000,endTime:1761000000});
   assert.ok(out.path.startsWith(dirs.outputDir + path.sep));
   assert.equal(JSON.parse(await readFile(out.path, 'utf8')).results[0].symbol, 'NSE:SBIN-EQ');
+});
+
+
+test('offline worker refuses a partial exporter manifest before replay', async t => {
+  const dirs = await fixture(t);
+  const manifestPath = path.join(dirs.inputDir, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.complete = false;
+  manifest.exportedCount = 1;
+  manifest.failureCount = 1;
+  manifest.failures = [{symbol:'NSE:RELIANCE-EQ',reason:'FYERS HTTP 429'}];
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  let replayCalled = false;
+  await assert.rejects(
+    runOfflineHistoricalDataset({ ...dirs, replay: () => { replayCalled = true; return {status:'COMPLETE',mode:'HISTORICAL_SIGNAL_REPLAY',actionable:false}; } }),
+    /manifest is incomplete or has failed exports/
+  );
+  assert.equal(replayCalled, false);
 });
 
 test('offline worker rejects modified files and provenance mismatch', async t => {

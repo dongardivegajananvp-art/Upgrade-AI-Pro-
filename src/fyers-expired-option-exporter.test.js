@@ -67,7 +67,7 @@ test('expired option export discovers provider expiry and exact nearest-ATM CE/P
     assert.equal(calls[2][1].include_greeks,'0');
     assert.equal(calls[2][1].resolution,'5');
     assert.equal(result.report.actionable,false);
-    const payload=JSON.parse(await readFile(path.join(outputDir,'NSE_NIFTY25MAR23000CE.json'),'utf8'));
+    const payload=JSON.parse(await readFile(path.join(outputDir,'NSE_NIFTY25MAR23000CE-'+start+'-'+String(stamp)+'.json'),'utf8'));
     assert.equal(payload.selection.historicalAtmSelection,true);
     assert.equal(payload.candles[0].source,'FYERS_EXPIRED_FO_5M');
     assert.equal(payload.candles[0].time,candleStamp);
@@ -172,4 +172,24 @@ test('expired option ATM selection requires a completed underlying close from th
     await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,selectionTime:priorDay}),/same trading date|selected trading date/);
     assert.equal(calls.length,0,'invalid historical close must be rejected before API requests');
   });
+});
+
+
+test('expired option archive keeps the same contract across different historical session selections',async()=>{
+ await withOutput(async outputDir=>{
+  const first=clientFixture();
+  const second=clientFixture();
+  const one=await exportExpiredOptionPair({...base(outputDir),client:first.client});
+  const laterStamp=stamp+300;
+  const two=await exportExpiredOptionPair({...base(outputDir),client:second.client,selectionTime:laterStamp});
+  assert.equal(one.report.contracts.CE,two.report.contracts.CE);
+  assert.notEqual(one.report.contractResults.CE.file,two.report.contractResults.CE.file);
+  assert.notEqual(one.report.requested.start+'-'+one.report.selectionTime,two.report.requested.start+'-'+two.report.selectionTime);
+  const firstPayload=JSON.parse(await readFile(path.join(outputDir,one.report.contractResults.CE.file),'utf8'));
+  const secondPayload=JSON.parse(await readFile(path.join(outputDir,two.report.contractResults.CE.file),'utf8'));
+  assert.equal(firstPayload.selection.selectionTime,stamp);
+  assert.equal(secondPayload.selection.selectionTime,laterStamp);
+  assert.equal(firstPayload.candles[0].time,secondPayload.candles[0].time);
+  assert.ok(one.report.requestCount+two.report.requestCount<=10);
+ });
 });

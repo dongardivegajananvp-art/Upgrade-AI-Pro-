@@ -15,9 +15,13 @@ async function fixture(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const data = Buffer.from(JSON.stringify({ symbol:'NSE:SBIN-EQ', source:'FYERS_HISTORICAL_API', dataProvenance:'FYERS_HISTORICAL_API', fiveMinuteCandles:[], dailyCandles:[], topGainerMembership:[],apiEvidence:{fiveMinute:{endpoint:'/data/history',resolution:'5',httpStatus:200,responseSha256:'b'.repeat(64),retrievedAt:'2026-11-24T10:00:00Z'},daily:{endpoint:'/data/history',resolution:'D',httpStatus:200,responseSha256:'c'.repeat(64),retrievedAt:'2026-11-24T10:00:00Z'}} }));
   await writeFile(path.join(inputDir, 'sbin.json'), data);
+  const foMaster=Buffer.from('{\"official\":\"fo\"}');
+  const cmMaster=Buffer.from('{\"official\":\"cm\"}');
+  await writeFile(path.join(inputDir,'master-NSE_FO_sym_master.json'),foMaster);
+  await writeFile(path.join(inputDir,'master-NSE_CM_sym_master.json'),cmMaster);
   await writeFile(path.join(inputDir, 'manifest.json'), JSON.stringify({
     format:'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1', source:'FYERS_HISTORICAL_API', actionable:false,
-    datasetId:'test-fixture', requested:{startTime:1760000000,endTime:1761000000}, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',sha256:'b'.repeat(64)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',sha256:'c'.repeat(64)}}}, requestPolicy:{sequential:true},
+    datasetId:'test-fixture', requested:{startTime:1760000000,endTime:1761000000}, master:{source:'FYERS_OFFICIAL_SYMBOL_MASTER',sha256:'a'.repeat(64),sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',datasetFile:'master-NSE_FO_sym_master.json',sha256:digest(foMaster)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',datasetFile:'master-NSE_CM_sym_master.json',sha256:digest(cmMaster)}}}, requestPolicy:{sequential:true},
     files:[{symbol:'NSE:SBIN-EQ',file:'sbin.json',sha256:digest(data)}]
   }));
   return { inputDir, outputDir };

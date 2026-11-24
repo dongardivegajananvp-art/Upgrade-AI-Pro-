@@ -31,7 +31,8 @@ test('exporter makes sequential official FYERS 5m and daily requests and writes 
  const fetchImpl=async(url,options)=>{
   calls.push({url:new URL(url),options});
   const resolution=new URL(url).searchParams.get('resolution');
-  const prev=new Date(NOW-86400000); prev.setUTCHours(3,45,0,0);\n  const candles=resolution==='5'?[[Math.floor(prev.getTime()/1000),100,105,95,102,50]]:dailyRows();
+  const prev=new Date(NOW-86400000); prev.setUTCHours(3,45,0,0);
+  const candles=resolution==='5'?[[Math.floor(prev.getTime()/1000),100,105,95,102,50]]:dailyRows();
   return {status:200,ok:true,text:async()=>JSON.stringify({s:'ok',candles})};
  };
  const result=await exportFyersHistoricalDataset({...dirs,appId:'APP-123',accessToken:'secret-token',fetchImpl,now:NOW,minRequestGapMs:1000,pause:async()=>{}});

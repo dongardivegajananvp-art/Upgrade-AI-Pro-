@@ -875,7 +875,7 @@ test('fixed premium Entry/SL/Target preserve exchange tick alignment and request
       const plan = buildFixedPremiumPlan({
         breakoutLevel: 100.013,
         tickSize,
-        livePremium: 100.013 + tickSize,
+        livePremium: Math.ceil((100.013 + tickSize - 1e-9) / tickSize) * tickSize,
         swingLow: 99.013,
         targetR
       });

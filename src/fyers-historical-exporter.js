@@ -129,10 +129,10 @@ if (process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(impo
   const [masterFile,outputDir]=process.argv.slice(2);
   try {
     const result=await exportFyersHistoricalDataset({masterFile,outputDir,appId:process.env.FYERS_APP_ID?.trim(),accessToken:process.env.FYERS_ACCESS_TOKEN?.trim()});
-    process.stdout.write(JSON.stringify({status:result.manifest.complete?'COMPLETE':'PARTIAL',manifestPath:result.manifestPath,exported:result.manifest.exportedCount,failed:result.manifest.failureCount,actionable:false,ordersEnabled:false})+'\\n');
+    process.stdout.write(JSON.stringify({status:result.manifest.complete?'COMPLETE':'PARTIAL',manifestPath:result.manifestPath,exported:result.manifest.exportedCount,failed:result.manifest.failureCount,actionable:false,ordersEnabled:false})+'\n');
     if (!result.manifest.complete) process.exitCode=2;
   } catch(error) {
-    process.stderr.write(JSON.stringify({status:'DATA_UNAVAILABLE',reason:String(error?.message||error).slice(0,240),actionable:false,ordersEnabled:false})+'\\n');
+    process.stderr.write(JSON.stringify({status:'DATA_UNAVAILABLE',reason:String(error?.message||error).slice(0,240),actionable:false,ordersEnabled:false})+'\n');
     process.exitCode=1;
   }
 }

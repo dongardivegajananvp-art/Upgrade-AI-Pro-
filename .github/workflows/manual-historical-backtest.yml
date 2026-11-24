@@ -51,8 +51,10 @@ jobs:
           FYERS_ACCESS_TOKEN: ${{ secrets.FYERS_ACCESS_TOKEN }}
         run: npm run backtest:export -- ./backtest-data/official-master.json ./backtest-data
 
+      - name: Require complete three-month F&O universe before replay
+        run: node --input-type=module -e "import fs from 'node:fs'; const m=JSON.parse(fs.readFileSync('backtest-data/manifest.json','utf8')); if (m.complete !== true || m.exportedCount !== m.symbolsCount && m.symbolsCount !== undefined) throw new Error('Historical export is partial; full-universe replay is blocked'); if (m.failureCount !== 0) throw new Error('Historical export contains failed symbols; replay is blocked'); console.log('Complete export verified:',m.exportedCount,'symbols');"
+
       - name: Run isolated offline nine-strategy signal replay
-        if: always() && hashFiles('backtest-data/manifest.json') != ''
         run: npm run backtest:offline -- ./backtest-data ./backtest-results
 
       - name: Upload auditable dataset and replay output

@@ -29,7 +29,7 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
   if (manifest.format !== FORMAT || manifest.source !== PROVENANCE || manifest.actionable !== false) {
     throw new Error('Dataset manifest is not an explicitly non-actionable FYERS historical export');
   }
-  if (!manifest.master || manifest.master.source !== 'FYERS_OFFICIAL_SYMBOL_MASTER' || !/^[a-f0-9]{64}$/.test(manifest.master.sha256 || '') || !manifest.master.sourceFiles?.NSE_FO?.sha256 || !manifest.master.sourceFiles?.NSE_CM?.sha256 || !manifest.requestPolicy || manifest.requestPolicy.sequential !== true) {
+  if (!manifest.master || manifest.master.source !== 'FYERS_OFFICIAL_SYMBOL_MASTER' || !/^[a-f0-9]{64}$/.test(manifest.master.sha256 || '') || manifest.master.sourceFiles?.NSE_FO?.url !== 'https://public.fyers.in/sym_details/NSE_FO_sym_master.json' || manifest.master.sourceFiles?.NSE_CM?.url !== 'https://public.fyers.in/sym_details/NSE_CM_sym_master.json' || !/^[a-f0-9]{64}$/.test(manifest.master.sourceFiles?.NSE_FO?.sha256 || '') || !/^[a-f0-9]{64}$/.test(manifest.master.sourceFiles?.NSE_CM?.sha256 || '') || !manifest.requestPolicy || manifest.requestPolicy.sequential !== true) {
     throw new Error('Dataset is missing official-master integrity evidence or sequential export policy');
   }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length > 300) {

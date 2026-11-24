@@ -55,6 +55,9 @@ test('exporter makes sequential official FYERS 5m and daily requests and writes 
  assert.equal(dataset.dataProvenance,PROV);
  assert.equal(dataset.fiveMinuteCandles[0].source,'FYERS_HISTORY_5M');
  assert.equal(dataset.dailyCandles.length,120);
+ assert.equal(manifest.files[0].rawResponseEvidence.fiveMinute.sha256,digest(await readFile(path.join(dirs.outputDir,manifest.files[0].rawResponseEvidence.fiveMinute.file))));
+ assert.equal(manifest.files[0].rawResponseEvidence.daily.sha256,digest(await readFile(path.join(dirs.outputDir,manifest.files[0].rawResponseEvidence.daily.file))));
+ assert.equal(dataset.apiEvidence.fiveMinute.responseSha256,manifest.files[0].rawResponseEvidence.fiveMinute.sha256);
 });
 
 test('exporter halts on FYERS 429 without retrying or continuing universe',async t=>{

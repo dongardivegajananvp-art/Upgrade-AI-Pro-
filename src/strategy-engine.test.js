@@ -867,3 +867,54 @@ test('targeted strategy detector invalidation matrix rejects each missing patter
   // Opening range: first candle defines a range, but later closes remain inside it.
   assert.equal(detectOpeningRange(rows5),null,'opening range without a completed break must reject');
 });
+
+
+test('fixed premium Entry/SL/Target preserve exchange tick alignment and requested minimum RR across tick sizes', () => {
+  for (const tickSize of [0.01, 0.05, 0.1, 0.25]) {
+    for (const targetR of [2, 2.25, 2.5, 3]) {
+      const plan = buildFixedPremiumPlan({
+        breakoutLevel: 100.013,
+        tickSize,
+        livePremium: 100.013 + tickSize,
+        swingLow: 99.013,
+        targetR
+      });
+      assert.equal(plan.status, 'SETUP_CONFIRMED', JSON.stringify({tickSize,targetR,plan}));
+      for (const price of [plan.entry, plan.stopLoss, plan.target]) {
+        const ticks = price / tickSize;
+        assert.ok(Math.abs(ticks - Math.round(ticks)) < 1e-7,
+          'price must align to exchange tick size '+tickSize+': '+price);
+      }
+      assert.ok(plan.stopLoss < plan.entry);
+      assert.ok(plan.target > plan.entry);
+      assert.ok(plan.rr >= targetR - 1e-8);
+      assert.ok(plan.rr >= 2);
+    }
+  }
+});
+
+test('fixed premium plan accepts exact 0.5R chase boundary and rejects any excess', () => {
+  const base = buildFixedPremiumPlan({
+    breakoutLevel:100, tickSize:0.05, livePremium:100.05 + 0.5 * 1.1,
+    swingLow:99
+  });
+  assert.equal(base.status, 'SETUP_CONFIRMED');
+  const chase = buildFixedPremiumPlan({
+    breakoutLevel:100, tickSize:0.05, livePremium:100.05 + 0.5 * 1.1 + 0.001,
+    swingLow:99
+  });
+  assert.equal(chase.status, 'NO_TRADE');
+  assert.match(chase.reason,/more than 0.5R/);
+});
+
+test('fixed premium plan fails closed for invalid prices, tick size and target multiples', () => {
+  const valid = {breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99};
+  for (const patch of [
+    {breakoutLevel:0},{breakoutLevel:NaN},{tickSize:0},{tickSize:-0.05},
+    {livePremium:0},{livePremium:NaN},{swingLow:0},{swingLow:NaN},
+    {targetR:1.99},{targetR:3.01},{targetR:NaN}
+  ]) {
+    assert.equal(buildFixedPremiumPlan({...valid,...patch}).status,'NO_TRADE',
+      'invalid input must fail closed: '+JSON.stringify(patch));
+  }
+});

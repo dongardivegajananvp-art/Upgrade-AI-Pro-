@@ -14,14 +14,14 @@ const sha256 = value => createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function istDate(seconds) { return new Date((Number(seconds) + 19800) * 1000).toISOString().slice(0, 10); }
-function normalizeFiveMinute(rows, start, end) {
+function normalizeFiveMinute(rows, start, end, nowSeconds) {
   if (!Array.isArray(rows)) throw new Error('FYERS 5-minute response did not contain a candles array');
   const seen = new Set();
   const candles = [];
   for (const row of rows) {
     if (!Array.isArray(row) || row.length < 6) throw new Error('Malformed FYERS 5-minute candle row');
     const [time,open,high,low,close,volume] = row.map(Number);
-    if (![time,open,high,low,close,volume].every(Number.isFinite) || time < start || time > end || time <= 0 || open <= 0 || close <= 0 || high < Math.max(open,close,low) || low > Math.min(open,close) || volume < 0 || seen.has(time)) throw new Error('Invalid or duplicate FYERS 5-minute candle; refusing to repair or interpolate');
+    const ist = new Date((time + 19800) * 1000);\n    const minuteOfDay = ist.getUTCHours() * 60 + ist.getUTCMinutes();\n    if (![time,open,high,low,close,volume].every(Number.isFinite) || time < start || time > end || time + FIVE_MINUTES > nowSeconds || minuteOfDay < 555 || minuteOfDay > 925 || time <= 0 || open <= 0 || close <= 0 || high < Math.max(open,close,low) || low > Math.min(open,close) || volume < 0 || seen.has(time)) throw new Error('Invalid or duplicate FYERS 5-minute candle; refusing to repair or interpolate');
     seen.add(time);
     candles.push({time,open,high,low,close,volume,completed:true,source:'FYERS_HISTORY_5M'});
   }
@@ -67,7 +67,7 @@ export async function exportFyersHistoricalDataset({
   const output=path.resolve(outputDir);
   const masterBytes=await readFile(path.resolve(masterFile));
   const master=JSON.parse(masterBytes.toString('utf8'));
-  if (master.format!==MASTER_FORMAT || master.source!==MASTER_PROVENANCE || master.verifiedOfficialMaster!==true || !Array.isArray(master.symbols) || !master.sourceFiles?.NSE_FO?.sha256 || !master.sourceFiles?.NSE_CM?.sha256) throw new Error('Input must be an explicitly verified FYERS official NSE F&O equity master export');
+  if (master.format!==MASTER_FORMAT || master.source!==MASTER_PROVENANCE || master.verifiedOfficialMaster!==true || !Array.isArray(master.symbols) || master.sourceFiles?.NSE_FO?.url!=='https://public.fyers.in/sym_details/NSE_FO_sym_master.json' || master.sourceFiles?.NSE_CM?.url!=='https://public.fyers.in/sym_details/NSE_CM_sym_master.json' || !/^[a-f0-9]{64}$/.test(master.sourceFiles?.NSE_FO?.sha256||'') || !/^[a-f0-9]{64}$/.test(master.sourceFiles?.NSE_CM?.sha256||'')) throw new Error('Input must be an explicitly verified FYERS official NSE F&O equity master export');
   const symbols=[...new Set(master.symbols.map(x=>String(x?.symbol||x).trim().toUpperCase()))].sort();
   if (!symbols.length || symbols.length>300 || symbols.some(s=>!SYMBOL.test(s))) throw new Error('Official master contains an empty, oversized or invalid NSE F&O equity universe');
   const endTime=Math.floor(now/1000);
@@ -94,7 +94,7 @@ export async function exportFyersHistoricalDataset({
       const response=await fetchImpl(url,{method:'GET',headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},signal:AbortSignal.timeout(20000)});
       const raw=await response.text();
       let body; try { body=JSON.parse(raw); } catch { throw new Error('FYERS returned non-JSON history response for '+symbol+' '+resolution); }
-      if (response.status===429 || response.status===401 || response.status===403) {
+      if (response.status===429 || response.status===401 || response.status===403 || String(body.code??'').includes('1015') || /1015|too many requests|rate.?limit/i.test(String(body.message||''))) {
         const error=new Error('FYERS HTTP '+response.status+'; export stopped immediately without retry');
         error.stopExport=true; throw error;
       }
@@ -104,7 +104,7 @@ export async function exportFyersHistoricalDataset({
     try {
       const five=await fetchCandles('5',fiveMinuteStartTime);
       const daily=await fetchCandles('D',dailyStartTime);
-      const fiveMinuteCandles=normalizeFiveMinute(five.body.candles,fiveMinuteStartTime,endTime);
+      const fiveMinuteCandles=normalizeFiveMinute(five.body.candles,fiveMinuteStartTime,endTime,Math.floor(now/1000));
       const dailyCandles=normalizeDaily(daily.body.candles,dailyStartTime,endTime,Math.floor(now/1000));
       if (!fiveMinuteCandles.length || dailyCandles.length<50) throw new Error('FYERS returned insufficient completed candles; no file accepted');
       const data={symbol,source:PROVENANCE,dataProvenance:PROVENANCE,fiveMinuteCandles,dailyCandles,topGainerMembership:[],requested:manifest.requested,retrievedAt:new Date().toISOString(),apiEvidence:{fiveMinute:five.proof,daily:daily.proof}};

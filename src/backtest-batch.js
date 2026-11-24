@@ -58,6 +58,8 @@ export function createHistoricalFnoBacktestRunner({
       signals: job.signals.slice(),
       failures: job.failures.slice(0, 100),
       failureCount: job.failureCount,
+      nextIndex: job.nextIndex,
+      pauseReason: job.pauseReason || null,
       limitations: [
         'This run evaluates underlying 5-minute strategy signals only; it is not an option-trade P&L backtest.',
         'Historical option contracts, option OHLCV, quote/fill timing, spread, slippage and brokerage are not simulated.',
@@ -70,12 +72,15 @@ export function createHistoricalFnoBacktestRunner({
 
   async function execute(job) {
     job.status = 'RUNNING';
-    for (const item of job.universe) {
+    job.pauseReason = null;
+    while (job.nextIndex < job.universe.length) {
       if (job.cancelRequested) {
         job.status = 'CANCELLED';
         break;
       }
+      const item = job.universe[job.nextIndex];
       job.currentSymbol = item.symbol;
+      let pause = false;
       try {
         const data = await fetchHistory({
           symbol: item.symbol,
@@ -110,15 +115,25 @@ export function createHistoricalFnoBacktestRunner({
           }
         }
       } catch (error) {
-        job.blockedCount += 1;
-        job.failureCount += 1;
-        job.failures.push({ symbol: item.symbol, status: 'DATA_UNAVAILABLE', reason: String(error?.message || error).slice(0, 180) });
-      } finally {
-        job.processedCount += 1;
+        const reason = String(error?.message || error).slice(0, 180);
+        if (/429|1015|cooldown|rate.?limit|authentication is not active|HTTP 401|authenticate the user/i.test(reason)) {
+          job.status = 'PAUSED_UPSTREAM_GUARD';
+          job.pauseReason = reason;
+          pause = true;
+        } else {
+          job.blockedCount += 1;
+          job.failureCount += 1;
+          job.failures.push({ symbol: item.symbol, status: 'DATA_UNAVAILABLE', reason });
+        }
       }
+      if (pause) break;
+      job.processedCount += 1;
+      job.nextIndex += 1;
     }
-    if (job.status !== 'CANCELLED') job.status = job.blockedCount ? (job.completedCount ? 'PARTIAL' : 'DATA_UNAVAILABLE') : 'COMPLETE';
-    job.completedAt = new Date(now()).toISOString();
+    if (job.status !== 'PAUSED_UPSTREAM_GUARD' && job.status !== 'CANCELLED') {
+      job.status = job.blockedCount ? (job.completedCount ? 'PARTIAL' : 'DATA_UNAVAILABLE') : 'COMPLETE';
+      job.completedAt = new Date(now()).toISOString();
+    }
     job.currentSymbol = null;
     if (activeJob === job) activeJob = null;
   }
@@ -170,6 +185,8 @@ export function createHistoricalFnoBacktestRunner({
         failureCount: 0,
         maxStoredSignals,
         cancelRequested: false,
+        nextIndex: 0,
+        pauseReason: null,
         currentSymbol: null
       };
       jobs.set(job.id, job);
@@ -182,6 +199,14 @@ export function createHistoricalFnoBacktestRunner({
     get(jobId) {
       const job = jobs.get(String(jobId || ''));
       return job ? snapshot(job) : null;
+    },
+    resume(jobId) {
+      const job = jobs.get(String(jobId || ''));
+      if (!job || job.status !== 'PAUSED_UPSTREAM_GUARD' || activeJob) return false;
+      job.status = 'QUEUED';
+      activeJob = job;
+      setImmediate(() => { void execute(job); });
+      return true;
     },
     cancel(jobId) {
       const job = jobs.get(String(jobId || ''));

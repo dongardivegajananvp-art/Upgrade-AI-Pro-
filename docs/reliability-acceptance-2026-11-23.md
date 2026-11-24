@@ -76,3 +76,13 @@ Compatibility is therefore **partially verified, not universally certified**. CI
 - With no fresh index feed, F&O subscriptions, selected option ticks, and the live scanner correctly remained gated. No live strategy/Entry acceptance can be claimed from this window.
 - Account positions, orderbook and Option Chain had no verified successful upstream response in this log window. Absence of a logged request is not evidence of recovery.
 - Production remained on deployment `dep-dc22957f3r2c73e4evhg`; no PR #89 code was deployed. Orders remained disabled and stale/missing data remained NO TRADE.
+
+
+## 2026-11-24 OAuth and socket log interpretation (production, unchanged deployment)
+
+- At 2026-11-24T05:07:36Z the OAuth login route was reached and the configured redirect matched the expected production callback URI.
+- At 2026-11-24T05:07:59Z the callback route was reached and the FYERS token exchange succeeded. This proves one successful OAuth callback in the inspected window.
+- A second callback reached the route at 2026-11-24T05:10:04Z and was rejected as missing, mismatched, or already consumed state. No new login-route event was present immediately before this second callback in the inspected log window. This is consistent with a stale/duplicate callback after the successful login; it is not sufficient evidence that a fresh Connect attempt failed. A fresh single-click login-to-callback browser test is still required.
+- The production socket emitted repeated close events at approximately two-minute intervals and reconnected about five to six seconds later. The deployed close handler logged no close-event payload, so the upstream close cause cannot be identified from these logs. PR #89 adds bounded close-detail capture, but this diagnostic change is not deployed.
+- The socket received index messages immediately after connecting, but their exchange timestamps were from 2026-11-23 and were 18–24 hours old in the inspected window. Since 2026-11-24 was an NSE holiday, those messages are expected to fail the live freshness gate. They must not be treated as fresh market ticks.
+- No code or production configuration was changed as part of this log review. OAuth fresh-flow validation, socket close-cause attribution, and next-open-session feed acceptance remain release gates.

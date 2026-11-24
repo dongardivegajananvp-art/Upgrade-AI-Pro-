@@ -49,6 +49,17 @@ function validateRange({startTime,dailyStartTime,endTime}) {
   if ((z-a)/DAY>100 || (z-d)/DAY>366) throw new Error('Requested history range exceeds FYERS per-request limits');
 }
 
+function assertOutsideNseQuietWindow(epochMs) {
+  const ist = new Date(Number(epochMs) + 19800000);
+  const weekday = ist.getUTCDay();
+  const minute = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  // Keep historical REST traffic away from the live session, with a 30-minute
+  // opening/closing buffer. This is checked before every upstream request.
+  if (weekday >= 1 && weekday <= 5 && minute >= 525 && minute < 960) {
+    throw new Error('LIVE_SESSION_PROTECTION: historical export paused during NSE weekday quiet window (08:45-16:00 IST)');
+  }
+}
+
 async function atomicJson(file, value) {
   const temp=file+'.tmp';
   await writeFile(temp, JSON.stringify(value), {flag:'wx'});
@@ -62,7 +73,7 @@ async function atomicJson(file, value) {
  */
 export async function exportFyersHistoricalDataset({
   masterFile, outputDir, appId, accessToken, fetchImpl=globalThis.fetch,
-  now=Date.now(), minRequestGapMs=4000, pause=sleep
+  now=Date.now(), minRequestGapMs=4000, pause=sleep, clock=()=>Date.now()
 }={}) {
   if (!masterFile || !outputDir || !appId || !accessToken || typeof fetchImpl!=='function') throw new Error('Master file, output directory, FYERS app ID, access token and fetch implementation are required');
   if (!Number.isInteger(minRequestGapMs) || minRequestGapMs<1000 || minRequestGapMs>60000) throw new Error('Request pacing must be between 1000 and 60000 milliseconds');

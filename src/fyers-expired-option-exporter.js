@@ -115,7 +115,7 @@ async function loadCheckpoint(file, identity) {
 async function saveCheckpoint(file, checkpoint) {
   const temporary = file + '.' + process.pid + '.' + Date.now() + '.tmp';
   try {
-    await writeFile(temporary, JSON.stringify(checkpoint, null, 2) + '\\n', { flag: 'wx' });
+    await writeFile(temporary, JSON.stringify(checkpoint, null, 2) + '\n', { flag: 'wx' });
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });

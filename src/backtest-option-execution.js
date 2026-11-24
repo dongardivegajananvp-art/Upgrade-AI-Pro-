@@ -7,7 +7,8 @@ const down=(v,t)=>Number((Math.floor(v/t+1e-9)*t).toFixed(8));
 const norm=v=>String(v||'').toUpperCase().replace(/^NSE:/,'').replace(/-(EQ|INDEX)$/,'');
 const fail=reason=>({status:'DATA_UNAVAILABLE',actionable:false,ordersEnabled:false,reason,pnl:null,rMultiple:null});
 function validCandle(c){return c&&c.completed===true&&c.source==='FYERS_EXPIRED_FO_5M'&&['time','open','high','low','close','volume'].every(k=>finite(c[k]))&&Number(c.time)>0&&Number(c.open)>0&&Number(c.close)>0&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)>0&&Number(c.low)<=Math.min(Number(c.open),Number(c.close))&&Number(c.volume)>=0;}
-function isNseBar(row){const d=new Date((Number(row.time)+OFFSET)*1000);const minute=d.getUTCHours()*60+d.getUTCMinutes();return minute>=555&&minute<930&&(minute-555)%5===0;}\nfunction continuous(rows){return rows.every((r,i)=>isNseBar(r)&&(i===0||(Number(r.time)-Number(rows[i-1].time)===BAR&&istDate(r.time)===istDate(rows[i-1].time))));}
+function isNseBar(row){const d=new Date((Number(row.time)+OFFSET)*1000);const minute=d.getUTCHours()*60+d.getUTCMinutes();return minute>=555&&minute<930&&(minute-555)%5===0;}
+function continuous(rows){return rows.every((r,i)=>isNseBar(r)&&(i===0||(Number(r.time)-Number(rows[i-1].time)===BAR&&istDate(r.time)===istDate(rows[i-1].time))));}
 
 /**
  * Conservative offline OHLC proxy for one completed underlying signal.

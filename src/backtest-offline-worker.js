@@ -29,6 +29,9 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
   if (manifest.format !== FORMAT || manifest.source !== PROVENANCE || manifest.actionable !== false) {
     throw new Error('Dataset manifest is not an explicitly non-actionable FYERS historical export');
   }
+  if (!manifest.master || manifest.master.source !== PROVENANCE || !/^[a-f0-9]{64}$/.test(manifest.master.sha256 || '') || !manifest.requestPolicy || manifest.requestPolicy.sequential !== true) {
+    throw new Error('Dataset is missing official-master integrity evidence or sequential export policy');
+  }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length > 300) {
     throw new Error('Dataset manifest must contain 1 to 300 symbol files');
   }
@@ -44,6 +47,11 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
     const data = JSON.parse(bytes.toString('utf8'));
     if (data.symbol !== symbol || data.dataProvenance !== PROVENANCE || data.source !== PROVENANCE) {
       throw new Error('Historical file provenance/symbol mismatch for ' + symbol);
+    }
+    const evidence = data.apiEvidence;
+    const validEvidence = proof => proof && proof.endpoint === '/data/history' && proof.httpStatus === 200 && /^[a-f0-9]{64}$/.test(proof.responseSha256 || '') && typeof proof.retrievedAt === 'string';
+    if (!validEvidence(evidence?.fiveMinute) || evidence.fiveMinute.resolution !== '5' || !validEvidence(evidence?.daily) || evidence.daily.resolution !== 'D') {
+      throw new Error('FYERS API response evidence is missing or invalid for ' + symbol);
     }
     const result = replay({
       symbol,

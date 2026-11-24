@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect, formatSocketCloseDetail } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -59,6 +59,7 @@ let resetRateLimitAfterSubscriptionFlush = false;
 let socketConnectedAt = null;
 let socketLastConnectedAt = null;
 let socketLastClosedAt = null;
+let socketLastCloseDetail = null;
 let socketLastMessageAt = null;
 let socketLastTickAt = null;
 let socketLastTickExchangeTime = null;
@@ -477,16 +478,21 @@ export function startMarketSocket() {
       }
       console.error('[FYERS_DATA] socket error:', lastError);
     });
-    socket.on('close', () => {
+    socket.on('close', (...details) => {
       socketCloseCount++;
       socketLastClosedAt = new Date().toISOString();
+      socketLastCloseDetail = formatSocketCloseDetail(details);
       socketConnectedAt = null;
       socketTransportConnected = false;
       socketStatus = 'DISCONNECTED';
       // FYERS Data Socket auto-reconnect is expected to restore prior SDK requests.
       // Keep the SDK-requested set to avoid duplicate sends; it is not an exchange ACK.
       // Per-symbol fresh ticks, not this set, prove that the feed has resumed.
-      console.warn('[FYERS_DATA] socket closed; desired subscriptions will be reconciled on reconnect');
+      console.warn('[FYERS_DATA] socket closed:', JSON.stringify({
+        at:socketLastClosedAt, detail:socketLastCloseDetail,
+        reconnectCount:socketReconnectCount, closeCount:socketCloseCount,
+        errorCount:socketErrorCount
+      }));
     });
     // Configure the SDK's reconnect handler before opening the transport.
     connectWithAutoReconnect(socket, 10);
@@ -530,7 +536,7 @@ export function getMarketData(now = Date.now()) {
     socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
     socketDiagnostics: {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,
-      lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt,
+      lastConnectedAt: socketLastConnectedAt, lastClosedAt: socketLastClosedAt, lastCloseDetail:socketLastCloseDetail,
       lastMessageAt: socketLastMessageAt, lastTickAt: socketLastTickAt,
       lastTickExchangeTime: socketLastTickExchangeTime,
       lastTickAgeSeconds: socketLastTickAt ? Math.max(0, Math.floor((now - socketLastTickAt) / 1000)) : null,

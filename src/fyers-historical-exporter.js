@@ -6,6 +6,7 @@ const DATA_URL = 'https://api-t1.fyers.in/data/history';
 const MASTER_FORMAT = 'UPGRADE_AI_PRO_FYERS_NSE_FNO_MASTER_V1';
 const DATA_FORMAT = 'UPGRADE_AI_PRO_FYERS_HISTORICAL_DATASET_V1';
 const PROVENANCE = 'FYERS_HISTORICAL_API';
+const MASTER_PROVENANCE = 'FYERS_OFFICIAL_SYMBOL_MASTER';
 const SYMBOL = /^NSE:[A-Z0-9&._-]{1,48}-EQ$/;
 const DAY = 86400;
 const FIVE_MINUTES = 300;
@@ -66,7 +67,7 @@ export async function exportFyersHistoricalDataset({
   const output=path.resolve(outputDir);
   const masterBytes=await readFile(path.resolve(masterFile));
   const master=JSON.parse(masterBytes.toString('utf8'));
-  if (master.format!==MASTER_FORMAT || master.source!==PROVENANCE || master.verifiedOfficialMaster!==true || !Array.isArray(master.symbols)) throw new Error('Input must be an explicitly verified FYERS official NSE F&O equity master export');
+  if (master.format!==MASTER_FORMAT || master.source!==MASTER_PROVENANCE || master.verifiedOfficialMaster!==true || !Array.isArray(master.symbols) || !master.sourceFiles?.NSE_FO?.sha256 || !master.sourceFiles?.NSE_CM?.sha256) throw new Error('Input must be an explicitly verified FYERS official NSE F&O equity master export');
   const symbols=[...new Set(master.symbols.map(x=>String(x?.symbol||x).trim().toUpperCase()))].sort();
   if (!symbols.length || symbols.length>300 || symbols.some(s=>!SYMBOL.test(s))) throw new Error('Official master contains an empty, oversized or invalid NSE F&O equity universe');
   const endTime=Math.floor(now/1000);
@@ -76,7 +77,7 @@ export async function exportFyersHistoricalDataset({
   const fiveMinuteStartTime=Math.floor((startDate.getTime()-5*86400000)/1000);
   validateRange({startTime:fiveMinuteStartTime,dailyStartTime,endTime});
   await mkdir(output,{recursive:true});
-  const manifest={format:DATA_FORMAT,source:PROVENANCE,actionable:false,datasetId:'fyers-nse-fno-3m-'+endTime,createdAt:new Date(now).toISOString(),requested:{startTime,endTime,dailyStartTime,fiveMinuteStartTime},master:{sha256:sha256(masterBytes),retrievedAt:master.retrievedAt||null,source:PROVENANCE},requestPolicy:{sequential:true,minGapMs:minRequestGapMs,retries:0},files:[],failures:[]};
+  const manifest={format:DATA_FORMAT,source:PROVENANCE,actionable:false,datasetId:'fyers-nse-fno-3m-'+endTime,createdAt:new Date(now).toISOString(),requested:{startTime,endTime,dailyStartTime,fiveMinuteStartTime},master:{sha256:sha256(masterBytes),retrievedAt:master.retrievedAt||null,source:MASTER_PROVENANCE,sourceFiles:master.sourceFiles},requestPolicy:{sequential:true,minGapMs:minRequestGapMs,retries:0},files:[],failures:[]};
   let lastRequestAt=0;
   for (let index=0; index<symbols.length; index++) {
     const symbol=symbols[index];

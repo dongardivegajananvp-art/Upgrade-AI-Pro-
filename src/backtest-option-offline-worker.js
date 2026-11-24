@@ -10,7 +10,7 @@ function filename(value){
  return value;
 }
 function masterFilename(value){
- if(typeof value!=='string'||!/^NSE_FO_contract_\\d{8}\\.csv\\.gz$/.test(value))throw new Error('Official NSE daily F&O master filename is invalid');
+ if(typeof value!=='string'||!/^NSE_FO_contract_\d{8}\.csv\.gz$/.test(value))throw new Error('Official NSE daily F&O master filename is invalid');
  return value;
 }
 async function readVerified(root,name,expected,label){

@@ -110,7 +110,10 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
     }
     results.push({ symbol, ...result, actionable: false, ordersEnabled: false, source: PROVENANCE });
   }
+  const completeCount = results.filter(row => row.status === 'COMPLETE').length;
+  const unavailableCount = results.length - completeCount;
   const report = {
+    status: unavailableCount === 0 ? 'COMPLETE' : 'PARTIAL',
     format: 'UPGRADE_AI_PRO_HISTORICAL_REPLAY_RESULTS_V1',
     mode: 'OFFLINE_HISTORICAL_SIGNAL_REPLAY',
     source: PROVENANCE,
@@ -120,8 +123,8 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
     ordersEnabled: false,
     liveStateTouched: false,
     symbolCount: results.length,
-    completeCount: results.filter(row => row.status === 'COMPLETE').length,
-    unavailableCount: results.filter(row => row.status !== 'COMPLETE').length,
+    completeCount,
+    unavailableCount,
     results
   };
   await mkdir(output, { recursive: true });
@@ -136,7 +139,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
   const [inputDir, outputDir] = process.argv.slice(2);
   runOfflineHistoricalDataset({ inputDir, outputDir })
     .then(({ path: resultPath, report }) => {
-      process.stdout.write(JSON.stringify({ status: 'COMPLETE', resultPath, symbolCount: report.symbolCount, actionable: false, ordersEnabled: false }) + '\\n');
+      process.stdout.write(JSON.stringify({ status: report.status, resultPath, symbolCount: report.symbolCount, completeCount: report.completeCount, unavailableCount: report.unavailableCount, actionable: false, ordersEnabled: false }) + '\\n');
+      if (report.status !== 'COMPLETE') process.exitCode = 2;
     })
     .catch(error => {
       process.stderr.write(JSON.stringify({ status: 'DATA_UNAVAILABLE', reason: String(error?.message || error).slice(0, 300), actionable: false, ordersEnabled: false }) + '\\n');

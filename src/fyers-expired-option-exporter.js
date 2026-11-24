@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 const FORMAT = 'UPGRADE_AI_PRO_FYERS_EXPIRED_OPTION_DATA_V1';
@@ -85,6 +85,62 @@ async function writeOnce(file, value) {
   const temp = file+'.tmp';
   await writeFile(temp,bytes,{flag:'wx'});
   await rename(temp,file);
+}
+
+const DAILY_BUDGET_FORMAT = 'FYERS_EXPIRED_OPTION_DAILY_BUDGET_V1';
+const DAILY_REQUEST_LIMIT = 10;
+
+/**
+ * Reserve one provider request atomically in a persistent IST-day ledger.
+ * Reservations are never refunded after a network error: conservative counting
+ * prevents retries or parallel invocations from exceeding the daily allowance.
+ */
+async function reserveDailyRequest(budgetDir, now) {
+  const day = istDate(now);
+  const file = path.join(budgetDir, 'fyers-expired-option-budget-' + day + '.json');
+  const lock = file + '.lock';
+  let acquired = false;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await mkdir(lock);
+      acquired = true;
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      await sleep(50);
+    }
+  }
+  if (!acquired) throw new Error('FYERS expired-option daily budget lock is busy; request blocked safely');
+  try {
+    let used = 0;
+    try {
+      const prior = JSON.parse((await readFile(file, 'utf8')));
+      if (prior.format !== DAILY_BUDGET_FORMAT || prior.istDate !== day ||
+          prior.limit !== DAILY_REQUEST_LIMIT || !Number.isInteger(prior.used) ||
+          prior.used < 0 || prior.used > DAILY_REQUEST_LIMIT) {
+        throw new Error('FYERS expired-option daily budget ledger is invalid; request blocked safely');
+      }
+      used = prior.used;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (used >= DAILY_REQUEST_LIMIT) {
+      throw new Error('FYERS Standard expired-F&O daily request budget exhausted; no upstream request was sent');
+    }
+    const next = {
+      format: DAILY_BUDGET_FORMAT,
+      istDate: day,
+      limit: DAILY_REQUEST_LIMIT,
+      used: used + 1,
+      updatedAt: new Date(now).toISOString()
+    };
+    const temporary = file + '.' + process.pid + '.' + Date.now() + '.tmp';
+    await writeFile(temporary, JSON.stringify(next, null, 2) + '\\n', { flag: 'wx' });
+    await rename(temporary, file);
+    return { used: next.used, remaining: DAILY_REQUEST_LIMIT - next.used, ledgerFile: file };
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -180,7 +236,7 @@ export async function exportExpiredOptionPair({
     format:FORMAT,source:'FYERS_EXPIRED_FO_API',status:Object.values(contractResults).every(x=>x.status==='EXPORTED')?'PAIR_EXPORTED':'PARTIAL',
     underlying,expiry,strike,selectionTime:Number(selectionTime),selectionMethod:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',
     requested:{start,end,resolution:'5'},contracts:pair,contractResults,requestCount:requestLog.length,
-    requestBudget:{maxIntradayRequests,used:requestLog.length,remaining:maxIntradayRequests-requestLog.length},
+    requestBudget:{providerDailyLimit:DAILY_REQUEST_LIMIT,usedToday:dailyBudget?.used??0,remainingToday:dailyBudget?.remaining??DAILY_REQUEST_LIMIT,invocationLimit:maxIntradayRequests,usedThisInvocation:requestLog.length,ledgerFile:dailyBudget?.ledgerFile??null},
     requestEvidence:requestLog,actionable:false,ordersEnabled:false,liveStateTouched:false,
     limitations:[
       'Provider contract symbols and expiry are taken from FYERS expired-F&O discovery APIs.',

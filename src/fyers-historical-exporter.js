@@ -21,7 +21,9 @@ function normalizeFiveMinute(rows, start, end, nowSeconds) {
   for (const row of rows) {
     if (!Array.isArray(row) || row.length < 6) throw new Error('Malformed FYERS 5-minute candle row');
     const [time,open,high,low,close,volume] = row.map(Number);
-    const ist = new Date((time + 19800) * 1000);\n    const minuteOfDay = ist.getUTCHours() * 60 + ist.getUTCMinutes();\n    if (![time,open,high,low,close,volume].every(Number.isFinite) || time < start || time > end || time + FIVE_MINUTES > nowSeconds || minuteOfDay < 555 || minuteOfDay > 925 || time <= 0 || open <= 0 || close <= 0 || high < Math.max(open,close,low) || low > Math.min(open,close) || volume < 0 || seen.has(time)) throw new Error('Invalid or duplicate FYERS 5-minute candle; refusing to repair or interpolate');
+    const ist = new Date((time + 19800) * 1000);
+    const minuteOfDay = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if (![time,open,high,low,close,volume].every(Number.isFinite) || time < start || time > end || time + FIVE_MINUTES > nowSeconds || minuteOfDay < 555 || minuteOfDay > 925 || time <= 0 || open <= 0 || close <= 0 || high < Math.max(open,close,low) || low > Math.min(open,close) || volume < 0 || seen.has(time)) throw new Error('Invalid or duplicate FYERS 5-minute candle; refusing to repair or interpolate');
     seen.add(time);
     candles.push({time,open,high,low,close,volume,completed:true,source:'FYERS_HISTORY_5M'});
   }

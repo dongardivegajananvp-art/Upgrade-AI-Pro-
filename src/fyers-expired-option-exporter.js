@@ -135,7 +135,7 @@ async function reserveDailyRequest(budgetDir, now) {
       updatedAt: new Date(now).toISOString()
     };
     const temporary = file + '.' + process.pid + '.' + Date.now() + '.tmp';
-    await writeFile(temporary, JSON.stringify(next, null, 2) + '\\n', { flag: 'wx' });
+    await writeFile(temporary, JSON.stringify(next, null, 2), { flag: 'wx' });
     await rename(temporary, file);
     return { used: next.used, remaining: DAILY_REQUEST_LIMIT - next.used, ledgerFile: file };
   } finally {

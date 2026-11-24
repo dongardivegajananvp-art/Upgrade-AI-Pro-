@@ -104,3 +104,24 @@ test('offline worker has no imports of live server, FYERS REST, WebSocket, scann
   const source = await readFile(new URL('./backtest-offline-worker.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /fyers-rest|fyers-market-socket|rolling-fno-scanner|server\\.js|order-manager|placeOrder/);
 });
+
+
+test('offline worker marks replay PARTIAL when a symbol has unavailable strategy history', async t => {
+  const dirs = await fixture(t);
+  const out = await runOfflineHistoricalDataset({
+    ...dirs,
+    replay: ({symbol}) => ({
+      status:'DATA_UNAVAILABLE',
+      mode:'HISTORICAL_SIGNAL_REPLAY',
+      actionable:false,
+      symbol,
+      signals:[],
+      reason:'Insufficient validated historical candles'
+    })
+  });
+  assert.equal(out.report.status, 'PARTIAL');
+  assert.equal(out.report.completeCount, 0);
+  assert.equal(out.report.unavailableCount, 1);
+  assert.equal(out.report.actionable, false);
+  assert.equal(out.report.ordersEnabled, false);
+});

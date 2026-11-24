@@ -32,6 +32,11 @@ export async function runOfflineHistoricalDataset({ inputDir, outputDir, replay 
   if (!manifest.master || manifest.master.source !== 'FYERS_OFFICIAL_SYMBOL_MASTER' || !/^[a-f0-9]{64}$/.test(manifest.master.sha256 || '') || manifest.master.sourceFiles?.NSE_FO?.url !== 'https://public.fyers.in/sym_details/NSE_FO_sym_master.json' || manifest.master.sourceFiles?.NSE_CM?.url !== 'https://public.fyers.in/sym_details/NSE_CM_sym_master.json' || !/^[a-f0-9]{64}$/.test(manifest.master.sourceFiles?.NSE_FO?.sha256 || '') || !/^[a-f0-9]{64}$/.test(manifest.master.sourceFiles?.NSE_CM?.sha256 || '') || !manifest.requestPolicy || manifest.requestPolicy.sequential !== true) {
     throw new Error('Dataset is missing official-master integrity evidence or sequential export policy');
   }
+  for (const name of ['NSE_FO','NSE_CM']) {
+    const source=manifest.master.sourceFiles[name];
+    const filename=safeName(source.datasetFile);
+    if (sha256(await readFile(path.join(input,filename)))!==source.sha256) throw new Error('Bundled official FYERS '+name+' master SHA-256 mismatch');
+  }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length > 300) {
     throw new Error('Dataset manifest must contain 1 to 300 symbol files');
   }

@@ -80,3 +80,11 @@ export function connectWithAutoReconnect(socket, retryCount = 10) {
   socket.connect();
   return true;
 }
+export function formatSocketCloseDetail(details = []) {
+  if (!Array.isArray(details) || details.length === 0) return null;
+  const parts = details.map(value => {
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }).filter(Boolean);
+  return parts.join(' | ').slice(0, 240) || null;
+}

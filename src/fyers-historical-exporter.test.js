@@ -9,7 +9,7 @@ import { exportFyersHistoricalDataset } from './fyers-historical-exporter.js';
 const MASTER='UPGRADE_AI_PRO_FYERS_NSE_FNO_MASTER_V1';
 const PROV='FYERS_HISTORICAL_API';
 const MASTER_PROV='FYERS_OFFICIAL_SYMBOL_MASTER';
-const NOW=Date.parse('2026-11-24T10:00:00Z');
+const NOW=Date.parse('2026-11-24T10:30:00Z');
 const digest=value=>createHash('sha256').update(value).digest('hex');
 function dailyRows(){
   const rows=[];
@@ -67,6 +67,19 @@ test('exporter halts on FYERS 429 without retrying or continuing universe',async
  assert.equal(result.manifest.complete,false);
  assert.equal(result.manifest.exportedCount,0);
  assert.match(result.manifest.failures[0].reason,/HTTP 429/);
+});
+
+test('exporter refuses every FYERS history request during NSE live-session protection window',async t=>{
+ const dirs=await fixture(t); let calls=0;
+ const result=await exportFyersHistoricalDataset({
+  ...dirs,appId:'APP',accessToken:'TOKEN',now:NOW,
+  clock:()=>Date.parse('2026-11-25T05:00:00Z'),
+  minRequestGapMs:1000,pause:async()=>{},
+  fetchImpl:async()=>{calls++;throw new Error('must not call FYERS during live session');}
+ });
+ assert.equal(calls,0);
+ assert.equal(result.manifest.exportedCount,0);
+ assert.match(result.manifest.failures[0].reason,/LIVE_SESSION_PROTECTION/);
 });
 
 test('exporter rejects unverified master and invalid candle rows instead of repairing them',async t=>{

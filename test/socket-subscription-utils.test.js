@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from '../src/socket-subscription-utils.js';
 
 test('subscription delta avoids duplicate additions and removes obsolete symbols', () => {
   assert.deepEqual(getSocketSubscriptionDelta(['A', 'B', 'A'], ['B', 'C', 'C']), {
@@ -95,4 +95,9 @@ test('socket close diagnostics preserve provider detail while bounding log size'
   assert.equal(formatSocketCloseDetail([]),null);
   assert.equal(formatSocketCloseDetail(['closed', {code:1006,reason:'network'}]),'closed | {"code":1006,"reason":"network"}');
   assert.equal(formatSocketCloseDetail(['x'.repeat(400)]).length,240);
+});
+
+
+test('FYERS subscription pacing uses a conservative 2.5-second interval after observed 1015 errors', () => {
+  assert.equal(SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, 2500);
 });

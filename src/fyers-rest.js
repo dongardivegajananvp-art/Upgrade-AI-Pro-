@@ -640,6 +640,21 @@ function istDateFromEpochSeconds(seconds) {
  * Intraday and daily windows are separate because FYERS documents different
  * per-request limits (100 days intraday, 366 days daily).
  */
+export function validateHistoricalBacktestRange({ startTime, dailyStartTime, endTime } = {}) {
+  const start = Number(startTime);
+  const dailyStart = Number(dailyStartTime);
+  const end = Number(endTime);
+  if (![start, dailyStart, end].every(Number.isFinite) || dailyStart <= 0 || start <= 0 || end <= start || dailyStart > start) {
+    throw new Error('Historical backtest date range is invalid');
+  }
+  const intradayDays = (end - start) / 86400;
+  const dailyDays = (end - dailyStart) / 86400;
+  if (intradayDays > 100 || dailyDays > 366) {
+    throw new Error('Requested FYERS history range exceeds documented per-request limits');
+  }
+  return { intradayDays, dailyDays };
+}
+
 export async function getHistoricalBacktestHistory({
   symbol,
   startTime,
@@ -652,14 +667,7 @@ export async function getHistoricalBacktestHistory({
   const start = Number(startTime);
   const dailyStart = Number(dailyStartTime);
   const end = Number(endTime);
-  if (![start, dailyStart, end].every(Number.isFinite) || dailyStart <= 0 || start <= 0 || end <= start || dailyStart > start) {
-    throw new Error('Historical backtest date range is invalid');
-  }
-  const intradayDays = (end - start) / 86400;
-  const dailyDays = (end - dailyStart) / 86400;
-  if (intradayDays > 100 || dailyDays > 366) {
-    throw new Error('Requested FYERS history range exceeds documented per-request limits');
-  }
+  validateHistoricalBacktestRange({ startTime: start, dailyStartTime: dailyStart, endTime: end });
   const from5m = istDateFromEpochSeconds(start);
   const fromDaily = istDateFromEpochSeconds(dailyStart);
   const to = istDateFromEpochSeconds(end);

@@ -49,8 +49,18 @@ export function simulateExpiredOptionSignal({signal,optionDataset,contractSpec,t
   const o=Number(c.open),h=Number(c.high),l=Number(c.low);
   if(fill===null){
    if(h<entry)continue;
+   const chaseCeiling=entry+0.5*risk;
+   if(o>chaseCeiling+tick*1e-7)return {status:'NO_TRADE',actionable:false,ordersEnabled:false,reason:'Option opened beyond the 0.5R chase limit',entry,stopLoss,target,risk,pnl:0,rMultiple:0};
+   // If the bar opens below entry but its high exceeds the chase ceiling,
+   // OHLC cannot reveal whether the trigger was first reached inside the
+   // permitted range or only after the live quote had become a chase.
+   if(o<entry-tick*1e-7&&h>chaseCeiling+tick*1e-7)
+    return {status:'UNRESOLVED',actionable:false,ordersEnabled:false,reason:'Intrabar path crossed the 0.5R chase ceiling after a below-trigger open; 5-minute OHLC cannot prove an in-range entry',entry,stopLoss,target,risk,pnl:null,rMultiple:null};
+   // If the same below-trigger bar also trades through the structural stop,
+   // the stop may have occurred before the entry trigger. Do not invent order.
+   if(o<entry-tick*1e-7&&l<=stopLoss)
+    return {status:'UNRESOLVED',actionable:false,ordersEnabled:false,reason:'Entry trigger and structural stop were both touched in one 5-minute bar after a below-trigger open; event order is unknowable',entry,stopLoss,target,risk,pnl:null,rMultiple:null};
    const candidate=o>=entry?o:entry;
-   if(candidate>entry+0.5*risk+tick*1e-7)return {status:'NO_TRADE',actionable:false,ordersEnabled:false,reason:'Option opened beyond the 0.5R chase limit',entry,stopLoss,target,risk,pnl:0,rMultiple:0};
    fill=candidate;fillTime=Number(c.time);
    if(o<=stopLoss||l<=stopLoss){exit=o<stopLoss?o:stopLoss;exitTime=Number(c.time);exitReason='STOP';break;}
    if(h>=target){exit=target;exitTime=Number(c.time);exitReason='TARGET';break;}

@@ -175,6 +175,49 @@ test('expired option ATM selection requires a completed underlying close from th
 });
 
 
+
+test('expired option export resumes from hash-verified checkpoints without repeating successful provider requests',async()=>{
+  await withOutput(async outputDir=>{
+    const {client,calls}=clientFixture();
+    let simulatedNow=now;
+    const original=client.fno_historical_data;
+    let failPeOnce=true;
+    client.fno_historical_data=async args=>{
+      if(args.symbol.endsWith('PE')&&failPeOnce){failPeOnce=false;calls.push(['fno_historical_data_failed',args]);throw new Error('simulated transient PE response failure');}
+      return original(args);
+    };
+    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client,clock:()=>simulatedNow}),/simulated transient PE response failure/);
+    assert.equal(calls.filter(row=>row[0]==='expiry_dates').length,1);
+    assert.equal(calls.filter(row=>row[0]==='history_underlying_symbols').length,1);
+    assert.equal(calls.filter(row=>row[0]==='fno_historical_data'&&row[1].symbol.endsWith('CE')).length,1);
+
+    simulatedNow=now+60000;
+    const resumed=await exportExpiredOptionPair({...base(outputDir),client,clock:()=>simulatedNow});
+    assert.equal(resumed.report.status,'PAIR_EXPORTED');
+    assert.equal(resumed.report.requestCount,1,'only the missing PE candle request should be sent on resume');
+    assert.equal(resumed.report.reusedCheckpointCount,3,'expiry, contract catalog and CE candles should be reused');
+    assert.deepEqual(resumed.report.reusedCheckpoint,['expiry_dates','history_underlying_symbols','fno_historical_data_CE']);
+    assert.equal(calls.filter(row=>row[0]==='expiry_dates').length,1);
+    assert.equal(calls.filter(row=>row[0]==='history_underlying_symbols').length,1);
+    assert.equal(calls.filter(row=>row[0]==='fno_historical_data'&&row[1].symbol.endsWith('CE')).length,1);
+    assert.equal(calls.filter(row=>row[0]==='fno_historical_data'&&row[1].symbol.endsWith('PE')).length,1);
+    assert.equal(resumed.report.requestBudget.usedToday,5,'the daily ledger must retain the failed request reservation');
+  });
+});
+
+test('expired option exporter refuses a checkpoint whose cached response hash was modified',async()=>{
+  await withOutput(async outputDir=>{
+    const {client}=clientFixture();
+    await exportExpiredOptionPair({...base(outputDir),client});
+    const { readdir } = await import('node:fs/promises');
+    const checkpointName=(await readdir(outputDir)).find(name=>name.startsWith('checkpoint-'));
+    const checkpointPath=path.join(outputDir,checkpointName);
+    const saved=JSON.parse(await readFile(checkpointPath,'utf8'));
+    saved.responses.expiry_dates.response.data.expiry_dates.options=[];
+    await (await import('node:fs/promises')).writeFile(checkpointPath,JSON.stringify(saved));
+    await assert.rejects(()=>exportExpiredOptionPair({...base(outputDir),client}),/checkpoint response hash is invalid/);
+  });
+});
 test('expired option archive keeps the same contract across different historical session selections',async()=>{
  await withOutput(async outputDir=>{
   const first=clientFixture();

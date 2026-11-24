@@ -87,6 +87,41 @@ async function writeOnce(file, value) {
   await rename(temp,file);
 }
 
+const CHECKPOINT_FORMAT = 'FYERS_EXPIRED_OPTION_EXPORT_CHECKPOINT_V1';
+
+async function loadCheckpoint(file, identity) {
+  try {
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    if (saved.format !== CHECKPOINT_FORMAT || saved.identitySha256 !== sha256(JSON.stringify(identity)) ||
+        !saved.responses || typeof saved.responses !== 'object' || Array.isArray(saved.responses)) {
+      throw new Error('FYERS expired-option checkpoint identity/format is invalid; refusing unsafe resume');
+    }
+    for (const [key, item] of Object.entries(saved.responses)) {
+      if (!item || !item.response || typeof item.completedAt !== 'string' || !Number.isFinite(Date.parse(item.completedAt)) || item.sha256 !== sha256(JSON.stringify(item.response))) {
+        throw new Error('FYERS expired-option checkpoint response hash is invalid for ' + key);
+      }
+    }
+    return saved;
+  } catch (error) {
+    if (error.code === 'ENOENT') return {
+      format: CHECKPOINT_FORMAT,
+      identitySha256: sha256(JSON.stringify(identity)),
+      responses: {}
+    };
+    throw error;
+  }
+}
+
+async function saveCheckpoint(file, checkpoint) {
+  const temporary = file + '.' + process.pid + '.' + Date.now() + '.tmp';
+  try {
+    await writeFile(temporary, JSON.stringify(checkpoint, null, 2) + '\n', { flag: 'wx' });
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 const DAILY_BUDGET_FORMAT = 'FYERS_EXPIRED_OPTION_DAILY_BUDGET_V1';
 const DAILY_REQUEST_LIMIT = 10;
 
@@ -179,11 +214,21 @@ export async function exportExpiredOptionPair({
   }
   if (!budgetDir) throw new Error('A persistent budgetDir is required for the cross-invocation daily request ledger');
   const budgetRoot=path.resolve(budgetDir);
+  const root=path.resolve(outputDir);
   await mkdir(budgetRoot,{recursive:true});
+  await mkdir(root,{recursive:true});
+  const identity={underlying,expiry,start,end,underlyingPrice:Number(underlyingPrice),selectionTime:Number(selectionTime)};
+  const checkpointFile=path.join(root,'checkpoint-'+sha256(JSON.stringify(identity)).slice(0,24)+'.json');
+  const checkpoint=await loadCheckpoint(checkpointFile,identity);
   const requestLog=[];
+  const reusedCheckpoint=[];
   let lastRequestAt=0;
   let dailyBudget=null;
   const invoke=async (label, fn) => {
+    if (Object.hasOwn(checkpoint.responses,label)) {
+      reusedCheckpoint.push(label);
+      return checkpoint.responses[label].response;
+    }
     assertNseQuietWindow(clock());
     const wait=Math.max(0,lastRequestAt+minRequestGapMs-Date.now());
     if (wait) await pause(wait);
@@ -193,6 +238,12 @@ export async function exportExpiredOptionPair({
     lastRequestAt=Date.now();
     const response=await fn();
     requestLog.push({label,completedAt:new Date(clock()).toISOString(),responseSha256:sha256(JSON.stringify(response))});
+    const cacheable = (response?.s==='ok' && response?.data && typeof response.data==='object') ||
+      (['ok','no_data'].includes(response?.s) && Array.isArray(response?.candles));
+    if (cacheable) {
+      checkpoint.responses[label]={response,sha256:sha256(JSON.stringify(response)),completedAt:new Date(clock()).toISOString()};
+      await saveCheckpoint(checkpointFile,checkpoint);
+    }
     return response;
   };
 
@@ -220,8 +271,6 @@ export async function exportExpiredOptionPair({
   }
   if (pair.CE===pair.PE) throw new Error('FYERS expired CE/PE contract identity collision');
 
-  const root=path.resolve(outputDir);
-  await mkdir(root,{recursive:true});
   const contractResults={};
   for (const side of ['CE','PE']) {
     const symbol=pair[side];
@@ -235,7 +284,7 @@ export async function exportExpiredOptionPair({
       selection:{method:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',underlyingPrice:Number(underlyingPrice),selectionTime:Number(selectionTime),historicalAtmSelection:true},
       requested:{start,end,resolution:'5'},timestampConvention:'FYERS_EPOCH_BAR_START',
       columns:response.columns,candles,responseSha256:sha256(JSON.stringify(response)),
-      candleSha256:sha256(JSON.stringify(candles)),retrievedAt:new Date(clock()).toISOString(),
+      candleSha256:sha256(JSON.stringify(candles)),retrievedAt:checkpoint.responses['fno_historical_data_'+side].completedAt,
       historicalBidAskDepthAvailable:false,actionable:false,ordersEnabled:false
     };
     const filename=symbol.replace(':','_')+'-'+start+'-'+String(selectionTime)+'.json';
@@ -245,9 +294,9 @@ export async function exportExpiredOptionPair({
   const report={
     format:FORMAT,source:'FYERS_EXPIRED_FO_API',status:Object.values(contractResults).every(x=>x.status==='EXPORTED')?'PAIR_EXPORTED':'PARTIAL',
     underlying,expiry,strike,selectionTime:Number(selectionTime),selectionMethod:'NEAREST_LISTED_STRIKE_TO_COMPLETED_UNDERLYING_CLOSE',
-    requested:{start,end,resolution:'5'},contracts:pair,contractResults,requestCount:requestLog.length,
+    requested:{start,end,resolution:'5'},contracts:pair,contractResults,requestCount:requestLog.length,reusedCheckpointCount:reusedCheckpoint.length,checkpointFile:path.basename(checkpointFile),
     requestBudget:{maxIntradayRequests,used:dailyBudget?.used??0,remaining:dailyBudget?.remaining??DAILY_REQUEST_LIMIT,providerDailyLimit:DAILY_REQUEST_LIMIT,usedToday:dailyBudget?.used??0,remainingToday:dailyBudget?.remaining??DAILY_REQUEST_LIMIT,invocationLimit:maxIntradayRequests,usedThisInvocation:requestLog.length,ledgerFile:dailyBudget?.ledgerFile??null},
-    requestEvidence:requestLog,actionable:false,ordersEnabled:false,liveStateTouched:false,
+    requestEvidence:requestLog,reusedCheckpoint,actionable:false,ordersEnabled:false,liveStateTouched:false,
     limitations:[
       'Provider contract symbols and expiry are taken from FYERS expired-F&O discovery APIs.',
       'Strike selection uses the supplied completed underlying candle close; this is not a historical bid/ask or option-chain replay.',

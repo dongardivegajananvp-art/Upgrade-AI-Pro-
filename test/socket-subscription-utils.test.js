@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect } from '../src/socket-subscription-utils.js';
 
 test('subscription delta avoids duplicate additions and removes obsolete symbols', () => {
   assert.deepEqual(getSocketSubscriptionDelta(['A', 'B', 'A'], ['B', 'C', 'C']), {
@@ -69,4 +69,23 @@ test('session-ready socket plan includes active F&O and selected option', async 
 
 test('one-symbol subscription pacing can serialize newly added symbols safely', () => {
   assert.deepEqual(splitSubscriptionBatches(['A','B','C'], 1), [['A'], ['B'], ['C']]);
+});
+
+
+test('FYERS auto-reconnect is configured before the WebSocket transport connects', () => {
+  const events=[];
+  const socket={
+    autoreconnect(retryCount){events.push(['autoreconnect',retryCount]);},
+    connect(){events.push(['connect']);}
+  };
+  assert.equal(connectWithAutoReconnect(socket,10),true);
+  assert.deepEqual(events,[['autoreconnect',10],['connect']]);
+});
+
+test('FYERS auto-reconnect retry count is bounded to the SDK supported range', () => {
+  const events=[];
+  const socket={autoreconnect(value){events.push(value);},connect(){events.push('connect');}};
+  connectWithAutoReconnect(socket,1000);
+  assert.deepEqual(events,[50,'connect']);
+  assert.throws(()=>connectWithAutoReconnect({connect(){}},10),/autoreconnect/);
 });

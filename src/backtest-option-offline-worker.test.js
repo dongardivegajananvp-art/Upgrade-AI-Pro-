@@ -47,7 +47,7 @@ test('offline option worker blocks tampered option files before replay',async()=
  const root=await mkdtemp(path.join(os.tmpdir(),'offline-option-tamper-'));
  try{
   const input=path.join(root,'input'),output=path.join(root,'output');await mkdir(input);
-  const masterFile='NSE_FO_contract_26032025.csv.gz';await writeFile(path.join(input,masterFile),gzipSync('Instrument,Symbol,Expiry,Strike,OptionType,LotSize,TickSize,ISIN,UnderlyingSymbol\nOPTSTK,SBIN,27-Mar-2025,800,CE,750,0.05,INE062A01020,SBIN\n')));const masterHash=hash(await readFile(path.join(input,masterFile)));const spec={...contractSpec,masterFile,masterFileSha256:masterHash,sha256:masterHash};const files={signal:JSON.stringify(signal),option:JSON.stringify(optionDataset),spec:JSON.stringify(spec)};
+  const masterFile='NSE_FO_contract_26032025.csv.gz';await writeFile(path.join(input,masterFile),gzipSync(['Instrument,Symbol,Expiry,Strike,OptionType,LotSize,TickSize,ISIN,UnderlyingSymbol','OPTSTK,SBIN,27-Mar-2025,800,CE,750,0.05,INE062A01020,SBIN'].join(String.fromCharCode(10))));const masterHash=hash(await readFile(path.join(input,masterFile)));const spec={...contractSpec,masterFile,masterFileSha256:masterHash,sha256:masterHash};const files={signal:JSON.stringify(signal),option:JSON.stringify(optionDataset),spec:JSON.stringify(spec)};
   const hs={};
   for(const [key,value] of Object.entries(files)){await writeFile(path.join(input,key+'.json'),value);hs[key]=hash(value);}
   await writeFile(path.join(input,'option.json'),JSON.stringify({...optionDataset,candles:[]}));

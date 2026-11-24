@@ -9,7 +9,7 @@ const SYMBOL = /^NSE:[A-Z0-9&._-]{1,48}-EQ$/;
 
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 function safeName(value) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9._-]{1,100}\\.json$/.test(value) || value.includes('..')) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._-]{1,100}\.json$/.test(value) || value.includes('..')) {
     throw new Error('Dataset filename is invalid');
   }
   return value;

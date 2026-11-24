@@ -251,10 +251,10 @@ test('encrypted browser safety state restores a future cooldown monotonically',(
     cloudflareRateLimitCountToday:1,unknownRateLimitCountToday:0,
     lastRateLimitAt:new Date(now).toISOString(),lastRateLimitKind:'CLOUDFLARE_1015'
   },now),true);
-  assert.equal(getRestDiagnostics(now).cooldownUntil,new Date(firstUntil).toISOString());
+  assert.equal(getRestDiagnostics(now).cooldownUntil,firstUntil);
   assert.equal(getRestDiagnostics(now).recoveryProbeRequired,true);
   assert.equal(restoreRestSafetyState({cooldownUntil:now+60000,rateLimitDayKey:'2026-11-24',rateLimitCountToday:1},now),true);
-  assert.equal(getRestDiagnostics(now).cooldownUntil,new Date(firstUntil).toISOString());
+  assert.equal(getRestDiagnostics(now).cooldownUntil,firstUntil);
   assert.equal(getRestSafetyState(now).cooldownUntil,firstUntil);
   assert.equal(restoreRestSafetyState({cooldownUntil:now-1},now),false);
 });

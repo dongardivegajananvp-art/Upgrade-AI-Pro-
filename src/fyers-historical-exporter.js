@@ -112,6 +112,7 @@ export async function exportFyersHistoricalDataset({
   for (let index=0; index<symbols.length; index++) {
     const symbol=symbols[index];
     const fetchCandles=async (resolution,from) => {
+      assertOutsideNseQuietWindow(clock());
       const wait=Math.max(0,lastRequestAt+minRequestGapMs-Date.now());
       if (wait) await pause(wait);
       const url=new URL(DATA_URL);

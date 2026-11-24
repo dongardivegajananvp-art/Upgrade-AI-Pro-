@@ -64,7 +64,7 @@ test('exporter rejects unverified master and invalid candle rows instead of repa
  const dirs=await fixture(t);
  await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:false,sourceFiles:{NSE_FO:{sha256:'a'.repeat(64)},NSE_CM:{sha256:'b'.repeat(64)}},symbols:['NSE:SBIN-EQ']}));
  await assert.rejects(exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW}),/verified FYERS official/);
- await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:PROV,verifiedOfficialMaster:true,symbols:['NSE:SBIN-EQ']}));
+ await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:true,sourceFiles:{NSE_FO:{url:'https://public.fyers.in/sym_details/NSE_FO_sym_master.json',sha256:'a'.repeat(64)},NSE_CM:{url:'https://public.fyers.in/sym_details/NSE_CM_sym_master.json',sha256:'b'.repeat(64)}},symbols:['NSE:SBIN-EQ']}));
  const invalid=await exportFyersHistoricalDataset({...dirs,appId:'APP',accessToken:'TOKEN',now:NOW,minRequestGapMs:1000,pause:async()=>{},fetchImpl:async()=>({status:200,ok:true,text:async()=>JSON.stringify({s:'ok',candles:[[1,1,1,1,1,1]]})})});
  assert.equal(invalid.manifest.complete,false);
  assert.match(invalid.manifest.failures[0].reason,/Invalid or duplicate FYERS 5-minute candle/);

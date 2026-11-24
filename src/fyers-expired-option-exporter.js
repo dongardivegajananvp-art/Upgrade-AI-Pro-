@@ -169,6 +169,10 @@ export async function exportExpiredOptionPair({
   if ((endMs-startMs)/86400000>99) throw new Error('Expired F&O 5-minute request may cover at most 100 calendar dates');
   if (!Number.isFinite(Number(underlyingPrice)) || Number(underlyingPrice)<=0 ||
       !Number.isFinite(Number(selectionTime)) || Number(selectionTime)<=0) throw new Error('A positive completed historical underlying close and its timestamp are required');
+  const selectionDate=istDate(Number(selectionTime)*1000);
+  const selectionClock=new Date((Number(selectionTime)+19800)*1000);
+  const selectionMinute=selectionClock.getUTCHours()*60+selectionClock.getUTCMinutes();
+  if (selectionDate!==start || selectionMinute<560 || selectionMinute>930) throw new Error('Historical underlying close timestamp must be a completed NSE 5-minute candle close within the selected trading date');
   if (!outputDir || !Number.isInteger(minRequestGapMs) || minRequestGapMs<1000 || minRequestGapMs>60000 ||
       !Number.isInteger(maxIntradayRequests) || maxIntradayRequests<4 || maxIntradayRequests>10) {
     throw new Error('Output directory, safe request pacing and Standard-plan 4-to-10 request budget are required');

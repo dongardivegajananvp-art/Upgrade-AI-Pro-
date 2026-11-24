@@ -112,3 +112,13 @@ Compatibility is therefore **partially verified, not universally certified**. CI
 - No data job has been run against production because this code remains on Draft PR #89. No merge, deployment, Render configuration, or environment variable change was made.
 
 - CI run #277 and Verify run #596 completed successfully for PR head `79038ae4e85b17c64ff0ba10dc1de2d07a7f9784`: Node.js 22 suite 284 passed / 0 failed; production dependency audit 0 vulnerabilities; Verify JavaScript syntax checks passed.
+
+## FYERS expired-option history research correction (2026-11-24)
+
+- FYERS does provide official Expired F&O APIs: expiry dates, expired contract symbols, and expired-contract candles with optional OI and option Greeks. The workflow is expiry-dates -> underlying-symbols (contracts) -> expired historical-data.
+- Official endpoints: `/data/history/fno/expired/expiry-dates`, `/data/history/fno/expired/underlying-symbols`, and `/data/history/fno/expired/historical-data`.
+- The expired-candle endpoint supports 5-minute resolution and up to 100 days per request. A 3-calendar-month range fits that window, but every option contract's candles require its own historical-data request.
+- FYERS Standard plan is documented with only 10 Expired F&O intraday API requests per day; Prime uses the applicable Prime Data API rate limits. Since the project must avoid paid services, do not assume Prime access. This is a hard practical limit for broad multi-stock option-level backtests: expiry discovery, contract lookup and each selected option-contract candle request consume requests from the constrained API family.
+- The official FYERS docs expose the required option OHLCV/OI/Greeks data, so the earlier blanket statement that expired option data is unavailable was too broad. The correct blocker is Standard-plan request allowance and the very large number of contracts needed for full 218-stock coverage, plus data availability gaps on individual contracts.
+- A full option P&L backtest for all F&O stocks over three months is therefore NOT currently evidenced as feasible on Standard at no cost. Do not bypass limits, batch around quotas, or switch providers. The underlying 5-minute signal replay remains feasible through the regular History API; option-level results must remain explicitly partial/unavailable until actual official contract data is retrieved within plan limits.
+- FYERS community reported historical expired-F&O calendar/contract data gaps and later a fix, but this is not a guarantee that every contract/date has complete candles. Validate every response and fail closed on `no_data`, missing candles, gaps, or null Greeks where required.

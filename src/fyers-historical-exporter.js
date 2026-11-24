@@ -115,6 +115,9 @@ export async function exportFyersHistoricalDataset({
       assertOutsideNseQuietWindow(clock());
       const wait=Math.max(0,lastRequestAt+minRequestGapMs-Date.now());
       if (wait) await pause(wait);
+      // Re-check after pacing: a request queued just before 08:45/16:00 IST
+      // must not cross into the protected live-session window while waiting.
+      assertOutsideNseQuietWindow(clock());
       const url=new URL(DATA_URL);
       url.searchParams.set('symbol',symbol);
       url.searchParams.set('resolution',resolution);

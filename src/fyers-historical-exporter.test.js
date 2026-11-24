@@ -82,6 +82,21 @@ test('exporter refuses every FYERS history request during NSE live-session prote
  assert.match(result.manifest.failures[0].reason,/LIVE_SESSION_PROTECTION/);
 });
 
+
+test('exporter re-checks the NSE quiet window after request pacing wait',async t=>{
+ const dirs=await fixture(t); let calls=0;
+ let clockNow=Date.parse('2026-11-25T03:14:59Z');
+ const result=await exportFyersHistoricalDataset({
+  ...dirs,appId:'APP',accessToken:'TOKEN',now:NOW,
+  clock:()=>clockNow,minRequestGapMs:60000,
+  pause:async()=>{clockNow=Date.parse('2026-11-25T03:15:00Z');},
+  fetchImpl:async()=>{calls++;return {status:200,ok:true,text:async()=>JSON.stringify({s:'ok',candles:[[Math.floor((NOW-86400000)/1000),100,105,95,102,50]]})};}
+ });
+ assert.equal(calls,1);
+ assert.equal(result.manifest.complete,false);
+ assert.match(result.manifest.failures[0].reason,/LIVE_SESSION_PROTECTION/);
+});
+
 test('exporter rejects unverified master and invalid candle rows instead of repairing them',async t=>{
  const dirs=await fixture(t);
  await writeFile(dirs.masterFile,JSON.stringify({format:MASTER,source:MASTER_PROV,verifiedOfficialMaster:false,sourceFiles:{NSE_FO:{sha256:'a'.repeat(64)},NSE_CM:{sha256:'b'.repeat(64)}},symbols:['NSE:SBIN-EQ']}));

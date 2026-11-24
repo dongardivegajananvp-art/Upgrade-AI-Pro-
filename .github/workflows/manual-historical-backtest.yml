@@ -63,8 +63,10 @@ jobs:
         run: |
           report_file=$(find backtest-results -maxdepth 1 -type f -name 'result-*.json' -print -quit)
           test -n "$report_file" || { echo "No historical signal replay report found"; exit 1; }
+          set +e
           npm run backtest:option-queue -- "$report_file" ./option-queue
           queue_status=$?
+          set -e
           echo "Option queue command exit: $queue_status"
           if [ -f ./option-queue/manifest.json ]; then
             node --input-type=module -e "import fs from 'node:fs'; const m=JSON.parse(fs.readFileSync('./option-queue/manifest.json','utf8')); console.log(JSON.stringify({status:m.status,taskCount:m.taskCount,rejectedCount:m.rejectedCount,complete:m.complete,actionable:m.actionable,ordersEnabled:m.ordersEnabled},null,2));"
@@ -79,5 +81,6 @@ jobs:
           path: |
             backtest-data/
             backtest-results/
+            option-queue/
           if-no-files-found: warn
           retention-days: 90

@@ -1,104 +1,94 @@
 # UPGRADE AI PRO — Deep Audit Report
-Date: 2026-11-23
+Date: 2026-11-24
 Scope: repository `dongardivegajananvp-art/Upgrade-AI-Pro-`, production Render service `upgrade-ai-pro` (`srv-dbv6ug1srm7s73bjvgg0`), FYERS-only, NSE-only.
-Audit basis: current `main` tree at `6b8f86a3590bf41f792f6b0975a9d7f8d0125947`, PR #85/#86 metadata and diffs, GitHub Actions run, Render deploy/events/logs, and source review.
-This is a code/configuration and available-runtime audit, not a live-market acceptance test.
+Audit basis: PR #87 documentation branch reviewed against main after PRs #89, #90 and #91 were merged; source review of the offline historical worker and manual GitHub Actions workflow; previously verified Render deployment state.
+This is a repository/configuration and available-runtime audit, not a live-market acceptance test.
 
 ## Executive result
 
-- Production service is LIVE on Render at `https://upgrade-ai-pro.onrender.com`; deployed commit is PR #86 merge commit `6b8f86a3590bf41f792f6b0975a9d7f8d0125947`.
-- Render Auto-Deploy is OFF. No production deploy, environment-variable change, or order enablement was performed during this audit.
-- PR #86 main-branch CI passed. Render build and deploy events succeeded.
-- The latest available runtime logs are not proof of live trading readiness: all three index ticks were stale; F&O active socket slots were zero; Option Chain and Account Feed successful response paths were not evidenced in the post-deploy log window.
-- Orders remain disabled. NO TRADE remains the only safe status until live evidence passes.
+- PRs #89, #90 and #91 are merged into GitHub `main`. PR #89 adds scheduler/scanner/diagnostic reliability changes; PR #90 closes an NSE quiet-window race in the historical exporter; PR #91 blocks replay of incomplete exports.
+- Render production has **not** been updated for those merges. The latest verified Render deployment remains `dep-dc22957f3r2c73e4evhg`, running PR #86 merge commit `6b8f86a3590bf41f792f6b0975a9d7f8d0125947`. Auto-Deploy is OFF.
+- No production environment/settings change, live order enablement, or legacy-service change was made.
+- The latest available production observation is not proof of trading readiness: all three index ticks were stale, active F&O socket slots were zero, the Data Socket repeatedly closed/reconnected, and successful Option Chain / positions / orderbook responses were not evidenced in the inspected window.
+- Broker orders remain disabled. Stale, missing, mismatched or unverified data must remain NO TRADE.
+- The historical workflow is manual-dispatch only and has not been run. No dataset or replay results have been generated or validated.
 
-## Verified facts
+## Verified production baseline (PR #86 deployment)
 
-| Area | Verified state | Audit interpretation |
+| Area | Verified state | Interpretation |
 |---|---|---|
-| Runtime | Node engine 22.x; Render build uses `npm install`, start uses `npm start`; service listened on port 10000 | Runtime configuration is internally aligned; README had a stale Node 20+ statement, corrected in this audit branch |
-| Deployment | PR #86 merge SHA deployed; Render deploy status `live`; event `deploy_ended/succeeded` | Server deployment is verified, not market pipeline |
-| Automation | Render `autoDeploy=no`, trigger `off` | Manual deploy policy preserved |
-| REST governor | 6 upstream requests / rolling 60 seconds across the `fyers-rest.js` scheduler; background/account/scanner/research/warmup limited to 3/min, leaving interactive priority headroom; existing 4-second gap and history-specific caps remain | Conservative application-side protection based on observed Cloudflare 1015; not FYERS's published quota |
-| REST state | Cooldown, rolling request ledger and counters are process-local; startup requires one controlled interactive recovery probe | Restart-durable cooldown is not implemented; do not imply otherwise |
-| WebSocket | One socket; desired, SDK-requested and pending subscription states; paced one-symbol batches at 1.2 seconds; generic ACK is not treated as symbol-level proof | SDK subscription restoration and live tick proof still need an NSE-session test |
-| F&O master | Runtime diagnostics reported 94,071 FO rows, 10,222 CM rows, 93,404 active option contracts, 224 active underlyings, 218 mapped underlyings | Master mapping exists; it does not mean all 218 are subscribed or live |
-| Scanner | 20 rotating socket slots, 8-symbol scan slice; scanner is gated by NSE session, fresh index feed and REST recovery state | Rolling observation only; never simultaneous 218-symbol live coverage |
-| Strategy engine | Exactly nine IDs: EMA20/EMA50, Top Gainer breakout, daily-trend pullback, day high/low retest, double top/bottom neckline retest, bullish continuation, bearish continuation, flag/volume breakout, opening-range breakout | Ascending/descending triangle, pennant and flag are pattern variants inside continuation logic, not separate strategy IDs |
-| Entry | Three contiguous completed option candles, live premium trigger, structural stop, chase guard and canonical risk-plan validation; RR floor 1:2 | Code-level fixtures exist; full CE/PE × nine-strategy matrix and live acceptance remain open |
-| PWA | Versioned shell cache; API routes bypass service-worker cache; obsolete cache eviction and activation logic present | Browser-level update lifecycle proof remains open |
-| Orders | `tradingEnabled()` returns false | Broker order placement remains disabled |
+| Render service | `upgrade-ai-pro`, Free, one instance | Production target; no paid dependency added |
+| Deployment | `dep-dc22957f3r2c73e4evhg`, commit `6b8f86a3590bf41f792f6b0975a9d7f8d0125947`, status live | This remains the production version; merged main changes are not live |
+| Automation | Auto-Deploy OFF, trigger off | Manual deployment policy preserved |
+| Runtime | Node 22.x in `package.json`; PR #87 README correction states Node 22.x | Runtime documentation on PR #87 is aligned |
+| REST governor | PR #86 app-side guard: 6 requests / rolling 60 seconds through `src/fyers-rest.js`; lower-priority background/account/scanner/research/warmup work limited to 3/min; 4-second minimum gap and existing recovery/cooldown rules | Conservative app safeguards based on observed 1015; not a claim about FYERS-published quotas. OAuth exchange and public symbol-master download are separate paths |
+| FYERS auth / master | Latest PR #89 body records successful OAuth exchange and official NSE/FYERS master load during the 2026-11-24 observation | Authentication and master load do not prove live feed readiness |
+| WebSocket | One Data Socket; reconnect and close-event diagnostics improved in PR #89 source, but production still runs PR #86 | Runtime showed repeated close/reconnect and stale indices; new PR #89 diagnostics are not yet in production |
+| F&O coverage | 218 mapped underlyings; 20 rotating WebSocket slots; one history-backed underlying/minute scanner admission | Rolling coverage, not simultaneous full-universe live coverage; ideal 218-symbol history pass is at least 218 minutes before delays |
+| Orders | Order placement remains disabled | No live order path is authorized |
 
-## Runtime evidence after PR #86 deploy
+## Merged main changes not yet deployed
 
-Observed in the post-deploy window:
-- WebSocket connected and three index subscriptions were paced individually.
-- NIFTY exchange tick age was approximately 23.8 million ms; BANK NIFTY approximately 4.0 million ms; SENSEX approximately 5.65 million ms. All were marked `fresh:false`.
-- Official F&O master mapping reported 218 underlyings; active socket slots were 0.
-- Scanner reported current-session master refresh pending before master diagnostics completed.
-- No 1015/429 records appeared in the queried post-deploy log window. This is not proof of recovery: no successful Option Chain or Account Feed response was evidenced, and the market was closed.
-- Render process startup and deploy success were confirmed; application-level trading readiness was not.
+### PR #89 — scheduler fairness and reliability
+Merged as `2c1340c9a18b5ea69862cf97347e984831a7ba69`.
+- Fair Account / Scanner / Research background scheduling while Entry / Option Chain / Chart retain interactive priority.
+- Expired queued requests are rejected before dispatch; identical authenticated GET requests can be coalesced, but POST is not coalesced.
+- Scanner pre-admission and retry retention; one new history-backed underlying/minute; 20 rotating WebSocket slots remain rolling.
+- Endpoint response-derived health for Option Chain, positions and orderbook, separate setup readiness, WebSocket close details, reconnect configuration before connect.
+- Official NSE contract validation across nine strategy IDs and four side/option combinations.
+- Positive setup fixtures for all nine strategy IDs and stale-option rejection gates; a negative end-to-end invalidation matrix and explicit daily-history / Top Gainer-membership blockers.
+- Browser-session cooldown persistence uses an encrypted Secure/HttpOnly/SameSite=Lax cookie. This is session-scoped, not shared across devices/browsers; a lost 429 response cannot persist its deadline. It is not a globally durable cooldown store.
+- PR #89's historical batch implementation is not a live production route; production was not deployed from this PR.
 
-## Findings and closure requirements
+### PR #90 — NSE quiet-window boundary
+Merged as `200e7f6d5b75879179600e14e14fd66d121e1e46`.
+- Historical exporter rechecks the NSE quiet window after its pacing wait and immediately before the FYERS request.
+- Regression test covers a wait that crosses the 08:45 IST boundary.
+- No production or live workstation behavior changed.
 
-### P0 — Live pipeline not proven
-**Finding:** No fresh live index ticks, selected underlying tick, selected option tick, completed live option candles, or end-to-end Entry ledger were evidenced after deploy.
-**Closure:** During NSE hours, capture exchange timestamps and receipt ages for all three indices, one selected F&O underlying and its exact CE/PE contract; verify contiguous completed candles; produce one complete positive or explicit rejection ledger. No trade unless every gate passes.
+### PR #91 — incomplete dataset replay rejection
+Merged as `8afccd978fc446126d70ed778b59d93e0d87eea8`.
+- Offline worker requires `manifest.complete === true`, zero failures, and `exportedCount` equal to the manifest file count.
+- Regression test verifies that replay is rejected and the replay callback is not invoked for a partial manifest.
+- This is a fail-closed data-integrity guard, not proof that a full export has been completed.
 
-### P1 — Option Chain and Account Feed recovery unproven
-**Finding:** PR #86 globally paces market/account requests routed through `src/fyers-rest.js`, but post-deploy logs did not prove successful Option Chain, positions or orderbook responses. OAuth code exchange in `src/fyers-auth.js` is a separate direct request path and is not part of the market/account REST scheduler budget.
-**Closure:** Add explicit endpoint-level request/response telemetry and verify each path independently. Preserve source/path/priority/status/latency/CF-Ray diagnostics without logging secrets or tokens. Confirm account polling does not starve option/entry work.
+## Historical backtest: exact scope and limitations
 
-### P1 — Restart-durable REST cooldown unavailable
-**Finding:** REST cooldown and rolling-window history are process-local. A Render restart clears them; startup fail-closed probe reduces risk but does not restore the prior cooldown deadline.
-**Closure:** Either implement a durable store that is available and verified within the no-paid-service constraint, or retain and clearly document process-local behavior with a conservative restart recovery policy. Do not claim durable cooldown until restart tests prove it.
+### Isolation evidence in source
+- `.github/workflows/manual-historical-backtest.yml` is `workflow_dispatch` only and requires the exact confirmation string `RUN_HISTORICAL_BACKTEST`.
+- It runs on a GitHub-hosted `ubuntu-latest` runner, not in the Render live service.
+- Before any FYERS request, it checks for repository secrets `FYERS_APP_ID` and `FYERS_ACCESS_TOKEN`; the workflow masks them in logs.
+- It downloads the official FYERS NSE F&O symbol master, exports official FYERS `/data/history` 5-minute and daily data, requires a complete export, then invokes a separate offline worker and uploads dataset/results as a short-retention artifact.
+- `src/backtest-offline-worker.js` imports Node crypto/filesystem/path and the historical replay engine only. It has no FYERS client, REST governor, server, WebSocket, scanner, order manager or live-state imports.
+- Worker requires non-overlapping input/output directories; validates manifest provenance, official master source URLs and hashes, sequential request policy, complete export, unique NSE EQ symbols, per-file hashes, FYERS history endpoint evidence, raw-response hashes, exact normalized candle equality, and non-actionable replay output. Results explicitly set `ordersEnabled:false` and `liveStateTouched:false`.
+- PR #91 strengthens the complete-manifest check so a partial export cannot be replayed by invoking the worker outside the guarded workflow.
 
-### P1 — REST governor scope wording is broader than implementation
-**Finding:** The 6/60s governor applies to requests routed through `fyers-rest.js`; the OAuth token exchange in `fyers-auth.js` is a direct fetch. Public symbol-master downloads use a separate public host and daily cache.
-**Closure:** Keep the claim scoped to broker market/account REST requests, or deliberately integrate OAuth with a shared origin-level limiter after evaluating authentication failure and queue semantics.
+### What this does and does not prove
+- Code structure supports separation from the Render live process and live trading state. The workflow has not been executed, so an end-to-end isolation run and actual dataset provenance have not yet been demonstrated.
+- SHA-256 values prove file integrity relative to the recorded manifest; they are not a cryptographic FYERS digital signature. Source labels and API evidence are auditable metadata, not independent broker attestation.
+- This is **underlying historical signal replay**, not a complete options backtest. It does not simulate historical option contracts/quotes/candles, fills, slippage, fees, Entry/SL/Target execution, P&L, win rate or profit factor.
+- Top Gainer membership is not fabricated. Without timestamp-matched historical membership snapshots, that strategy must remain BLOCKED / NOT EVALUATED.
+- Do not claim full nine-strategy historical coverage or strategy profitability from this replay.
+- The workflow requires repository secrets. Their presence has not been verified; no secrets were read or changed. No credentials should be pasted into chat.
+- No workflow run, FYERS historical export, replay, or artifact generation has occurred.
 
-### P1 — Health readiness is not full trade readiness
-**Finding:** `/health` separates process liveness from market-pipeline blockers, but its `MARKET_DATA_READY` state does not prove Account Feed, selected-option candle continuity, a strategy confirmation, risk-plan validity, or an eligible setup.
-**Closure:** Keep health as process/market-data readiness only. Add a separate explicit setup/entry readiness ledger with AUTH, REST, index, underlying, option, contract, candle, strategy, risk and account-feed states. Never let a generic `READY` label imply orders are enabled.
+## Live-market acceptance blockers
 
-### P1 — F&O coverage semantics
-**Finding:** 218 is the mapped universe; 20 is the rotating WebSocket slot count; 8 is the scan slice. These are different quantities. Rolling observations are not simultaneous and may age out.
-**Closure:** UI and API must always expose universe count, current socket slice, scan slice, last observed time, fresh/stale/missing counts and rotation age. Selected symbol must remain pinned. Top Gainers must use only fresh current-session observations.
+1. **Index feed:** prove 3/3 fresh exchange-timestamped index ticks during NSE hours with receipt ages and reconnect stability.
+2. **F&O feed and scanner:** prove selected underlying ticks, rotation/coverage age, fresh-only Top Gainers, and actual scanner admission/results. Do not label all 218 mapped underlyings as simultaneously live.
+3. **Option Chain and Account Feed:** capture successful response-derived health independently for Option Chain, positions and orderbook; absence of log entries is not recovery evidence.
+4. **Option and candle pipeline:** prove exact official contract identity (underlying, expiry, strike, CE/PE, lot/tick), fresh option ticks and contiguous completed option candles.
+5. **Nine-strategy Entry matrix:** prove positive and negative CE/PE paths across all nine strategies; preserve daily/15m/5m context, freshness, gap/duplicate/session checks and explicit rejection reasons.
+6. **Risk ledger:** independently verify Entry, SL, Target, exchange tick rounding, chase guard and RR >= 1:2 after rounding. Missing evidence => NO TRADE.
+7. **UI/runtime:** verify PWA update lifecycle, bounded non-overlapping polling, account feed cadence, and status labels that distinguish process health from trade readiness.
+8. **Release:** CI + Verify, explicit user approval, manual Render deploy, exact deployed SHA check, market-open acceptance and rollback record.
 
-### P1 — Entry test matrix incomplete
-**Finding:** Representative positive/negative tests exist for all nine strategy families and the CE option 3-candle path, but the documented full CE/PE × nine-strategy matrix, session-boundary matrix and exact risk-rounding matrix are not complete.
-**Closure:** Add table-driven CE and PE fixtures for each strategy, invalid contract/expiry/tick/candle-gap/duplicate/stale/late premium cases, exact tick rounding, chase >0.5R rejection, RR 1.99 rejection, and explicit NO TRADE outputs.
+## Safety and release controls
 
-### P2 — Strategy name/pattern expectation mismatch
-**Finding:** The nine strategy IDs include `BULLISH_CONTINUATION` and `BEARISH_CONTINUATION`; ascending/descending triangles, pennants and flags are variants reported as pattern metadata. `FLAG_BREAKOUT_VOLUME` is another distinct ID.
-**Closure:** Keep UI labels and user-facing documentation explicit about parent strategy vs pattern subtype. Add direct fixture tests for ascending triangle, descending triangle, pennant and flag subtypes.
-
-### P2 — Frontend polling verification incomplete
-**Finding:** Status polling has overlap protection and hidden-tab pause; account refresh is throttled to 120 seconds and universe refresh to 30 seconds. Full browser-level endpoint cadence, abort-on-symbol-change and rapid navigation tests remain open.
-**Closure:** Add browser/fake-timer tests that assert bounded requests, no overlap, no background polling, and cancellation of obsolete chart/option requests.
-
-### P2 — Documentation drift
-**Finding:** README said Node.js 20+ while `package.json`, Render `NODE_VERSION`, and GitHub Actions specify Node 22. The older reliability register referenced PR #85 and the pre-PR #86 8/minute history-only policy.
-**Closure:** README runtime statement corrected in this branch. Update the reliability register to reflect PR #86's global market/account REST governor and current deployment evidence before treating it as the current source of truth.
-
-### P2 — Operational evidence / rollback
-**Finding:** Deploy SHA and live event are verified, but a tested rollback/restore drill and a stable runtime evidence bundle are not recorded.
-**Closure:** Maintain a release record with approved SHA, CI + Verify runs, Render deploy ID, health output, post-deploy endpoint checks, market-session proof and rollback reference.
-
-## Required next phases
-
-1. **REST endpoint proof:** Option Chain, positions, orderbook, chart and Entry request path; source/path/priority/response/latency; no 1015 recurrence under controlled cadence.
-2. **WebSocket proof:** auth, reconnect, per-symbol ACK/tick identity, 3/3 fresh indices, selected underlying and selected option fresh ticks.
-3. **Scanner proof:** official master current, rotation cadence, actual per-symbol scan ledger, fresh-only Top Gainers and measured 218-universe rolling coverage.
-4. **Entry proof:** CE and PE, exact contract/expiry/strike/tick, three contiguous completed option candles, Entry/SL/Target/RR >= 2, no chase, explicit rejection reasons.
-5. **UI/runtime proof:** account polling, no overlap, browser PWA update, no misleading ready state.
-6. **Release proof:** CI and Verify pass, manual approval, deployed SHA confirmation, market-open acceptance, rollback record.
-
-## Non-negotiable safety
-- FYERS only; NSE only.
-- No synthetic, sample, stale or unverified actionable data.
-- Missing/stale/mismatched input means NO TRADE.
-- Orders stay disabled.
-- Auto-Deploy stays OFF; manual deploy only with explicit approval.
-- No legacy service changes and no paid dependencies.
-- This audit branch does not change production behavior.
+- FYERS only; NSE only; no synthetic, sample, stale or unverified actionable data.
+- Missing, stale or mismatched inputs mean NO TRADE.
+- Orders remain disabled.
+- Render Auto-Deploy remains OFF. No deployment without explicit user approval.
+- No legacy service changes, paid dependencies, or production backtest execution.
+- Closed-market tests and a successful Render deploy do not prove live-market readiness.
+- This report is documentation only; it does not authorize merge, deployment, secret changes, historical workflow execution or order placement.

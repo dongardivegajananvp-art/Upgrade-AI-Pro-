@@ -74,7 +74,7 @@ function normalizeCandles(response, {symbol, expiry, start, end}) {
   return rows;
 }
 async function writeOnce(file, value) {
-  const bytes = Buffer.from(JSON.stringify(value,null,2)+'\\n');
+  const bytes = Buffer.from(JSON.stringify(value,null,2)+'\n');
   try {
     const existing = await readFile(file);
     if (!existing.equals(bytes)) throw new Error('HISTORICAL_ARCHIVE_CONFLICT: refusing to overwrite different source evidence');

@@ -54,7 +54,7 @@ test('history-backed scanner advertises one new symbol per minute under the guar
 });
 
 
-test('WebSocket rotates eight new symbols per minute while REST history scan remains one per minute',()=>{
+test('WebSocket rotates one new symbol per minute to match one REST scan slot',()=>{
   assert.equal(FNO_SCAN_PER_SLICE,1);
   assert.equal(FNO_SOCKET_ROTATION_ADVANCE,1);
   const visited=new Set();
@@ -84,7 +84,7 @@ test('one-symbol-per-minute rotation keeps every symbol active for twenty scan s
   let start=0;
   for(let minute=0;minute<slots;minute++){
     const active=buildFnoRotationSlice(universe,start,slots);
-    assert.ok(active.includes(universe[0].symbol));
+    assert.ok(active.includes(universe[19].symbol));
     start=getNextFnoRotationIndex(total,start,advance);
   }
   assert.equal(start,20);

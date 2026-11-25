@@ -52,9 +52,9 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandl
 // This is not a claim of an external generative-AI model or paid AI service.
 export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
   const valid = rows => Array.isArray(rows) && rows.length && rows.every(c =>
-    c && ['time','open','high','low','close','volume'].every(k => Number.isFinite(Number(c[k]))) &&
+    c && ['time','open','high','low','close'].every(k => Number.isFinite(Number(c[k]))) &&
     Number(c.time)>0 && Number(c.open)>0 && Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low)) &&
-    Number(c.low)<=Math.min(Number(c.open),Number(c.close)) && Number(c.volume)>=0);
+    Number(c.low)<=Math.min(Number(c.open),Number(c.close)));
   if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
   if (!contiguousWindow(candles,20)) return {status:'UNAVAILABLE',reason:'The latest 20 completed 5-minute research candles must be contiguous across verified NSE sessions'};
   if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
@@ -228,7 +228,6 @@ export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, s
     candleTime:number(candle.time),breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
     retestSequenceVerified:Boolean(requireLevelCross)};
 }
-export const confirmBreakoutPressureVolume = confirmStrategyTriggerCandle;
 
 function candidate(strategy, side, level, candle, details={}) {
   if (!finite(level) || number(level)<=0) return null;
@@ -264,6 +263,9 @@ export function detectContinuation(rows, side) {
   const last=rows.at(-1), prior=rows.slice(-13,-1);
   const impulse=rows.slice(-30,-13);
   if(prior.length!==12||impulse.length<10)return null;
+  const flagDrift=number(prior.at(-1).close)-number(prior[0].close);
+  // Counter-trend pullback flags belong to the dedicated flag-breakout rule.
+  if((side==='LONG'&&flagDrift<0)||(side==='SHORT'&&flagDrift>0))return null;
   const move=side==='LONG'
     ? number(impulse.at(-1).close)-number(impulse[0].close)
     : number(impulse[0].close)-number(impulse.at(-1).close);
@@ -285,9 +287,17 @@ export function detectFlagVolume(rows) {
   const last=rows.at(-1),flag=rows.slice(-13,-1),impulse=rows.slice(-30,-13);
   if(flag.length!==12||impulse.length!==17||!last)return null;
   const high=Math.max(...flag.map(c=>number(c.high))),low=Math.min(...flag.map(c=>number(c.low)));
+  const impulseHigh=Math.max(...impulse.map(c=>number(c.high))),impulseLow=Math.min(...impulse.map(c=>number(c.low)));
+  const impulseRange=impulseHigh-impulseLow,flagRange=high-low;
   const impulseUp=number(impulse.at(-1).close)>number(impulse[0].close);
   const impulseDown=number(impulse.at(-1).close)<number(impulse[0].close);
-  // Pure price-structure flag; no volume contraction or breakout-volume filter.
+  const flagDrift=number(flag.at(-1).close)-number(flag[0].close);
+  // Dedicated flag setup requires a compact counter-trend pullback.
+  if((impulseUp&&flagDrift>=0)||(impulseDown&&flagDrift<=0))return null;
+  // Pure price-structure flag: require a real impulse and a compact flag range
+  // (<=50% of the impulse range), then a completed close outside that range.
+  // Volume contraction and breakout-volume filters are intentionally absent.
+  if(!(impulseRange>0&&flagRange>0&&flagRange<=impulseRange*0.5))return null;
   if(impulseUp&&number(last.close)>high)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last,{pattern:'BULL_FLAG_PRICE_BREAKOUT'});
   if(impulseDown&&number(last.close)<low)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last,{pattern:'BEAR_FLAG_PRICE_BREAKDOWN'});
   return null;
@@ -303,7 +313,7 @@ export function detectOpeningRange(rows, sessionStartMinute = 555) {
   };
   // The first completed 5-minute candle defines the opening high/low.
   // A live tick alone is not a breakout candle: wait for the actual 5-minute
-  // candle to close outside the range so its direction and volume can be checked.
+  // candle to close outside the range before it can be treated as a breakout.
   const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
   const last=day.at(-1),prior=day.at(-2);
   if(first&&last){
@@ -441,7 +451,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
   const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now);
   consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (trigger candle plus at least one same-session volume reference)','Latest completed 5-minute close did not break the previous completed candle high');
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
   consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed FYERS daily candles with the latest completed session within five calendar days','Daily and 5-minute EMA20/EMA50 alignment, EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);

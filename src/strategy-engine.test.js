@@ -40,15 +40,15 @@ function pressureVolumeRows(side='LONG') {
     : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
   return rows;
 }
-test('common confirmation requires strong bullish pressure and at least 1.5x available prior same-session volume', () => {
+test('common confirmation requires bullish pressure and at least 1.25x available prior same-session volume', () => {
   const rows=pressureVolumeRows('LONG');
   const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows.at(-1).time);
   assert.equal(result.ok,true);
   assert.equal(result.pressure,'BUYING');
   assert.equal(result.relativeVolume,1.6);
-  assert.ok(result.bodyStrength>=0.55);
+  assert.ok(result.bodyStrength>=0.50);
 });
-test('common confirmation requires strong bearish pressure and at least 1.5x available prior same-session volume', () => {
+test('common confirmation requires bearish pressure and at least 1.25x available prior same-session volume', () => {
   const rows=pressureVolumeRows('SHORT');
   const result=confirmBreakoutPressureVolume(rows,'SHORT',99,rows.at(-1).time);
   assert.equal(result.ok,true);
@@ -62,14 +62,29 @@ test('common confirmation rejects weak body pressure even when volume is high', 
   assert.equal(result.ok,false);
   assert.match(result.reason,/Buying pressure is weak/);
 });
-test('common confirmation rejects volume below 1.5x the available prior same-session average', () => {
+test('common confirmation rejects volume below 1.25x the available prior same-session average', () => {
   const rows=pressureVolumeRows('LONG');
-  rows[20]={...rows[20],volume:149};
+  rows[20]={...rows[20],volume:124};
   const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time);
   assert.equal(result.ok,false);
-  assert.match(result.reason,/1.5x/);
+  assert.match(result.reason,/1.25x/);
 });
-test('relative-volume baseline has no 20-candle cap and uses all prior contiguous same-session candles', () => {
+test('pressure threshold accepts 50% body and a close within the top/bottom 35%, but no weaker candle', () => {
+  const bullish=pressureVolumeRows('LONG');
+  bullish[20]={...bullish[20],open:100,high:104,low:99,close:102.5,volume:125};
+  const buy=confirmBreakoutPressureVolume(bullish,'LONG',101,bullish[20].time);
+  assert.equal(buy.ok,true);
+  assert.equal(buy.bodyStrength,0.5);
+  assert.equal(buy.relativeVolume,1.25);
+
+  const bearish=pressureVolumeRows('SHORT');
+  bearish[20]={...bearish[20],open:100,high:101,low:96,close:97.5,volume:125};
+  const sell=confirmBreakoutPressureVolume(bearish,'SHORT',99,bearish[20].time);
+  assert.equal(sell.ok,true);
+  assert.equal(sell.bodyStrength,0.5);
+  assert.equal(sell.relativeVolume,1.25);
+});
+\ntest('relative-volume baseline has no 20-candle cap and uses all prior contiguous same-session candles', () => {
   const start=1800000000;
   const rows=Array.from({length:31},(_,i)=>({
     time:start+i*300,open:100,high:101,low:99,close:100,volume:100
@@ -430,7 +445,8 @@ test('flag-volume detector requires contracting flag volume and a high-volume br
     rows.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:200});
   }
   for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:100});
-  rows.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:200});
+  rows.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:125});
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?124:c.volume}))),null);
   assert.equal(detectFlagVolume(rows)?.side,'LONG');
   assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:200}))),null);
 });

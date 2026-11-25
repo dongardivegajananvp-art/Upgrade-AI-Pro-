@@ -106,9 +106,11 @@ test('verified history chart survives option-chain and research failures', () =>
   const selectionFlow = app.slice(start, end);
   const chartRender = selectionFlow.indexOf('drawHistoryChart(data.candles)');
   const optionFlow = selectionFlow.indexOf('await loadOptionChain');
-  const researchFlow = selectionFlow.indexOf('/api/research-context');
+  const researchFlow = selectionFlow.indexOf('await ensureResearchContext(symbol)');
   assert.ok(chartRender >= 0 && optionFlow > chartRender && researchFlow > chartRender,
     'chart is rendered before downstream option and research requests');
+  assert.match(app, /fetch\('\/api\/research-context\?symbol='/,
+    'research context is fetched by the shared warmup gate');
   const postHistory = selectionFlow.slice(chartRender);
   const downstream = selectionFlow.slice(optionFlow);
   assert.match(postHistory, /OPTION CHAIN UNAVAILABLE/);
@@ -295,4 +297,28 @@ test('PWA updates activate the versioned shell, evict old caches and never inter
   assert.match(serviceWorker, /self\.clients\.claim\(\)/);
   assert.match(serviceWorker, /keys\.filter\(k=>k!==CACHE\)/);
   assert.match(serviceWorker, /u\.pathname\.startsWith\('\/api\/'\)\)return/);
+});
+
+test('live setup history requests are sequenced and never weaken the shared REST governor', () => {
+  const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
+  const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);
+  const flow = server.slice(start, end);
+  const reads = [
+    "const underlyingHistory = await getFiveMinuteHistory",
+    "const optionHistory = await getFiveMinuteHistory",
+    "const dailyHistory = await getDailyHistory",
+    "const fifteenMinuteHistory = await getFifteenMinuteHistory"
+  ].map(token => flow.indexOf(token));
+  assert.ok(reads.every(index => index >= 0), 'all four verified history inputs remain required');
+  assert.deepEqual(reads, [...reads].sort((a, b) => a - b), 'history requests are sequential');
+  assert.doesNotMatch(flow, /Promise\.all\(/, 'setup history reads are not queued as a burst');
+  assert.match(flow, /REST_PRIORITY\.ENTRY/, 'all setup reads retain ENTRY priority');
+});
+
+test('entry evaluation waits for verified daily and 15m context and account polling yields to REST work', () => {
+  assert.match(app, /if \(researchContextReadySymbol !== selectedSymbol\) return/);
+  assert.match(app, /researchContextLoadingPromise/);
+  assert.match(app, /researchContextRetryAt = Date\.now\(\) \+ 15_000/);
+  assert.match(app, /accountRefreshSafe = !restState\.cooldownActive/);
+  assert.match(app, /Number\(restState\.requestsThisMinute \|\| 0\) < 4/);
 });

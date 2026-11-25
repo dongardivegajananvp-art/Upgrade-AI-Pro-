@@ -29,6 +29,7 @@ let setupOptionTrigger = null;
 let setupRetryAfter = 0;
 let researchContextReadySymbol = null;
 let researchContextLoadingSymbol = null;
+let researchContextLoadingPromise = null;
 let researchContextRetryAt = 0;
 const ACCOUNT_REFRESH_INTERVAL_MS = 120_000;
 let lastAccountRefresh = 0;
@@ -522,24 +523,34 @@ async function readJsonResponse(response, endpoint) {
   }
 }
 async function ensureResearchContext(symbol) {
-  if (!symbol || researchContextReadySymbol === symbol || researchContextLoadingSymbol === symbol || Date.now() < researchContextRetryAt) return;
+  if (!symbol || researchContextReadySymbol === symbol || Date.now() < researchContextRetryAt) return;
+  if (researchContextLoadingSymbol === symbol && researchContextLoadingPromise) return researchContextLoadingPromise;
   researchContextLoadingSymbol = symbol;
+  const pending = (async () => {
+    try {
+      const response = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+      const payload = await readJsonResponse(response, 'RESEARCH CONTEXT /api/research-context');
+      if (!response.ok) throw new Error(payload.reason || 'Research context request failed · HTTP ' + response.status);
+      if (selectedSymbol === symbol) {
+        researchContextReadySymbol = symbol;
+        researchContextRetryAt = 0;
+      }
+    } catch (error) {
+      if (selectedSymbol === symbol) {
+        researchContextRetryAt = Date.now() + 15_000;
+        document.querySelector('#research-status').textContent = 'RESEARCH CONTEXT WAITING · NO TRADE';
+      }
+      throw error;
+    }
+  })();
+  researchContextLoadingPromise = pending;
   try {
-    const response = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
-    const payload = await readJsonResponse(response, 'RESEARCH CONTEXT /api/research-context');
-    if (!response.ok) throw new Error(payload.reason || 'Research context request failed · HTTP ' + response.status);
-    if (selectedSymbol === symbol) {
-      researchContextReadySymbol = symbol;
-      researchContextRetryAt = 0;
-    }
-  } catch (error) {
-    if (selectedSymbol === symbol) {
-      researchContextRetryAt = Date.now() + 15_000;
-      document.querySelector('#research-status').textContent = 'RESEARCH CONTEXT WAITING · NO TRADE';
-    }
-    throw error;
+    await pending;
   } finally {
-    if (researchContextLoadingSymbol === symbol) researchContextLoadingSymbol = null;
+    if (researchContextLoadingSymbol === symbol && researchContextLoadingPromise === pending) {
+      researchContextLoadingSymbol = null;
+      researchContextLoadingPromise = null;
+    }
   }
 }
 async function selectSymbol(symbol, livePrice = null) {

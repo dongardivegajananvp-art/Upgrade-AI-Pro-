@@ -86,7 +86,7 @@ async function refreshUniverseScan() {
       const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
       const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
       card.append(head,evidence,target,reason);
-      card.addEventListener('click',()=>selectSymbol(item.symbol));
+      card.addEventListener('click',()=>void selectCandidateForEntry(item));
       container.append(card);
     }
     if(!(data.top3||[]).length) {
@@ -1250,6 +1250,24 @@ async function evaluateSelectedSetup() {
   } catch(error) { setupEvaluationDone=true; setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
+async function selectCandidateForEntry(candidate) {
+  const symbol=String(candidate?.symbol||'').trim();
+  const side=candidate?.side==='LONG'?'CE':candidate?.side==='SHORT'?'PE':null;
+  if(!symbol||!side)return;
+  // A verified Top-3 underlying setup already has its directional side and
+  // completed multi-timeframe research. Carry that direction into the official
+  // FYERS option-chain selection instead of requiring a second manual CE/PE guess.
+  await selectSymbol(symbol);
+  if(selectedSymbol!==symbol)return;
+  if(researchContextReadySymbol!==symbol) {
+    try { await ensureResearchContext(symbol); }
+    catch { return; }
+  }
+  if(selectedSymbol!==symbol||researchContextReadySymbol!==symbol)return;
+  selectedOptionSide=side;
+  await autoSelectDirectionalOption(side);
+}
+
 async function autoSelectDirectionalOption(optionSide) {
   const requestGeneration=++optionSelectionGeneration;
   const requestedUnderlying=selectedSymbol,requestedSide=optionSide;

@@ -346,17 +346,11 @@ test('opening-range setup confirms first breakout after the opening candle witho
   assert.equal('relativeVolume' in confirmation,false);
 });
 
-test('breakout candle confirmation enforces directional pressure and relative volume', () => {
-  const bullishRows=pressureVolumeRows('LONG');
-  const bearishRows=pressureVolumeRows('SHORT');
-  assert.equal(confirmBreakoutPressureVolume(bullishRows,'LONG',101,bullishRows.at(-1).time).ok,true);
-  assert.equal(confirmBreakoutPressureVolume(bearishRows,'SHORT',99,bearishRows.at(-1).time).ok,true);
-  const noVolume=pressureVolumeRows('LONG'); noVolume[20]={...noVolume[20],volume:0};
-  assert.equal(confirmBreakoutPressureVolume(noVolume,'LONG',101,noVolume[20].time).ok,false);
-  const weak=pressureVolumeRows('LONG'); weak[20]={...weak[20],close:100.5};
-  assert.equal(confirmBreakoutPressureVolume(weak,'LONG',101,weak[20].time).ok,false);
+test('legacy confirmation export no longer applies pressure or volume filters',()=>{
+  const rows=pressureVolumeRows('LONG');
+  rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
+  assert.equal(confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time).ok,true);
 });
-
 
 // Direct detector fixtures supplement the aggregate ledger tests. These
 // fixtures exercise representative positive and negative paths without

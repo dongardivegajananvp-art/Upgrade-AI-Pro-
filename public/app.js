@@ -574,7 +574,18 @@ async function selectSymbol(symbol, livePrice = null) {
   setupOptionTrigger = null; setupRetryAfter = 0;
   chartSetupLevels = null;
   setupEvaluationDone = false;
+  setupEvaluationRunning = false;
   chartLiveCandle = null;
+  // A prior index selection must not leave index-only labels visible while a
+  // stock is loading. Reset every dependent panel immediately on symbol change.
+  document.querySelector('#setup-state').textContent = 'STOCK SELECTED · VERIFYING LIVE DATA';
+  document.querySelector('#setup-state').dataset.state = 'blocked';
+  document.querySelector('#chart-candle-status').textContent = 'COMPLETED STOCK CANDLES · LIVE CANDLE VERIFYING';
+  document.querySelector('#research-status').textContent = 'STOCK RESEARCH · LOADING VERIFIED CONTEXT';
+  document.querySelector('#research-results').textContent = 'Waiting for verified daily and 15-minute context. No setup is inferred.';
+  document.querySelector('#option-status').textContent = 'LOADING VERIFIED FYERS OPTION CHAIN';
+  document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
+  document.querySelector('#option-quantity').textContent = '—';
   const title = document.querySelector('#symbol');
   const area = document.querySelector('#chart-area');
   title.textContent = symbol + ' · LOADING VERIFIED FYERS HISTORY';

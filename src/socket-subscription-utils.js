@@ -11,6 +11,15 @@ export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols =
   };
 }
 
+// Keep the currently selected option ahead of background F&O subscriptions.
+// The caller still sends one symbol per paced batch; this only changes FIFO order.
+export function prioritizeSubscriptionQueue(pendingSymbols = [], prioritySymbol = null) {
+  const queue = [...new Set((Array.isArray(pendingSymbols) ? pendingSymbols : [])
+    .filter(symbol => typeof symbol === 'string' && symbol))];
+  if (typeof prioritySymbol !== 'string' || !prioritySymbol || !queue.includes(prioritySymbol)) return queue;
+  return [prioritySymbol, ...queue.filter(symbol => symbol !== prioritySymbol)];
+}
+
 export function splitSubscriptionBatches(symbols = [], batchSize = 4) {
   const size = Math.max(1, Math.floor(Number(batchSize) || 4));
   const unique = [...new Set((Array.isArray(symbols) ? symbols : []).filter(symbol => typeof symbol === 'string' && symbol))];

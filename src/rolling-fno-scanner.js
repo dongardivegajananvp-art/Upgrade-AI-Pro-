@@ -8,6 +8,7 @@ export const FNO_SCAN_PER_SLICE = 1;
 // guarded one-history-scan/minute cadence: every active symbol gets a scan slot
 // before it leaves the 20-symbol socket slice.
 export const FNO_SOCKET_ROTATION_ADVANCE = 1;
+export const FNO_SYMBOL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);
 }
@@ -54,7 +55,7 @@ export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount =
   return [...new Set(slice)];
 }
 
-export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scanLedger = new Map(), now = Date.now()) {
+export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scanLedger = new Map(), now = Date.now(), minRescanIntervalMs = FNO_SYMBOL_RESCAN_COOLDOWN_MS) {
   if (!Array.isArray(activeSymbols) || !activeSymbols.length) return null;
   const eligible = activeSymbols.filter(symbol => {
     const tick = ticks.get(symbol);
@@ -64,17 +65,22 @@ export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scan
       now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10);
   });
   if (!eligible.length) return null;
-  // Unscanned symbols first, then the oldest actual attempt. Stable active-slice
-  // order breaks ties; stale symbols never consume the one-per-minute REST slot.
-  eligible.sort((a, b) => {
-    const stamp = symbol => {
-      const row = scanLedger.get(symbol);
-      const value = Date.parse(row?.scannedAt || row?.attemptedAt || '');
-      return Number.isFinite(value) ? value : 0;
-    };
-    return stamp(a) - stamp(b);
+  const lastAttempt = symbol => {
+    const row = scanLedger.get(symbol);
+    const stamp = Date.parse(row?.scannedAt || row?.attemptedAt || '');
+    return Number.isFinite(stamp) ? stamp : null;
+  };
+  // Fresh symbols with no recorded attempt always win. A previously scanned
+  // symbol cannot consume another REST slot until its cooldown has elapsed.
+  const unscanned = eligible.filter(symbol => lastAttempt(symbol) === null);
+  if (unscanned.length) return unscanned[0];
+  const due = eligible.filter(symbol => {
+    const stamp = lastAttempt(symbol);
+    return stamp !== null && now - stamp >= Math.max(0, Number(minRescanIntervalMs) || 0);
   });
-  return eligible[0];
+  if (!due.length) return null;
+  due.sort((a, b) => lastAttempt(a) - lastAttempt(b));
+  return due[0];
 }
 
 export function getFnoScanBatchSize(universeCount, startIndex = 0, scanPerSlice = FNO_SCAN_PER_SLICE) {

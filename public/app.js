@@ -243,6 +243,16 @@ async function refresh() {
       }
     }
     const indices = md.indices || {};
+    if (selectedSymbol && labels.some(([symbol]) => symbol === selectedSymbol)) {
+      const indexTick = indices[selectedSymbol];
+      chartLiveCandle = indexTick?.fresh ? indexTick.liveCandle || null : null;
+      if (!chartGestureActive) renderChartViewport();
+      renderLiveCandleSummary(indexTick || null);
+      const candleStatus = document.querySelector('#chart-candle-status');
+      if (candleStatus) candleStatus.textContent = indexTick?.fresh && chartLiveCandle
+        ? 'INDEX LIVE CANDLE · FYERS EXCHANGE TICK FRESH'
+        : 'INDEX HISTORY · WAITING FOR FRESH LIVE CANDLE';
+    }
     const nseSessionOpen = isNseRegularSession(Date.now());
     let freshCount = 0;
     for (const [symbol, priceId, changeId] of labels) {

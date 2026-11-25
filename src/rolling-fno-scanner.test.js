@@ -97,7 +97,9 @@ test('scanner does not spend another REST slot rescanning the same symbol inside
   const ticks=new Map([[symbol,tick]]);
   const ledger=new Map([[symbol,{scannedAt:new Date(now-8000).toISOString()}]]);
   assert.equal(getNextFreshFnoScanSymbol([symbol],ticks,ledger,now),null);
-  assert.equal(getNextFreshFnoScanSymbol([symbol],ticks,ledger,now+FNO_SYMBOL_RESCAN_COOLDOWN_MS),symbol);
+  const later=now+FNO_SYMBOL_RESCAN_COOLDOWN_MS;
+  ticks.set(symbol,{symbol,price:100,receivedAt:later,exchangeTime:later/1000});
+  assert.equal(getNextFreshFnoScanSymbol([symbol],ticks,ledger,later),symbol);
 });
 
 test('fresh never-scanned symbol takes priority over a due previously scanned symbol',()=>{

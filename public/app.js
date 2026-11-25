@@ -670,13 +670,14 @@ async function selectSymbol(symbol, livePrice = null) {
   // there, while the already-rendered history chart remains intact.
   try {
     await ensureResearchContext(symbol);
-    if (selectedSymbol !== symbol || researchContextReadySymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration || researchContextReadySymbol !== symbol) return;
     const researchResponse = await fetch('/api/research?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
     const researchPayload = await readJsonResponse(researchResponse, 'RESEARCH /api/research');
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     if (!researchResponse.ok) throw new Error(researchPayload.reason || 'Research request failed · HTTP ' + researchResponse.status);
-    if (selectedSymbol === symbol) renderResearchResults(researchPayload);
+    renderResearchResults(researchPayload);
   } catch (error) {
-    if (selectedSymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     document.querySelector('#research-status').textContent = 'RESEARCH UNAVAILABLE · NO TRADE';
     const results = document.querySelector('#research-results');
     results.replaceChildren();

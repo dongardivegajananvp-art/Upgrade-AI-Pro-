@@ -285,7 +285,7 @@ function isFnoMasterCurrent() {
 }
 function getSessionMarketData() {
   const market = getMarketData();
-  if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) {
+  if (!isFnoMasterCurrent()) {
     market.fno = {
       ...market.fno,
       status:'SYMBOL_MASTER_NOT_LOADED',

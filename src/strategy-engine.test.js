@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmBreakoutPressureVolume, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagVolume, detectDailyTrendPullback } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagVolume, detectDailyTrendPullback } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -33,7 +33,7 @@ test('duplicate active underlying or option contract is rejected', () => {
 });
 
 
-function pressureVolumeRows(side='LONG') {
+function candleRows(side='LONG') {
   const rows=Array.from({length:21},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[20]=side==='LONG'
     ? {time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:160}
@@ -41,7 +41,7 @@ function pressureVolumeRows(side='LONG') {
   return rows;
 }
 test('strategy trigger ignores candle pressure and volume entirely',()=>{
-  const rows=pressureVolumeRows('LONG');
+  const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
   const result=confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time);
   assert.equal(result.ok,true);
@@ -50,7 +50,7 @@ test('strategy trigger ignores candle pressure and volume entirely',()=>{
   assert.equal('pressure' in result,false);
 });
 test('retest trigger still requires original completed-candle price-level cross',()=>{
-  const rows=pressureVolumeRows('LONG');
+  const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:103,low:99.5,close:102.8,volume:0};
   rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:0};
   const retest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,true);
@@ -340,7 +340,7 @@ test('opening-range setup confirms first breakout after the opening candle witho
   const setup=detectOpeningRange([...baseline,breakout],555,103);
   assert.equal(setup.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(setup.side,'LONG');
-  const confirmation=confirmBreakoutPressureVolume([...baseline,breakout],'LONG',101,breakout.time);
+  const confirmation=confirmStrategyTriggerCandle([...baseline,breakout],'LONG',101,breakout.time);
   assert.equal(confirmation.ok,true);
   assert.equal(confirmation.candleTime,breakout.time);
   assert.equal('pressure' in confirmation,false);
@@ -348,9 +348,9 @@ test('opening-range setup confirms first breakout after the opening candle witho
 });
 
 test('legacy confirmation export no longer applies pressure or volume filters',()=>{
-  const rows=pressureVolumeRows('LONG');
+  const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
-  assert.equal(confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time).ok,true);
+  assert.equal(confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time).ok,true);
 });
 
 // Direct detector fixtures supplement the aggregate ledger tests. These

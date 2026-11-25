@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
@@ -298,7 +298,7 @@ function applyFnoRotation(advance = false) {
     return;
   }
   const nextIndex=advance&&universe.length>MAX_UNDERLYING_SLOTS
-    ? getNextFnoRotationIndex(universe.length,rotationIndex,SCAN_PER_SLICE) : rotationIndex;
+    ? getNextFnoRotationIndex(universe.length,rotationIndex,FNO_SOCKET_ROTATION_ADVANCE) : rotationIndex;
   const next=nextSlice(nextIndex);
   if (!next.length) {
     activeFnoSymbols = [];
@@ -533,7 +533,7 @@ export function getMarketData(now = Date.now()) {
     const tick = ticks.get(symbol) || null;
     indices[symbol] = tick ? { ...tick, fresh: isFresh(tick, now), liveCandle: isFresh(tick, now) && indexLiveCandles.has(symbol) ? { ...indexLiveCandles.get(symbol) } : null } : null;
   }
-  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: SCAN_PER_SLICE, rotationIntervalMs: ROTATION_INTERVAL_MS });
+  const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: MAX_UNDERLYING_SLOTS, rotationIntervalMs: ROTATION_INTERVAL_MS });
   const topGainers = rolling.topGainers;
   const optionTick = selectedOptionSymbol ? ticks.get(selectedOptionSymbol) || null : null;
   const activeFnoTicks = activeFnoSymbols.map(symbol => ({ symbol, tick: ticks.get(symbol) || null }));

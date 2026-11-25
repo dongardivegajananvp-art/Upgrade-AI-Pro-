@@ -228,7 +228,6 @@ export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, s
     candleTime:number(candle.time),breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
     retestSequenceVerified:Boolean(requireLevelCross)};
 }
-export const confirmBreakoutPressureVolume = confirmStrategyTriggerCandle;
 
 function candidate(strategy, side, level, candle, details={}) {
   if (!finite(level) || number(level)<=0) return null;

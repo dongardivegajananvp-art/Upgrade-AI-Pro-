@@ -624,12 +624,14 @@ const server = http.createServer(async (req,res) => {
       const setup = await setupEvaluationFlight.run(flightKey, async () => {
         const startedAt = Date.now();
         console.info('[SETUP_EVAL] started:',JSON.stringify({underlying:body.underlying,contract:body.contract,contractSide:contract.side,strike:contract.strike,expiry:contract.expiry}));
-        const [underlyingHistory,optionHistory,dailyHistory,fifteenMinuteHistory] = await Promise.all([
-          getFiveMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-5m'),
-          getFiveMinuteHistory(body.contract,Date.now(),REST_PRIORITY.ENTRY,'setup-option-5m'),
-          getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily'),
-          getFifteenMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-15m')
-        ]);
+        // Load the setup's history inputs sequentially. Promise.all queued four
+        // ENTRY jobs at once; with the mandatory 4-second REST gap, the final
+        // job could expire before dispatch even when the upstream was healthy.
+        // Each history accessor reuses its verified in-memory cache / single-flight.
+        const underlyingHistory = await getFiveMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-5m');
+        const optionHistory = await getFiveMinuteHistory(body.contract,Date.now(),REST_PRIORITY.ENTRY,'setup-option-5m');
+        const dailyHistory = await getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily');
+        const fifteenMinuteHistory = await getFifteenMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-15m');
         console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,
           underlying5mCount:underlyingHistory.candles.length,

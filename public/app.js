@@ -27,6 +27,10 @@ let setupEvaluationDone = false;
 let setupLastBucket = null;
 let setupOptionTrigger = null;
 let setupRetryAfter = 0;
+let researchContextReadySymbol = null;
+let researchContextLoadingSymbol = null;
+let researchContextLoadingPromise = null;
+let researchContextRetryAt = 0;
 const ACCOUNT_REFRESH_INTERVAL_MS = 120_000;
 let lastAccountRefresh = 0;
 let lastUniverseScanRefresh = 0;
@@ -185,7 +189,10 @@ async function refresh() {
     const r = await fetch('/api/status',{cache:'no-store'});
     if (!r.ok) throw new Error('status unavailable');
     const s = await r.json();
-    if (s.auth?.tokenStored && Date.now() - lastAccountRefresh >= ACCOUNT_REFRESH_INTERVAL_MS) refreshAccount();
+    const restState = s.rest || {};
+    const accountRefreshSafe = !restState.cooldownActive && !restState.queueDrainActive &&
+      Number(restState.queueDepth || 0) === 0 && Number(restState.requestsThisMinute || 0) < 4;
+    if (s.auth?.tokenStored && Date.now() - lastAccountRefresh >= ACCOUNT_REFRESH_INTERVAL_MS && accountRefreshSafe) refreshAccount();
     else if (!s.auth?.tokenStored) {
       document.querySelector('#positions-data').textContent = 'Connect FYERS to read current-day positions and P&L.';
       document.querySelector('#orders-data').textContent = 'Connect FYERS to read today’s order status.';
@@ -195,6 +202,9 @@ async function refresh() {
     const md = s.marketData || {};
     if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
     renderMovers(md.fno || {});
+    if (selectedSymbol && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
+      void ensureResearchContext(selectedSymbol).catch(() => {});
+    }
     const optionTick = md.selectedOption;
     const underlyingTick = md.selectedUnderlying;
     // Restore the backend's selected chart symbol after a page reload; otherwise
@@ -472,7 +482,7 @@ function renderMovers(fno) {
 }
 async function selectIndexSymbol(symbol) {
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
-  selectedSymbol = symbol; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
+  selectedSymbol = symbol; researchContextReadySymbol = null; researchContextRetryAt = 0; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
   title.textContent=symbol+' · LOADING VERIFIED FYERS INDEX HISTORY';
@@ -512,12 +522,45 @@ async function readJsonResponse(response, endpoint) {
     throw new Error(endpoint + ' returned non-JSON response · HTTP ' + response.status + ' · ' + contentType);
   }
 }
+async function ensureResearchContext(symbol) {
+  if (!symbol || researchContextReadySymbol === symbol || Date.now() < researchContextRetryAt) return;
+  if (researchContextLoadingSymbol === symbol && researchContextLoadingPromise) return researchContextLoadingPromise;
+  researchContextLoadingSymbol = symbol;
+  const pending = (async () => {
+    try {
+      const response = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
+      const payload = await readJsonResponse(response, 'RESEARCH CONTEXT /api/research-context');
+      if (!response.ok) throw new Error(payload.reason || 'Research context request failed · HTTP ' + response.status);
+      if (selectedSymbol === symbol) {
+        researchContextReadySymbol = symbol;
+        researchContextRetryAt = 0;
+      }
+    } catch (error) {
+      if (selectedSymbol === symbol) {
+        researchContextRetryAt = Date.now() + 15_000;
+        document.querySelector('#research-status').textContent = 'RESEARCH CONTEXT WAITING · NO TRADE';
+      }
+      throw error;
+    }
+  })();
+  researchContextLoadingPromise = pending;
+  try {
+    await pending;
+  } finally {
+    if (researchContextLoadingSymbol === symbol && researchContextLoadingPromise === pending) {
+      researchContextLoadingSymbol = null;
+      researchContextLoadingPromise = null;
+    }
+  }
+}
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol) return;
   // A persisted chart is display-only. Selecting that same symbol must still
   // fetch current verified FYERS history; never let a cache hit suppress reload.
   if (symbol === selectedSymbol && !chartRestoredFromCache) return;
   selectedSymbol = symbol;
+  researchContextReadySymbol = null;
+  researchContextRetryAt = 0;
   chartRestoredFromCache = false;
   resetChartViewport();
   setupOptionTrigger = null; setupRetryAfter = 0;
@@ -587,9 +630,8 @@ async function selectSymbol(symbol, livePrice = null) {
   // Research is an independent panel: malformed/HTML responses are diagnosed
   // there, while the already-rendered history chart remains intact.
   try {
-    const contextResponse = await fetch('/api/research-context?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
-    const contextPayload = await readJsonResponse(contextResponse, 'RESEARCH CONTEXT /api/research-context');
-    if (!contextResponse.ok) throw new Error(contextPayload.reason || 'Research context request failed · HTTP ' + contextResponse.status);
+    await ensureResearchContext(symbol);
+    if (selectedSymbol !== symbol || researchContextReadySymbol !== symbol) return;
     const researchResponse = await fetch('/api/research?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
     const researchPayload = await readJsonResponse(researchResponse, 'RESEARCH /api/research');
     if (!researchResponse.ok) throw new Error(researchPayload.reason || 'Research request failed · HTTP ' + researchResponse.status);
@@ -1054,6 +1096,10 @@ function renderResearchResults(setup) {
   }
 }
 async function evaluateSelectedSetup() {
+  // Do not race the option-triggered entry evaluation against the lower-priority
+  // daily/15m context warmup. Once context is ready, these histories are cached
+  // and the setup can fetch only genuinely missing inputs.
+  if (researchContextReadySymbol !== selectedSymbol) return;
   if (setupEvaluationRunning || setupEvaluationDone || !selectedSymbol || !selectedContractSymbol) return;
   setupEvaluationRunning = true;
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;

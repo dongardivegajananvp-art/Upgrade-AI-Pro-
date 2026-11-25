@@ -84,7 +84,8 @@ test('pressure threshold accepts 50% body and a close within the top/bottom 35%,
   assert.equal(sell.bodyStrength,0.5);
   assert.equal(sell.relativeVolume,1.25);
 });
-\ntest('relative-volume baseline has no 20-candle cap and uses all prior contiguous same-session candles', () => {
+
+test('relative-volume baseline has no 20-candle cap and uses all prior contiguous same-session candles', () => {
   const start=1800000000;
   const rows=Array.from({length:31},(_,i)=>({
     time:start+i*300,open:100,high:101,low:99,close:100,volume:100

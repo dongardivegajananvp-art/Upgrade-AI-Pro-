@@ -4,9 +4,10 @@
 // One history-backed scanner slot per minute is the honest safe cadence until the
 // scanner is moved to verified WebSocket-built candles or a measured larger budget.
 export const FNO_SCAN_PER_SLICE = 1;
-// WebSocket coverage is independent of REST history admission: rotate eight new
-// symbols per minute while retaining a 20-symbol overlap for stable live ticks.
-export const FNO_SOCKET_ROTATION_ADVANCE = 8;
+// Keep each symbol subscribed for a full 20-minute window. This matches the
+// guarded one-history-scan/minute cadence: every active symbol gets a scan slot
+// before it leaves the 20-symbol socket slice.
+export const FNO_SOCKET_ROTATION_ADVANCE = 1;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);
 }
@@ -51,6 +52,29 @@ export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount =
   for(let i=0;i<count;i++)slice.push(symbols[(start+i)%symbols.length]);
   if(selectedSymbol&&symbols.includes(selectedSymbol)&&!slice.includes(selectedSymbol))slice[slice.length-1]=selectedSymbol;
   return [...new Set(slice)];
+}
+
+export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scanLedger = new Map(), now = Date.now()) {
+  if (!Array.isArray(activeSymbols) || !activeSymbols.length) return null;
+  const eligible = activeSymbols.filter(symbol => {
+    const tick = ticks.get(symbol);
+    return Boolean(tick && Number.isFinite(Number(tick.price)) && Number(tick.price) > 0 &&
+      Number.isFinite(Number(tick.receivedAt)) && now - Number(tick.receivedAt) >= 0 &&
+      now - Number(tick.receivedAt) <= 10000 && Number.isFinite(Number(tick.exchangeTime)) &&
+      now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10);
+  });
+  if (!eligible.length) return null;
+  // Unscanned symbols first, then the oldest actual attempt. Stable active-slice
+  // order breaks ties; stale symbols never consume the one-per-minute REST slot.
+  eligible.sort((a, b) => {
+    const stamp = symbol => {
+      const row = scanLedger.get(symbol);
+      const value = Date.parse(row?.scannedAt || row?.attemptedAt || '');
+      return Number.isFinite(value) ? value : 0;
+    };
+    return stamp(a) - stamp(b);
+  });
+  return eligible[0];
 }
 
 export function getFnoScanBatchSize(universeCount, startIndex = 0, scanPerSlice = FNO_SCAN_PER_SLICE) {

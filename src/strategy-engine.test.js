@@ -417,12 +417,12 @@ test('bullish and bearish continuation detectors require impulse, consolidation 
 test('bullish and bearish flag detectors use price structure only, regardless of volume',()=>{
   const bullish=[];
   for(let i=0;i<17;i++){const close=100+i;bullish.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:0});}
-  for(let i=0;i<12;i++)bullish.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:0});
+  for(let i=0;i<12;i++){const close=116-i*.05;bullish.push({time:1800005100+i*300,open:close+.1,high:117,low:115,close,volume:0});}
   bullish.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:0});
   assert.equal(detectFlagVolume(bullish)?.side,'LONG');
   const bearish=[];
   for(let i=0;i<17;i++){const close=120-i;bearish.push({time:1800000000+i*300,open:close+.2,high:close+.4,low:close-.2,close,volume:0});}
-  for(let i=0;i<12;i++)bearish.push({time:1800005100+i*300,open:104,high:105,low:103,close:104,volume:0});
+  for(let i=0;i<12;i++){const close=104+i*.05;bearish.push({time:1800005100+i*300,open:close-.1,high:105,low:103,close,volume:0});}
   bearish.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:0});
   assert.equal(detectFlagVolume(bearish)?.side,'SHORT');
 });
@@ -719,7 +719,7 @@ test('end-to-end flag price-breakout is independently selectable when continuati
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:400});
   rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:400});
-  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:108,high:109.5,low:107.5,close:108,volume:0});
+  for(let i=0;i<12;i++){const close=108.5-i*.05;rows.push({time:start+(17+i)*300,open:close+.1,high:109.5,low:107.5,close,volume:0});}
   rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:600});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));

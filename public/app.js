@@ -98,6 +98,7 @@ async function refreshUniverseScan() {
     // available for the current active slice only; the full rolling universe is
     // represented by aggregate counts instead of rendering 218 nested rows.
     const activeSet=new Set(data.activeSymbols||[]);
+    const coverageBySymbol=new Map((data.symbolCoverage||[]).map(row=>[row.symbol,row]));
     const activeEvaluationsAll=(data.evaluations||[]).filter(row=>activeSet.has(row.symbol));
     const activeEvaluations=activeEvaluationsAll.slice(0,4);
     const diagnostics=document.createElement('details');
@@ -105,15 +106,34 @@ async function refreshUniverseScan() {
     diagnosticsTitle.textContent='ACTIVE SLICE · '+activeEvaluationsAll.length+' STOCKS · SHOWING '+activeEvaluations.length+' DETAILS';
     diagnostics.append(diagnosticsTitle);
     for(const stock of activeEvaluations) {
+      const coverage=coverageBySymbol.get(stock.symbol)||{};
+      const neverScanned=Number(coverage.scanAttempts||0)===0;
+      const candleCount=Number(coverage.candleCount||0);
       const group=document.createElement('details');
       const summary=document.createElement('summary');
-      summary.textContent=stock.symbol+' · '+stock.status+' · '+(stock.fresh?'FRESH TICK':'STALE / MISSING TICK');
+      const scanLabel=neverScanned?'AWAITING HISTORY SCAN':coverage.scanStatus||stock.status;
+      summary.textContent=stock.symbol+' · '+scanLabel+' · '+(stock.fresh?'FRESH TICK':'STALE / MISSING TICK');
       group.append(summary);
-      for(const item of stock.strategyLedger||[]) {
-        const row=document.createElement('div');row.className='strategy-ledger-row';
-        const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
-        const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
-        row.append(label,reason);group.append(row);
+      const evidence=document.createElement('small');
+      evidence.className='empty-inline';
+      evidence.textContent='5-MIN HISTORY · '+(neverScanned?'NOT REQUESTED YET':candleCount+' COMPLETED CANDLES')+
+        ' · LAST COMPLETED · '+(coverage.lastCompletedCandleTime||'—')+
+        ' · LAST SCAN · '+(coverage.lastScanAt||'—');
+      group.append(evidence);
+      if(neverScanned) {
+        const waiting=document.createElement('small');
+        waiting.textContent=coverage.scanReason||'Waiting for its guarded REST history rotation slot; no candle-staleness conclusion is available yet.';
+        group.append(waiting);
+      } else {
+        for(const item of stock.strategyLedger||[]) {
+          const row=document.createElement('div');row.className='strategy-ledger-row';
+          const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
+          const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
+          row.append(label,reason);group.append(row);
+        }
+        if(!stock.strategyLedger?.length && coverage.scanReason) {
+          const reason=document.createElement('small');reason.textContent=coverage.scanReason;group.append(reason);
+        }
       }
       diagnostics.append(group);
     }

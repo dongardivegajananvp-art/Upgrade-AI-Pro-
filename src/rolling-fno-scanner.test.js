@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE,
-  getNextFnoRotationIndex, getFnoScanBatchSize
+  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol
 } from './rolling-fno-scanner.js';
 
 const universe=Array.from({length:218},(_,i)=>({symbol:`NSE:STOCK${String(i).padStart(3,'0')}-EQ`}));
@@ -56,7 +56,7 @@ test('history-backed scanner advertises one new symbol per minute under the guar
 
 test('WebSocket rotates eight new symbols per minute while REST history scan remains one per minute',()=>{
   assert.equal(FNO_SCAN_PER_SLICE,1);
-  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,8);
+  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,1);
   const visited=new Set();
   let start=0,rotations=0;
   do{
@@ -66,5 +66,26 @@ test('WebSocket rotates eight new symbols per minute while REST history scan rem
     assert.ok(rotations<=Math.ceil(universe.length/FNO_SOCKET_ROTATION_ADVANCE));
   }while(start!==0);
   assert.equal(visited.size,218);
-  assert.equal(rotations,28);
+  assert.equal(rotations,218);
+});
+
+test('scanner picks the oldest fresh symbol and skips stale active ticks without losing the slot',()=>{
+  const now=Date.parse('2026-11-25T05:00:00Z');
+  const symbols=['NSE:A-EQ','NSE:B-EQ','NSE:C-EQ'];
+  const fresh=symbol=>({symbol,price:100,receivedAt:now,exchangeTime:now/1000});
+  const ticks=new Map([[symbols[0],fresh(symbols[0])],[symbols[1],{...fresh(symbols[1]),receivedAt:now-20000}],[symbols[2],fresh(symbols[2])]]);
+  const ledger=new Map([[symbols[0],{scannedAt:new Date(now-60000).toISOString()}]]);
+  assert.equal(getNextFreshFnoScanSymbol(symbols,ticks,ledger,now),symbols[2]);
+  assert.equal(getNextFreshFnoScanSymbol([symbols[1]],ticks,ledger,now),null);
+});
+
+test('one-symbol-per-minute rotation keeps every symbol active for twenty scan slots',()=>{
+  const total=218, slots=20, advance=FNO_SOCKET_ROTATION_ADVANCE;
+  let start=0;
+  for(let minute=0;minute<slots;minute++){
+    const active=buildFnoRotationSlice(universe,start,slots);
+    assert.ok(active.includes(universe[0].symbol));
+    start=getNextFnoRotationIndex(total,start,advance);
+  }
+  assert.equal(start,20);
 });

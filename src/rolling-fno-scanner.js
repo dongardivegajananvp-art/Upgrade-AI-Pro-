@@ -107,3 +107,11 @@ export function getFnoSliceScanSymbols(activeSymbols, scanPerSlice = FNO_SCAN_PE
   // Rotation advances by this count, so the head is the next unscanned batch.
   return activeSymbols.slice(0,count);
 }
+
+export function getFnoScanSliceKey(activeSymbols) {
+  return Array.isArray(activeSymbols) ? activeSymbols.filter(Boolean).join('|') : '';
+}
+
+export function shouldResetFnoScanCursor(previousRotation, nextRotation, previousSliceKey, nextSliceKey) {
+  return previousRotation !== nextRotation || previousSliceKey !== nextSliceKey;
+}

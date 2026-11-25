@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE,
-  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol
+  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS
 } from './rolling-fno-scanner.js';
 
 const universe=Array.from({length:218},(_,i)=>({symbol:`NSE:STOCK${String(i).padStart(3,'0')}-EQ`}));
@@ -88,4 +88,23 @@ test('one-symbol-per-minute rotation keeps every symbol active for twenty scan s
     start=getNextFnoRotationIndex(total,start,advance);
   }
   assert.equal(start,20);
+});
+
+test('scanner does not spend another REST slot rescanning the same symbol inside cooldown',()=>{
+  const now=Date.parse('2026-11-25T05:00:00Z');
+  const symbol='NSE:REPEAT-EQ';
+  const tick={symbol,price:100,receivedAt:now,exchangeTime:now/1000};
+  const ticks=new Map([[symbol,tick]]);
+  const ledger=new Map([[symbol,{scannedAt:new Date(now-8000).toISOString()}]]);
+  assert.equal(getNextFreshFnoScanSymbol([symbol],ticks,ledger,now),null);
+  assert.equal(getNextFreshFnoScanSymbol([symbol],ticks,ledger,now+FNO_SYMBOL_RESCAN_COOLDOWN_MS),symbol);
+});
+
+test('fresh never-scanned symbol takes priority over a due previously scanned symbol',()=>{
+  const now=Date.parse('2026-11-25T05:00:00Z');
+  const old='NSE:OLD-EQ',fresh='NSE:NEW-EQ';
+  const tick=symbol=>({symbol,price:100,receivedAt:now,exchangeTime:now/1000});
+  const ticks=new Map([[old,tick(old)],[fresh,tick(fresh)]]);
+  const ledger=new Map([[old,{scannedAt:new Date(now-FNO_SYMBOL_RESCAN_COOLDOWN_MS).toISOString()}]]);
+  assert.equal(getNextFreshFnoScanSymbol([old,fresh],ticks,ledger,now),fresh);
 });

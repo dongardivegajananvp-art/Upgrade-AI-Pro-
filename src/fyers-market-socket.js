@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -152,6 +152,16 @@ function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
     for (const symbol of added) {
       pendingSubscriptionSymbols.push(symbol);
       pendingSubscriptionSet.add(symbol);
+    }
+  }
+  if (selectedOptionSymbol && pendingSubscriptionSet.has(selectedOptionSymbol)) {
+    const before = pendingSubscriptionSymbols.indexOf(selectedOptionSymbol);
+    pendingSubscriptionSymbols = prioritizeSubscriptionQueue(pendingSubscriptionSymbols, selectedOptionSymbol);
+    if (before > 0) {
+      console.info('[FYERS_DATA] selected option subscription prioritized:', JSON.stringify({
+        symbol: selectedOptionSymbol, previousQueuePosition: before + 1, nextQueuePosition: 1,
+        pendingCount: pendingSubscriptionSymbols.length
+      }));
     }
   }
   // Resume any batches paused by a disconnect, even when the desired set did not change.

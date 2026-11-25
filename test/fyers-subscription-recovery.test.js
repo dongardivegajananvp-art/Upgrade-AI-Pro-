@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -53,4 +53,19 @@ test('FYERS generic subscription ACK is recognized without assigning symbol iden
   assert.equal(isGenericSubscriptionAck({ type: 'sub', code: 429 }), false);
   assert.equal(isGenericSubscriptionAck({ type: 'symbol_sub', code: 200 }), false);
   assert.equal(isGenericSubscriptionAck(null), false);
+});
+
+
+test('selected option subscription moves ahead of queued background F&O symbols', () => {
+  const pending = ['NSE:STOCK1-EQ','NSE:STOCK2-EQ','NSE:STOCK3-EQ','NSE:ANGELONE26DEC345CE'];
+  assert.deepEqual(prioritizeSubscriptionQueue(pending,'NSE:ANGELONE26DEC345CE'), [
+    'NSE:ANGELONE26DEC345CE','NSE:STOCK1-EQ','NSE:STOCK2-EQ','NSE:STOCK3-EQ'
+  ]);
+});
+
+test('selected option priority preserves deduplication and leaves unrelated queue order intact', () => {
+  assert.deepEqual(prioritizeSubscriptionQueue(
+    ['NSE:A-EQ','NSE:B-EQ','NSE:A-EQ','NSE:C-EQ'],
+    'NSE:OPTION26DECCE'
+  ), ['NSE:A-EQ','NSE:B-EQ','NSE:C-EQ']);
 });

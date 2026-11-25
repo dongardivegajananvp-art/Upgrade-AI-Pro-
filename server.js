@@ -12,6 +12,7 @@ import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
 import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
+import { isEligibleForResearchWarmup } from './src/research-warmup-eligibility.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
 import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
@@ -203,7 +204,11 @@ function startFnoStrategyScanner() {
         source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[],
         websocketObservation:{status:websocketObservation?.status||'NO_OBSERVATIONS',completedCount:websocketObservation?.completedCandles?.length||0,contiguousCompletedCount:websocketObservation?.contiguousCompletedCount||0,volumeVerified:Boolean(websocketObservation?.volumeVerified),actionable:Boolean(websocketObservation?.actionable)}
       });
-      if(research.status==='UNDERLYING_SETUP_CONFIRMED') {
+      // Warm daily/15m context for every symbol with a valid contiguous 50-candle
+      // 5m base. Do not gate warmup on an already-confirmed 5m setup: that made
+      // DAILY_TREND_5M_PULLBACK impossible to discover because it needs daily
+      // history before it can become a confirmed candidate.
+      if(isEligibleForResearchWarmup(history.candles)) {
         const queued=fnoResearchWarmupQueue.enqueue(symbol);
         fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
         if(queued) {

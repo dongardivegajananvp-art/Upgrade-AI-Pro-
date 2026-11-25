@@ -723,6 +723,9 @@ function resetChartViewport() {
 }
 function renderChartViewport() {
   const area = document.querySelector('#chart-area');
+  // Never replace the loading/error state with a live-only chart. A live tick is
+  // not a substitute for verified completed FYERS history, especially on indices.
+  if (!chartCandles.length) return;
   const candles = chartLiveCandle && chartLiveCandle.time > 0 ? [...chartCandles, chartLiveCandle] : chartCandles;
   area.replaceChildren();
   if (!candles.length) return;

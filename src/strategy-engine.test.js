@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagVolume, detectDailyTrendPullback } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
   assert.deepEqual(STRATEGIES, [
     'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK',
     'DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION',
-    'BEARISH_CONTINUATION','FLAG_BREAKOUT_VOLUME','OPENING_RANGE_BREAKOUT'
+    'BEARISH_CONTINUATION','FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT'
   ]);
 });
 test('scanner fails closed without a fresh exchange tick', () => {
@@ -419,12 +419,12 @@ test('bullish and bearish flag detectors use price structure only, regardless of
   for(let i=0;i<17;i++){const close=100+i;bullish.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:0});}
   for(let i=0;i<12;i++){const close=116-i*.05;bullish.push({time:1800005100+i*300,open:close+.1,high:117,low:115,close,volume:0});}
   bullish.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:0});
-  assert.equal(detectFlagVolume(bullish)?.side,'LONG');
+  assert.equal(detectFlagPriceStructure(bullish)?.side,'LONG');
   const bearish=[];
   for(let i=0;i<17;i++){const close=120-i;bearish.push({time:1800000000+i*300,open:close+.2,high:close+.4,low:close-.2,close,volume:0});}
   for(let i=0;i<12;i++){const close=104+i*.05;bearish.push({time:1800005100+i*300,open:close-.1,high:105,low:103,close,volume:0});}
   bearish.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:0});
-  assert.equal(detectFlagVolume(bearish)?.side,'SHORT');
+  assert.equal(detectFlagPriceStructure(bearish)?.side,'SHORT');
 });
 
 test('daily-trend pullback detector blocks missing or stale daily context', () => {
@@ -723,10 +723,10 @@ test('end-to-end flag price-breakout is independently selectable when continuati
   rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:600});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
-  assert.equal(result.strategy,'FLAG_BREAKOUT_VOLUME');
+  assert.equal(result.strategy,'FLAG_BREAKOUT_PRICE_STRUCTURE');
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);
-  assertStaleOptionQuoteBlocks(rows,'LONG','FLAG_BREAKOUT_VOLUME');
+  assertStaleOptionQuoteBlocks(rows,'LONG','FLAG_BREAKOUT_PRICE_STRUCTURE');
 });
 
 test('end-to-end daily-trend pullback requires fresh daily context and completes the SHORT/PE risk plan',()=>{
@@ -856,7 +856,7 @@ test('targeted strategy detector invalidation matrix rejects each missing patter
   assert.equal(detectContinuation(rows30,'SHORT'),null,'bearish continuation without impulse must reject');
 
   // Flat price structure without an impulse and breakout remains ineligible.
-  assert.equal(detectFlagVolume(rows30),null,'flag without a price impulse and breakout must reject');
+  assert.equal(detectFlagPriceStructure(rows30),null,'flag without a price impulse and breakout must reject');
 
   // Opening range: first candle defines a range, but later closes remain inside it.
   assert.equal(detectOpeningRange(rows5),null,'opening range without a completed break must reject');

@@ -140,7 +140,7 @@ async function refreshUniverseScan() {
       } else {
         for(const item of stock.strategyLedger||[]) {
           const row=document.createElement('div');row.className='strategy-ledger-row';
-          const label=document.createElement('b');const strategyLabel=item.strategy==='FLAG_BREAKOUT_VOLUME'?'FLAG_BREAKOUT_PRICE_STRUCTURE':item.strategy;label.textContent=strategyLabel+' · '+item.status;
+          const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
           const reason=document.createElement('small');reason.textContent=item.reason||'No reason returned';
           row.append(label,reason);group.append(row);
         }

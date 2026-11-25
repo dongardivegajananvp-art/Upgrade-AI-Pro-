@@ -6,7 +6,7 @@ import {
   detectContinuation,
   detectTopGainerMomentum,
   detectDayHighLowRetest,
-  detectFlagVolume,
+  detectFlagPriceStructure,
   detectOpeningRange,
   detectDailyTrendPullback
 } from './strategy-engine.js';
@@ -53,8 +53,8 @@ test('bearish flag price continuation confirms SHORT only after compact consolid
     rows.push({time:1800005100+i*300,open:close-0.1,high:104.5,low:103.5,close,volume:0});
   }
   rows.push({time:1800008700,open:103.4,high:103.6,low:101,close:101.5,volume:200});
-  assert.equal(detectFlagVolume(rows)?.side, 'SHORT');
-  assert.equal(detectFlagVolume(rows.map(c => ({...c, volume: 0})))?.side, 'SHORT');
+  assert.equal(detectFlagPriceStructure(rows)?.side, 'SHORT');
+  assert.equal(detectFlagPriceStructure(rows.map(c => ({...c, volume: 0})))?.side, 'SHORT');
 });
 
 test('daily-trend 5m bearish pullback requires fresh completed daily context and a resumed breakdown', () => {

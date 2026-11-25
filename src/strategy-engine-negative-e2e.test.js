@@ -93,7 +93,7 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
       reason: /bearish impulse/
     },
     {
-      strategy: 'FLAG_BREAKOUT_VOLUME',
+      strategy: 'FLAG_BREAKOUT_PRICE_STRUCTURE',
       input: neutralPipeline(),
       status: 'REJECTED',
       reason: /flag impulse, consolidation range, and completed price breakout/

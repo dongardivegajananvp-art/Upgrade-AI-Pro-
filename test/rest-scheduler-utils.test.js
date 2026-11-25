@@ -211,6 +211,8 @@ test('queued REST requests expire at their exact deadline and invalid timestamps
   assert.equal(getRestQueueMaxAgeMs(90),15000);
   assert.equal(getRestQueueMaxAgeMs(80),30000);
   assert.equal(getRestQueueMaxAgeMs(20),30000);
+  assert.equal(getRestQueueMaxAgeMs(30),120000);
+  assert.equal(getRestQueueMaxAgeMs(40),120000);
   assert.equal(getRestQueueMaxAgeMs(10),10000);
   assert.equal(getRestQueueMaxAgeMs(-20),120000);
   assert.equal(isRestQueueExpired(1000,10999,10000),false);

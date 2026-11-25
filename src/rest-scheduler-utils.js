@@ -220,8 +220,10 @@ export function getRestQueueMaxAgeMs(priority = 0) {
   if (value >= REST_PRIORITY.ENTRY) return 10_000;
   if (value >= REST_PRIORITY.OPTION_CHAIN) return 15_000;
   if (value >= REST_PRIORITY.CHART) return 30_000;
-  if (value >= REST_PRIORITY.ACCOUNT) return 30_000;
-  if (value >= REST_PRIORITY.SCANNER) return 10_000;
+  // CONTEXT and RESEARCH (priorities 30/40) often need two sequential
+  // history requests. They must not inherit the shorter ACCOUNT queue TTL.
+  if (value === REST_PRIORITY.ACCOUNT) return 30_000;
+  if (value === REST_PRIORITY.SCANNER) return 10_000;
   return 120_000;
 }
 

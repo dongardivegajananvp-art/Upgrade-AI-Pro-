@@ -42,7 +42,7 @@ test('opening-range first-candle breakdown confirms SHORT and does not invent a 
   assert.equal(detectOpeningRange([opening, noBreak]), null);
 });
 
-test('bearish flag-volume continuation confirms SHORT only with contracting flag volume and a high-volume breakdown', () => {
+test('bearish flag price continuation confirms SHORT only after compact consolidation and price breakdown', () => {
   const rows = [];
   for (let i = 0; i < 17; i++) {
     const close = 120 - i;
@@ -53,7 +53,7 @@ test('bearish flag-volume continuation confirms SHORT only with contracting flag
   }
   rows.push({time:1800008700,open:103.4,high:103.6,low:101,close:101.5,volume:200});
   assert.equal(detectFlagVolume(rows)?.side, 'SHORT');
-  assert.equal(detectFlagVolume(rows.map(c => ({...c, volume: 200}))), null);
+  assert.equal(detectFlagVolume(rows.map(c => ({...c, volume: 0})))?.side, 'SHORT');
 });
 
 test('daily-trend 5m bearish pullback requires fresh completed daily context and a resumed breakdown', () => {

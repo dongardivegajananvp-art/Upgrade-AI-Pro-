@@ -118,32 +118,17 @@ test('bullish and bearish continuation detectors require impulse, consolidation 
   assert.equal(detectContinuation(flat,'LONG'),null);
 });
 
-test('flag-volume detector requires contracting flag volume and a high-volume breakout', () => {
-  const rows=[];
-  for(let i=0;i<17;i++){
-    const close=100+i;
-    rows.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:200});
-  }
-  for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:100});
-  rows.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:125});
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?119:c.volume}))),null);
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?120:c.volume})))?.side,'LONG');
-  assert.equal(detectFlagVolume(rows)?.side,'LONG');
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:200}))),null);
-});
-
-
-test('bearish flag-volume detector accepts the same 1.20x breakout volume threshold', () => {
-  const rows=[];
-  for(let i=0;i<17;i++){
-    const close=120-i;
-    rows.push({time:1800000000+i*300,open:close+.2,high:close+.4,low:close-.2,close,volume:200});
-  }
-  for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:104,high:105,low:103,close:104,volume:100});
-  rows.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:125});
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?119:c.volume}))),null);
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?120:c.volume})))?.side,'SHORT');
-  assert.equal(detectFlagVolume(rows)?.side,'SHORT');
+test('bullish and bearish flag detectors use price structure only, regardless of volume',()=>{
+  const bullish=[];
+  for(let i=0;i<17;i++){const close=100+i;bullish.push({time:1800000000+i*300,open:close-.2,high:close+.2,low:close-.4,close,volume:0});}
+  for(let i=0;i<12;i++)bullish.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:0});
+  bullish.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:0});
+  assert.equal(detectFlagVolume(bullish)?.side,'LONG');
+  const bearish=[];
+  for(let i=0;i<17;i++){const close=120-i;bearish.push({time:1800000000+i*300,open:close+.2,high:close+.4,low:close-.2,close,volume:0});}
+  for(let i=0;i<12;i++)bearish.push({time:1800005100+i*300,open:104,high:105,low:103,close:104,volume:0});
+  bearish.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:0});
+  assert.equal(detectFlagVolume(bearish)?.side,'SHORT');
 });
 
 test('daily-trend pullback detector blocks missing or stale daily context', () => {
@@ -338,7 +323,7 @@ function makeOptionPipelineFields(start, side='CE') {
   return {contract,optionCandles,optionTick:{symbol,price:106.05,exchangeTime:start/1+900,receivedAt:(start+900)*1000}};
 }
 
-test('end-to-end day-high breakout/retest reaches fixed-risk plan only after original breakout pressure/volume confirms',()=>{
+test('end-to-end day-high breakout/retest reaches fixed-risk plan after original price-level cross confirms',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, now=(start+1500)*1000;
   const underlyingCandles=[
     {time:start,open:100,high:101,low:99,close:100,volume:100},
@@ -357,7 +342,7 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan only after ori
   assertStaleOptionQuoteBlocks(underlyingCandles,'LONG','DAY_HIGH_LOW_BREAK_RETEST');
 });
 
-test('end-to-end opening-range first-candle breakout passes only with completed pressure/volume and option confirmation',()=>{
+test('end-to-end opening-range first-candle breakout passes with completed price breakout and option confirmation',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, now=(start+900)*1000;
   const underlyingCandles=[
     {time:start,open:100,high:101,low:99,close:100,volume:100},
@@ -432,7 +417,7 @@ test('end-to-end bearish continuation validates the complete SHORT→PE→risk-p
   assertStaleOptionQuoteBlocks(rows,'SHORT','BEARISH_CONTINUATION');
 });
 
-test('end-to-end flag-volume breakout is independently selectable when continuation impulse threshold is not met',()=>{
+test('end-to-end flag price-breakout is independently selectable when continuation impulse threshold is not met',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:400});
   rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:400});
@@ -476,7 +461,7 @@ test('end-to-end daily-trend pullback requires fresh daily context and completes
 });
 
 
-test('end-to-end double-top neckline breakdown/retest validates SHORT→PE with original cross-candle volume',()=>{
+test('end-to-end double-top neckline breakdown/retest validates SHORT→PE with original price cross',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000;
   const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[5]={...rows[5],open:100,high:101,low:90,close:100};
@@ -493,7 +478,7 @@ test('end-to-end double-top neckline breakdown/retest validates SHORT→PE with 
   assertStaleOptionQuoteBlocks(rows,'SHORT','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
 });
 
-test('end-to-end double-bottom neckline breakout/retest validates LONG→CE with original cross-candle volume',()=>{
+test('end-to-end double-bottom neckline breakout/retest validates LONG→CE with original price cross',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000;
   const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[5]={...rows[5],open:115,high:120,low:99,close:115};
@@ -572,8 +557,8 @@ test('targeted strategy detector invalidation matrix rejects each missing patter
   assert.equal(detectContinuation(rows30,'LONG'),null,'bullish continuation without impulse must reject');
   assert.equal(detectContinuation(rows30,'SHORT'),null,'bearish continuation without impulse must reject');
 
-  // Flag: equal flag/impulse volume does not meet the required contraction.
-  assert.equal(detectFlagVolume(rows30),null,'flag without volume contraction must reject');
+  // Flat price structure without an impulse and breakout remains ineligible.
+  assert.equal(detectFlagVolume(rows30),null,'flag without a price impulse and breakout must reject');
 
   // Opening range: first candle defines a range, but later closes remain inside it.
   assert.equal(detectOpeningRange(rows5),null,'opening range without a completed break must reject');

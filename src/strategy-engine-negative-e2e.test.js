@@ -96,7 +96,7 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
       strategy: 'FLAG_BREAKOUT_VOLUME',
       input: neutralPipeline(),
       status: 'REJECTED',
-      reason: /Flag volume did not contract/
+      reason: /flag impulse, consolidation range, and completed price breakout/
     },
     {
       strategy: 'OPENING_RANGE_BREAKOUT',

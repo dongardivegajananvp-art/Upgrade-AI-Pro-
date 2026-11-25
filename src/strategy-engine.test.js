@@ -452,6 +452,19 @@ test('flag-volume detector requires contracting flag volume and a high-volume br
   assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:200}))),null);
 });
 
+
+test('bearish flag-volume detector accepts the same 1.25x breakout volume threshold', () => {
+  const rows=[];
+  for(let i=0;i<17;i++){
+    const close=120-i;
+    rows.push({time:1800000000+i*300,open:close+.2,high:close+.4,low:close-.2,close,volume:200});
+  }
+  for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:104,high:105,low:103,close:104,volume:100});
+  rows.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:125});
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?124:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows)?.side,'SHORT');
+});
+
 test('daily-trend pullback detector blocks missing or stale daily context', () => {
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
   assert.equal(detectDailyTrendPullback(rows,[],1800000000000),null);

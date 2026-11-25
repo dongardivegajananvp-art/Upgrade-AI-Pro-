@@ -263,6 +263,9 @@ export function detectContinuation(rows, side) {
   const last=rows.at(-1), prior=rows.slice(-13,-1);
   const impulse=rows.slice(-30,-13);
   if(prior.length!==12||impulse.length<10)return null;
+  const flagDrift=number(prior.at(-1).close)-number(prior[0].close);
+  // Counter-trend pullback flags belong to the dedicated flag-breakout rule.
+  if((side==='LONG'&&flagDrift<0)||(side==='SHORT'&&flagDrift>0))return null;
   const move=side==='LONG'
     ? number(impulse.at(-1).close)-number(impulse[0].close)
     : number(impulse[0].close)-number(impulse.at(-1).close);
@@ -288,6 +291,9 @@ export function detectFlagVolume(rows) {
   const impulseRange=impulseHigh-impulseLow,flagRange=high-low;
   const impulseUp=number(impulse.at(-1).close)>number(impulse[0].close);
   const impulseDown=number(impulse.at(-1).close)<number(impulse[0].close);
+  const flagDrift=number(flag.at(-1).close)-number(flag[0].close);
+  // Dedicated flag setup requires a compact counter-trend pullback.
+  if((impulseUp&&flagDrift>=0)||(impulseDown&&flagDrift<=0))return null;
   // Pure price-structure flag: require a real impulse and a compact flag range
   // (<=50% of the impulse range), then a completed close outside that range.
   // Volume contraction and breakout-volume filters are intentionally absent.

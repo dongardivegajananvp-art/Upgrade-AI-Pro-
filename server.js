@@ -15,7 +15,7 @@ import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { isEligibleForResearchWarmup } from './src/research-warmup-eligibility.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
-import { getFnoSliceScanSymbols } from './src/rolling-fno-scanner.js';
+import { getNextFreshFnoScanSymbol } from './src/rolling-fno-scanner.js';
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession } from './src/nse-session.js';
@@ -146,8 +146,7 @@ function startFnoStrategyScanner() {
       return;
     }
     if (fnoStrategyScanCursor>=scanLimit) return;
-    const scanSymbols=getFnoSliceScanSymbols(active,scanLimit);
-    const normalSymbol=scanSymbols[fnoStrategyScanCursor] || null;
+    const normalSymbol=getNextFreshFnoScanSymbol(active,snapshot.ticks,fnoSymbolScanLedger,Date.now());
     const retryCandidate=retryPendingActive;
     const symbol=retryCandidate ? fnoStrategyScanRetrySymbol : normalSymbol;
     if(!symbol) return;

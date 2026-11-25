@@ -284,9 +284,14 @@ export function detectFlagVolume(rows) {
   const last=rows.at(-1),flag=rows.slice(-13,-1),impulse=rows.slice(-30,-13);
   if(flag.length!==12||impulse.length!==17||!last)return null;
   const high=Math.max(...flag.map(c=>number(c.high))),low=Math.min(...flag.map(c=>number(c.low)));
+  const impulseHigh=Math.max(...impulse.map(c=>number(c.high))),impulseLow=Math.min(...impulse.map(c=>number(c.low)));
+  const impulseRange=impulseHigh-impulseLow,flagRange=high-low;
   const impulseUp=number(impulse.at(-1).close)>number(impulse[0].close);
   const impulseDown=number(impulse.at(-1).close)<number(impulse[0].close);
-  // Pure price-structure flag; no volume contraction or breakout-volume filter.
+  // Pure price-structure flag: require a real impulse and a compact flag range
+  // (<=50% of the impulse range), then a completed close outside that range.
+  // Volume contraction and breakout-volume filters are intentionally absent.
+  if(!(impulseRange>0&&flagRange>0&&flagRange<=impulseRange*0.5))return null;
   if(impulseUp&&number(last.close)>high)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last,{pattern:'BULL_FLAG_PRICE_BREAKOUT'});
   if(impulseDown&&number(last.close)<low)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last,{pattern:'BEAR_FLAG_PRICE_BREAKDOWN'});
   return null;

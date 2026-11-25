@@ -4,6 +4,9 @@
 // One history-backed scanner slot per minute is the honest safe cadence until the
 // scanner is moved to verified WebSocket-built candles or a measured larger budget.
 export const FNO_SCAN_PER_SLICE = 1;
+// WebSocket coverage is independent of REST history admission: rotate eight new
+// symbols per minute while retaining a 20-symbol overlap for stable live ticks.
+export const FNO_SOCKET_ROTATION_ADVANCE = 8;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);
 }

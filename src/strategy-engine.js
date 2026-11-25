@@ -121,14 +121,14 @@ const STRATEGIES = Object.freeze([
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
   'BULLISH_CONTINUATION',
   'BEARISH_CONTINUATION',
-  'FLAG_BREAKOUT_VOLUME',
+  'FLAG_BREAKOUT_PRICE_STRUCTURE',
   'OPENING_RANGE_BREAKOUT'
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
   'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
-  'FLAG_BREAKOUT_VOLUME','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
+  'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
 
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
@@ -283,7 +283,7 @@ export function detectContinuation(rows, side) {
   const pattern=ascendingTriangle?'ASCENDING_TRIANGLE':descendingTriangle?'DESCENDING_TRIANGLE':range/move<0.45?'PENNANT':'FLAG';
   return candidate(side==='LONG'?'BULLISH_CONTINUATION':'BEARISH_CONTINUATION',side,side==='LONG'?ceiling:floor,last,{pattern});
 }
-export function detectFlagVolume(rows) {
+export function detectFlagPriceStructure(rows) {
   const last=rows.at(-1),flag=rows.slice(-13,-1),impulse=rows.slice(-30,-13);
   if(flag.length!==12||impulse.length!==17||!last)return null;
   const high=Math.max(...flag.map(c=>number(c.high))),low=Math.min(...flag.map(c=>number(c.low)));
@@ -298,8 +298,8 @@ export function detectFlagVolume(rows) {
   // (<=50% of the impulse range), then a completed close outside that range.
   // Volume contraction and breakout-volume filters are intentionally absent.
   if(!(impulseRange>0&&flagRange>0&&flagRange<=impulseRange*0.5))return null;
-  if(impulseUp&&number(last.close)>high)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last,{pattern:'BULL_FLAG_PRICE_BREAKOUT'});
-  if(impulseDown&&number(last.close)<low)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last,{pattern:'BEAR_FLAG_PRICE_BREAKDOWN'});
+  if(impulseUp&&number(last.close)>high)return candidate('FLAG_BREAKOUT_PRICE_STRUCTURE','LONG',high,last,{pattern:'BULL_FLAG_PRICE_BREAKOUT'});
+  if(impulseDown&&number(last.close)<low)return candidate('FLAG_BREAKOUT_PRICE_STRUCTURE','SHORT',low,last,{pattern:'BEAR_FLAG_PRICE_BREAKDOWN'});
   return null;
 }
 
@@ -459,7 +459,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles','No two comparable swing highs/lows, neckline break, and subsequent neckline retest were all confirmed');
   consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
-  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','No flag impulse, consolidation range, and completed price breakout confirmed');
+  consider('FLAG_BREAKOUT_PRICE_STRUCTURE',w30,()=>detectFlagPriceStructure(rows),'Requires 30 contiguous completed 5-minute candles','No flag impulse, consolidation range, and completed price breakout confirmed');
   consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','No completed 5-minute candle broke and retested the first-candle/15-minute opening range');
   // Strategy-specific price structure is the trigger confirmation.
   // No common directional-pressure or volume gate is applied.

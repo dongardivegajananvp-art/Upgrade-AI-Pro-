@@ -52,9 +52,9 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandl
 // This is not a claim of an external generative-AI model or paid AI service.
 export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
   const valid = rows => Array.isArray(rows) && rows.length && rows.every(c =>
-    c && ['time','open','high','low','close','volume'].every(k => Number.isFinite(Number(c[k]))) &&
+    c && ['time','open','high','low','close'].every(k => Number.isFinite(Number(c[k]))) &&
     Number(c.time)>0 && Number(c.open)>0 && Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low)) &&
-    Number(c.low)<=Math.min(Number(c.open),Number(c.close)) && Number(c.volume)>=0);
+    Number(c.low)<=Math.min(Number(c.open),Number(c.close)));
   if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
   if (!contiguousWindow(candles,20)) return {status:'UNAVAILABLE',reason:'The latest 20 completed 5-minute research candles must be contiguous across verified NSE sessions'};
   if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
@@ -303,7 +303,7 @@ export function detectOpeningRange(rows, sessionStartMinute = 555) {
   };
   // The first completed 5-minute candle defines the opening high/low.
   // A live tick alone is not a breakout candle: wait for the actual 5-minute
-  // candle to close outside the range so its direction and volume can be checked.
+  // candle to close outside the range before it can be treated as a breakout.
   const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
   const last=day.at(-1),prior=day.at(-2);
   if(first&&last){
@@ -441,7 +441,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
   const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now);
   consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (trigger candle plus at least one same-session volume reference)','Latest completed 5-minute close did not break the previous completed candle high');
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
   consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed FYERS daily candles with the latest completed session within five calendar days','Daily and 5-minute EMA20/EMA50 alignment, EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);

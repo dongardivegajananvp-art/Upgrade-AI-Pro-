@@ -1250,22 +1250,16 @@ async function evaluateSelectedSetup() {
   } catch(error) { setupEvaluationDone=true; setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
-async function selectCandidateForEntry(candidate) {
+function selectCandidateForEntry(candidate) {
   const symbol=String(candidate?.symbol||'').trim();
   const side=candidate?.side==='LONG'?'CE':candidate?.side==='SHORT'?'PE':null;
   if(!symbol||!side)return;
-  // A verified Top-3 underlying setup already has its directional side and
-  // completed multi-timeframe research. Carry that direction into the official
-  // FYERS option-chain selection instead of requiring a second manual CE/PE guess.
-  await selectSymbol(symbol);
-  if(selectedSymbol!==symbol)return;
-  if(researchContextReadySymbol!==symbol) {
-    try { await ensureResearchContext(symbol); }
-    catch { return; }
-  }
-  if(selectedSymbol!==symbol||researchContextReadySymbol!==symbol)return;
+  // Set direction before the option chain renders, so the nearest official
+  // contract is selected on the strategy-confirmed side (not a stale UI side).
   selectedOptionSide=side;
-  await autoSelectDirectionalOption(side);
+  document.querySelector('#ce-select').classList.toggle('active',side==='CE');
+  document.querySelector('#pe-select').classList.toggle('active',side==='PE');
+  void selectSymbol(symbol);
 }
 
 async function autoSelectDirectionalOption(optionSide) {

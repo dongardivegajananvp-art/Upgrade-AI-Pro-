@@ -40,15 +40,15 @@ function pressureVolumeRows(side='LONG') {
     : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
   return rows;
 }
-test('common confirmation requires bullish pressure and at least 1.25x available prior same-session volume', () => {
+test('common confirmation requires bullish pressure and at least 1.20x available prior same-session volume', () => {
   const rows=pressureVolumeRows('LONG');
   const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows.at(-1).time);
   assert.equal(result.ok,true);
   assert.equal(result.pressure,'BUYING');
   assert.equal(result.relativeVolume,1.6);
-  assert.ok(result.bodyStrength>=0.50);
+  assert.ok(result.bodyStrength>=0.40);
 });
-test('common confirmation requires bearish pressure and at least 1.25x available prior same-session volume', () => {
+test('common confirmation requires bearish pressure and at least 1.20x available prior same-session volume', () => {
   const rows=pressureVolumeRows('SHORT');
   const result=confirmBreakoutPressureVolume(rows,'SHORT',99,rows.at(-1).time);
   assert.equal(result.ok,true);
@@ -62,27 +62,34 @@ test('common confirmation rejects weak body pressure even when volume is high', 
   assert.equal(result.ok,false);
   assert.match(result.reason,/Buying pressure is weak/);
 });
-test('common confirmation rejects volume below 1.25x the available prior same-session average', () => {
+test('common confirmation rejects volume below 1.20x the available prior same-session average', () => {
   const rows=pressureVolumeRows('LONG');
-  rows[20]={...rows[20],volume:124};
+  rows[20]={...rows[20],volume:119};
   const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time);
   assert.equal(result.ok,false);
-  assert.match(result.reason,/1.25x/);
+  assert.match(result.reason,/1.20x/);
 });
-test('pressure threshold accepts 50% body and a close within the top/bottom 35%, but no weaker candle', () => {
+test('common confirmation accepts exactly 1.20x breakout volume', () => {
+  const rows=pressureVolumeRows('LONG');
+  rows[20]={...rows[20],volume:120};
+  const result=confirmBreakoutPressureVolume(rows,'LONG',101,rows[20].time);
+  assert.equal(result.ok,true);
+  assert.equal(result.relativeVolume,1.2);
+});
+test('pressure threshold accepts 40% body and a close within the top/bottom 35%', () => {
   const bullish=pressureVolumeRows('LONG');
-  bullish[20]={...bullish[20],open:100,high:104,low:99,close:102.5,volume:125};
+  bullish[20]={...bullish[20],open:100,high:103,low:98,close:102,volume:120};
   const buy=confirmBreakoutPressureVolume(bullish,'LONG',101,bullish[20].time);
   assert.equal(buy.ok,true);
-  assert.equal(buy.bodyStrength,0.5);
-  assert.equal(buy.relativeVolume,1.25);
+  assert.equal(buy.bodyStrength,0.4);
+  assert.equal(buy.relativeVolume,1.2);
 
   const bearish=pressureVolumeRows('SHORT');
-  bearish[20]={...bearish[20],open:100,high:101,low:96,close:97.5,volume:125};
+  bearish[20]={...bearish[20],open:100,high:102,low:97,close:98,volume:120};
   const sell=confirmBreakoutPressureVolume(bearish,'SHORT',99,bearish[20].time);
   assert.equal(sell.ok,true);
-  assert.equal(sell.bodyStrength,0.5);
-  assert.equal(sell.relativeVolume,1.25);
+  assert.equal(sell.bodyStrength,0.4);
+  assert.equal(sell.relativeVolume,1.2);
 });
 
 test('relative-volume baseline has no 20-candle cap and uses all prior contiguous same-session candles', () => {
@@ -503,13 +510,14 @@ test('flag-volume detector requires contracting flag volume and a high-volume br
   }
   for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:100});
   rows.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:125});
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?124:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?119:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?120:c.volume})))?.side,'LONG');
   assert.equal(detectFlagVolume(rows)?.side,'LONG');
   assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:200}))),null);
 });
 
 
-test('bearish flag-volume detector accepts the same 1.25x breakout volume threshold', () => {
+test('bearish flag-volume detector accepts the same 1.20x breakout volume threshold', () => {
   const rows=[];
   for(let i=0;i<17;i++){
     const close=120-i;
@@ -517,7 +525,8 @@ test('bearish flag-volume detector accepts the same 1.25x breakout volume thresh
   }
   for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:104,high:105,low:103,close:104,volume:100});
   rows.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:125});
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?124:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?119:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?120:c.volume})))?.side,'SHORT');
   assert.equal(detectFlagVolume(rows)?.side,'SHORT');
 });
 

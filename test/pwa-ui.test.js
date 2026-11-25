@@ -95,7 +95,7 @@ test('verified chart history is fetched even when live socket pinning is unavail
     'socket pin is attempted before independent history retrieval');
   assert.match(selectionFlow, /socketPinError = String\(error\.message/);
   assert.match(selectionFlow, /LIVE FEED UNAVAILABLE · NO TRADE/);
-  assert.match(selectionFlow, /catch \(error\) \{[\s\S]*?socketPinError = String\(error\.message[\s\S]*?\}\s*if \(selectedSymbol !== symbol\) return;\s*try \{\s*const response = await fetch\('\/api\/history\?symbol='/,
+  assert.match(selectionFlow, /catch \(error\) \{[\s\S]*?socketPinError = String\(error\.message[\s\S]*?\}\s*if \(selectedSymbol !== symbol \|\| selectionGeneration !== symbolSelectionGeneration\) return;\s*try \{\s*const response = await fetch\('\/api\/history\?symbol='/,
     'socket pin failure is isolated and history retrieval still follows');
 });
 

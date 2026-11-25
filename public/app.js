@@ -1281,7 +1281,15 @@ function selectCandidateForEntry(candidate, options={}) {
   document.querySelector('#ce-select').classList.toggle('active',side==='CE');
   document.querySelector('#pe-select').classList.toggle('active',side==='PE');
   if(selectedSymbol===symbol&&!chartRestoredFromCache) {
-    if(!selectedContractSymbol||!selectedContractSymbol.endsWith(side)) renderOptionStrikes(selectedUnderlyingPrice);
+    if(selectedUnderlyingPrice>0&&optionChainRows.length) {
+      if(!selectedContractSymbol||!selectedContractSymbol.endsWith(side)) renderOptionStrikes(selectedUnderlyingPrice);
+    } else if(selectedUnderlyingPrice>0) {
+      void loadOptionChain(symbol,selectedUnderlyingPrice,'',symbolSelectionGeneration);
+    } else if(automatic) {
+      // The chart's first history request may still be in flight. Permit the
+      // next 30-second universe refresh to retry this same Top-1 handoff.
+      lastAutoTop3CandidateKey=null;
+    }
     return;
   }
   void selectSymbol(symbol);

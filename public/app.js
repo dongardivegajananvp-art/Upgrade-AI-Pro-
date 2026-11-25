@@ -86,7 +86,7 @@ async function refreshUniverseScan() {
       const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
       const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
       card.append(head,evidence,target,reason);
-      card.addEventListener('click',()=>selectSymbol(item.symbol));
+      card.addEventListener('click',()=>void selectCandidateForEntry(item));
       container.append(card);
     }
     if(!(data.top3||[]).length) {
@@ -1250,6 +1250,18 @@ async function evaluateSelectedSetup() {
   } catch(error) { setupEvaluationDone=true; setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
+function selectCandidateForEntry(candidate) {
+  const symbol=String(candidate?.symbol||'').trim();
+  const side=candidate?.side==='LONG'?'CE':candidate?.side==='SHORT'?'PE':null;
+  if(!symbol||!side)return;
+  // Set direction before the option chain renders, so the nearest official
+  // contract is selected on the strategy-confirmed side (not a stale UI side).
+  selectedOptionSide=side;
+  document.querySelector('#ce-select').classList.toggle('active',side==='CE');
+  document.querySelector('#pe-select').classList.toggle('active',side==='PE');
+  void selectSymbol(symbol);
+}
+
 async function autoSelectDirectionalOption(optionSide) {
   const requestGeneration=++optionSelectionGeneration;
   const requestedUnderlying=selectedSymbol,requestedSide=optionSide;

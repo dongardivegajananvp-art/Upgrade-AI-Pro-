@@ -337,3 +337,16 @@ test('entry evaluation waits for verified daily and 15m context and account poll
   assert.match(app, /accountRefreshSafe = !restState\.cooldownActive/);
   assert.match(app, /Number\(restState\.requestsThisMinute \|\| 0\) < 4/);
 });
+
+
+test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {
+  const start = app.indexOf('function renderChartViewport()');
+  const end = app.indexOf('\\nfunction ', start + 10);
+  assert.ok(start >= 0 && end > start, 'chart renderer is present');
+  const renderer = app.slice(start, end);
+  const historyGuard = renderer.indexOf('if (!chartCandles.length) return;');
+  const clearArea = renderer.indexOf('area.replaceChildren();');
+  assert.ok(historyGuard >= 0 && clearArea > historyGuard,
+    'renderer must preserve loading/error content until verified completed candles exist');
+  assert.match(renderer, /chartLiveCandle[\\s\\S]*?chartCandles/);
+});

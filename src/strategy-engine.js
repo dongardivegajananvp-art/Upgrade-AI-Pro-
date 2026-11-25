@@ -75,8 +75,7 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
   };
   const expected=setup?.side==='LONG'?'BULLISH':'BEARISH';
   const dailyTrend=trend(dailyCandles),fifteenTrend=trend(fifteenMinuteCandles),fiveTrend=trend(candles);
-  const pressure=setup?.breakoutConfirmation?.pressure || (setup?.side==='LONG'?'BUYING':'SELLING');
-  const volume=Number(candles.find(c=>Number(c.time)===Number(setup?.confirmedAt))?.volume);
+  const patternCandle=candles.find(c=>Number(c.time)===Number(setup?.confirmedAt));
   const aligned=t=>t===expected;
   const derivedRegime=dailyTrend===fifteenTrend&&dailyTrend!=='NEUTRAL'?'TRENDING_'+dailyTrend:
     (dailyTrend==='NEUTRAL'&&fifteenTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
@@ -86,8 +85,7 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     dailyTrend:aligned(dailyTrend)?20:dailyTrend==='NEUTRAL'?8:0,
     fifteenMinuteTrend:aligned(fifteenTrend)?20:fifteenTrend==='NEUTRAL'?8:0,
     fiveMinuteTrend:aligned(fiveTrend)?15:fiveTrend==='NEUTRAL'?6:0,
-    directionalPressure:pressure===(setup?.side==='LONG'?'BUYING':'SELLING')?10:0,
-    breakoutVolume:Number.isFinite(volume)&&volume>0?10:0,
+    strategyStructure:patternCandle&&validOhlcv(patternCandle)?20:0,
     liveTickFresh:5,
     strategyEvidence:setup?.strategy?20:0
   };
@@ -103,7 +101,7 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCa
     targetR===2.25?'B-grade research: at least two timeframes align; 2.25R objective':
     'Conservative research objective: minimum 2R';
   const evidence=['Daily trend: '+dailyTrend,'15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,
-    'Market regime: '+regime,'Breakout candle pressure: '+pressure,'Breakout candle volume: '+(Number.isFinite(volume)&&volume>0?'verified':'missing'),'FYERS tick: fresh'];
+    'Market regime: '+regime,'Completed-candle strategy structure: verified','FYERS tick: fresh'];
   return {status:'COMPLETE',qualityScore,rawQualityScore,regimePenalty,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
     direction:setup.side,timeframes:{daily:dailyTrend,fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},
     points,evidence,marketRegime:regime,targetR,targetRationale,targetMethod:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',
@@ -208,64 +206,29 @@ function pivotLow(rows, i, width=2) {
 // This is a shared entry-quality condition inside the existing nine strategies,
 // not a tenth strategy. For retest setups, validate the original level-crossing
 // candle; for trend/pullback setups without a fresh level cross, validate trigger candle.
-export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
-  if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) return { ok: false, reason: 'Verified completed OHLCV candles and direction are required' };
-  const signalIndex = signalTime == null ? rows.length - 1 : rows.findIndex(c => number(c.time) === number(signalTime));
-  if (signalIndex < 0) return { ok: false, reason: 'The strategy trigger candle is missing from verified history' };
-  let breakoutIndex = signalIndex, levelCrossFound = false;
-  // Only retest strategies must trace the original level-crossing candle.
-  // Trend, momentum and pullback setups validate their own trigger candle;
-  // an older crossing of the same numeric level is not valid confirmation.
-  if (requireLevelCross && finite(breakoutLevel)) {
-    for (let i = signalIndex; i >= 1; i--) {
-      const crossed = side === 'LONG'
-        ? number(rows[i].close) > number(breakoutLevel) && number(rows[i-1].close) <= number(breakoutLevel)
-        : number(rows[i].close) < number(breakoutLevel) && number(rows[i-1].close) >= number(breakoutLevel);
-      if (crossed) { breakoutIndex = i; levelCrossFound = true; break; }
+export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
+  if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) return { ok:false, reason:'Verified completed 5-minute candles and strategy direction are required' };
+  const signalIndex=signalTime==null?rows.length-1:rows.findIndex(c=>number(c.time)===number(signalTime));
+  if(signalIndex<0)return{ok:false,reason:'The strategy trigger candle is missing from verified history'};
+  let triggerIndex=signalIndex,levelCrossFound=false;
+  // Retest patterns retain their original level-cross -> retest sequence.
+  // No candle-body, buying/selling-pressure, or volume threshold is applied.
+  if(requireLevelCross&&finite(breakoutLevel)){
+    for(let i=signalIndex;i>=1;i--){
+      const crossed=side==='LONG'
+        ? number(rows[i].close)>number(breakoutLevel)&&number(rows[i-1].close)<=number(breakoutLevel)
+        : number(rows[i].close)<number(breakoutLevel)&&number(rows[i-1].close)>=number(breakoutLevel);
+      if(crossed){triggerIndex=i;levelCrossFound=true;break;}
     }
   }
-  if (requireLevelCross && !levelCrossFound) return { ok: false, reason: 'Original breakout/breakdown candle could not be verified; retest candle cannot substitute' };
-  const candle = rows[breakoutIndex];
-  if (!validOhlcv(candle)) return { ok: false, reason: 'Original breakout/breakdown candle OHLC is missing or invalid' };
-  // Use every available immediately preceding contiguous candle from the
-  // same trading session as the relative-volume baseline. There is no candle
-  // count cap or warm-up threshold; the opening breakout can use the opening
-  // candle as its first reference. Stop at gaps, session boundaries, or invalid
-  // volume rather than silently reaching across missing data.
-  const baseline = [];
-  for (let i = breakoutIndex - 1; i >= 0; i--) {
-    const row = rows[i], next = baseline[0] || candle;
-    if (!validOhlcv(row) || !finite(row.volume) || number(row.volume) <= 0 ||
-        number(next.time) - number(row.time) !== INTERVAL_SECONDS ||
-        istDayKey(number(row.time)) !== istDayKey(number(candle.time))) break;
-    baseline.unshift(row);
-  }
-  if (!baseline.length) return { ok: false, reason: 'At least one immediately preceding same-session completed 5-minute candle with valid positive volume is required for relative-volume confirmation' };
-  if (!finite(candle.volume) || number(candle.volume) <= 0) return { ok: false, reason: 'Original breakout/breakdown candle volume is missing or invalid' };
-  const range = number(candle.high) - number(candle.low);
-  if (!(range > 0)) return { ok: false, reason: 'Breakout/breakdown candle has no measurable range' };
-  const body = number(candle.close) - number(candle.open);
-  const bodyStrength = Math.abs(body) / range;
-  const closeLocation = (number(candle.close) - number(candle.low)) / range;
-  const pressureOk = side === 'LONG'
-    ? body > 0 && bodyStrength >= 0.40 && closeLocation >= 0.65
-    : body < 0 && bodyStrength >= 0.40 && closeLocation <= 0.35;
-  if (!pressureOk) return { ok: false, reason: side === 'LONG'
-    ? 'Buying pressure is weak: candle body must be at least 40% of range and close in the top 35%'
-    : 'Selling pressure is weak: candle body must be at least 40% of range and close in the bottom 35%',
-    bodyStrength, closeLocation };
-  const averagePriorVolume = baseline.reduce((sum, row) => sum + number(row.volume), 0) / baseline.length;
-  const relativeVolume = number(candle.volume) / averagePriorVolume;
-  if (!(relativeVolume >= 1.20)) return { ok: false, reason: 'Breakout/breakdown volume must be at least 1.20x the average of all available prior contiguous same-session 5-minute candles', averagePriorVolume, relativeVolume };
-  return {
-    ok: true,
-    reason: side === 'LONG' ? 'Strong buying pressure and 1.20x relative breakout volume confirmed' : 'Strong selling pressure and 1.20x relative breakdown volume confirmed',
-    candleTime: number(candle.time), breakoutVolume: number(candle.volume), averagePriorVolume,
-    relativeVolume: Number(relativeVolume.toFixed(2)), baselineCandleCount: baseline.length, bodyStrength: Number(bodyStrength.toFixed(2)),
-    closeLocation: Number(closeLocation.toFixed(2)),
-    pressure: side === 'LONG' ? 'BUYING' : 'SELLING'
-  };
+  if(requireLevelCross&&!levelCrossFound)return{ok:false,reason:'Original completed-candle level break could not be verified; retest candle cannot substitute'};
+  const candle=rows[triggerIndex];
+  if(!validOhlcv(candle))return{ok:false,reason:'Strategy trigger candle OHLC is missing or invalid'};
+  return{ok:true,reason:'Strategy trigger candle and required price-level sequence verified',
+    candleTime:number(candle.time),breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
+    retestSequenceVerified:Boolean(requireLevelCross)};
 }
+export const confirmBreakoutPressureVolume = confirmStrategyTriggerCandle;
 
 function candidate(strategy, side, level, candle, details={}) {
   if (!finite(level) || number(level)<=0) return null;
@@ -319,20 +282,17 @@ export function detectContinuation(rows, side) {
   return candidate(side==='LONG'?'BULLISH_CONTINUATION':'BEARISH_CONTINUATION',side,side==='LONG'?ceiling:floor,last,{pattern});
 }
 export function detectFlagVolume(rows) {
-  const last=rows.at(-1), flag=rows.slice(-13,-1), impulse=rows.slice(-30,-13);
-  const volumes=flag.map(c=>number(c.volume)).filter(Number.isFinite);
-  const priorVol=rows.slice(-30,-13).map(c=>number(c.volume)).filter(Number.isFinite);
-  if(volumes.length!==12||priorVol.length<10)return null;
-  const avgFlag=volumes.reduce((a,b)=>a+b,0)/volumes.length;
-  const avgPrior=priorVol.reduce((a,b)=>a+b,0)/priorVol.length;
+  const last=rows.at(-1),flag=rows.slice(-13,-1),impulse=rows.slice(-30,-13);
+  if(flag.length!==12||impulse.length!==17||!last)return null;
   const high=Math.max(...flag.map(c=>number(c.high))),low=Math.min(...flag.map(c=>number(c.low)));
   const impulseUp=number(impulse.at(-1).close)>number(impulse[0].close);
   const impulseDown=number(impulse.at(-1).close)<number(impulse[0].close);
-  if(avgFlag>=avgPrior*0.75)return null;
-  if(impulseUp&&number(last.close)>high&&number(last.volume)>=avgFlag*1.20)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last);
-  if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.20)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
+  // Pure price-structure flag; no volume contraction or breakout-volume filter.
+  if(impulseUp&&number(last.close)>high)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last,{pattern:'BULL_FLAG_PRICE_BREAKOUT'});
+  if(impulseDown&&number(last.close)<low)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last,{pattern:'BEAR_FLAG_PRICE_BREAKDOWN'});
   return null;
 }
+
 export function detectOpeningRange(rows, sessionStartMinute = 555) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
@@ -489,25 +449,26 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles','No two comparable swing highs/lows, neckline break, and subsequent neckline retest were all confirmed');
   consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
-  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','Flag volume did not contract below 75% of impulse volume or breakout volume did not reach 1.20x flag average');
+  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','No flag impulse, consolidation range, and completed price breakout confirmed');
   consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','No completed 5-minute candle broke and retested the first-candle/15-minute opening range');
-  // Apply one identical pressure+volume gate to every strategy signal.
-  const rejectedForConfirmation = [];
-  const confirmedCandidates = candidates.filter(item => {
-    const requireOriginalCross = ['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(item.strategy);
-    const confirmation = confirmBreakoutPressureVolume(rows, item.side, item.breakoutLevel, item.confirmedAt, requireOriginalCross);
-    if (!confirmation.ok) {
-      rejectedForConfirmation.push({ strategy: item.strategy, reason: confirmation.reason, metrics: confirmation });
+  // Strategy-specific price structure is the trigger confirmation.
+  // No common directional-pressure or volume gate is applied.
+  const triggerRejected=[];
+  const confirmedCandidates=candidates.filter(item=>{
+    const requireOriginalCross=['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(item.strategy);
+    const confirmation=confirmStrategyTriggerCandle(rows,item.side,item.breakoutLevel,item.confirmedAt,requireOriginalCross);
+    if(!confirmation.ok){
+      triggerRejected.push({strategy:item.strategy,reason:confirmation.reason});
       const row=strategyLedger.find(entry=>entry.strategy===item.strategy);
       if(row){row.status='REJECTED';row.reason=confirmation.reason;}
       return false;
     }
-    item.breakoutConfirmation = confirmation;
+    item.triggerConfirmation=confirmation;
     return true;
   });
-  candidates.splice(0, candidates.length, ...confirmedCandidates);
+  candidates.splice(0,candidates.length,...confirmedCandidates);
   if(!candidates.length){
-    if(rejectedForConfirmation.length)return {status:'NO_TRADE',reason:'Breakout rejected: directional candle pressure and verified breakout-candle volume are mandatory',rejectedStrategies:rejectedForConfirmation,evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
+    if(triggerRejected.length)return{status:'NO_TRADE',reason:'Strategy price-level confirmation could not be verified',rejectedStrategies:triggerRejected,evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
     if(!evaluated.length)return {...fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', ')),strategyLedger};
     if(researchEnabled){
       const watch=analyzeEarlyWatch({candles:rows,dailyCandles,fifteenMinuteCandles,tick:underlyingTick,now});

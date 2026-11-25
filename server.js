@@ -672,6 +672,13 @@ const server = http.createServer(async (req,res) => {
           stopLoss:Number.isFinite(Number(result.stopLoss))?result.stopLoss:null,
           target:Number.isFinite(Number(result.target))?result.target:null,
           rr:Number.isFinite(Number(result.rr))?result.rr:null,
+          entryTriggerPrice:Number.isFinite(Number(result.entryTriggerPrice))?result.entryTriggerPrice:null,
+          optionConfirmation:result.optionConfirmation||null,
+          researchStatus:result.research?.status||null,
+          researchQualityScore:Number.isFinite(Number(result.research?.qualityScore))?result.research.qualityScore:null,
+          evaluatedStrategies:Array.isArray(result.evaluatedStrategies)?result.evaluatedStrategies:[],
+          blockedStrategies:Array.isArray(result.blockedStrategies)?result.blockedStrategies:[],
+          strategyLedger:Array.isArray(result.strategyLedger)?result.strategyLedger.map(({strategy,status,reason,side,confirmedAt})=>({strategy,status,reason,side:side||null,confirmedAt:confirmedAt||null})):[],
           durationMs:Date.now()-startedAt
         }));
         return {...result,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'};

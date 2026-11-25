@@ -5,6 +5,8 @@ const labels = [
   ['BSE:SENSEX-INDEX','sensex','sensex-change']
 ];
 let selectedSymbol = null;
+let userSelectedSymbol = false;
+let lastAutoTop3CandidateKey = null;
 let symbolSelectionGeneration = 0;
 let optionSelectionGeneration = 0;
 let refreshRunning = false;
@@ -65,6 +67,17 @@ async function refreshUniverseScan() {
   try {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
+    // Once a fully verified Top-3 candidate exists, automatically route the #1
+    // candidate into read-only CE/PE verification unless the user has chosen
+    // a chart symbol manually. This never places an order.
+    if(data.marketSession==='OPEN'&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
+      const best=data.top3[0];
+      const candidateKey=[best.symbol,best.strategy,best.side].join('|');
+      if(best.symbol&&['LONG','SHORT'].includes(best.side)&&candidateKey!==lastAutoTop3CandidateKey) {
+        lastAutoTop3CandidateKey=candidateKey;
+        selectCandidateForEntry(best,{automatic:true});
+      }
+    }
     container.replaceChildren();
     status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
@@ -169,7 +182,7 @@ async function refreshUniverseScan() {
         const disclaimer=document.createElement('small');
         disclaimer.textContent='Research candidate only. No live underlying tick, option quote, option candles, Entry, SL or Target verified. NO TRADE until live gates pass.';
         card.append(head,details,disclaimer);
-        card.addEventListener('click',()=>selectSymbol(item.symbol));
+        card.addEventListener('click',()=>selectUserSymbol(item.symbol));
         container.append(card);
       }
       if(!(historical.candidates||[]).length) {
@@ -501,7 +514,7 @@ function renderMovers(fno) {
     button.dataset.state = cardState;
     button.dataset.rank = String(index + 1);
     button.title = view.mode === 'LIVE' && item.fresh ? 'Fresh FYERS exchange tick · ' + direction.toUpperCase() + ' ' + pct.toFixed(2) + '%' : (view.mode === 'LIVE' ? 'Rolling FYERS session observation · ' + Number(item.ageSeconds).toFixed(0) + 's old · NOT ACTIONABLE' : (view.mode === 'LAST_SESSION' ? 'LAST SESSION SNAPSHOT · NOT LIVE OR ACTIONABLE' : 'LAST OBSERVED SNAPSHOT · NOT LIVE OR ACTIONABLE'));
-    button.addEventListener('click', () => selectSymbol(item.symbol, item.price));
+    button.addEventListener('click', () => selectUserSymbol(item.symbol, item.price));
     const name = document.createElement('strong');
     name.textContent = item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
     const price = document.createElement('span');
@@ -514,6 +527,7 @@ function renderMovers(fno) {
   });
 }
 async function selectIndexSymbol(symbol) {
+  userSelectedSymbol=true;
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
   selectedSymbol = symbol; researchContextReadySymbol = null; researchContextRetryAt = 0; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
@@ -707,6 +721,11 @@ async function selectSymbol(symbol, livePrice = null) {
     results.append(note);
   }
 }
+function selectUserSymbol(symbol, livePrice=null) {
+  userSelectedSymbol=true;
+  return selectSymbol(symbol,livePrice);
+}
+
 function drawHistoryChart(candles) {
   chartCandles = Array.isArray(candles) ? candles.slice() : [];
   try {
@@ -1250,15 +1269,21 @@ async function evaluateSelectedSetup() {
   } catch(error) { setupEvaluationDone=true; setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
-function selectCandidateForEntry(candidate) {
+function selectCandidateForEntry(candidate, options={}) {
+  const automatic=Boolean(options.automatic);
   const symbol=String(candidate?.symbol||'').trim();
   const side=candidate?.side==='LONG'?'CE':candidate?.side==='SHORT'?'PE':null;
   if(!symbol||!side)return;
-  // Set direction before the option chain renders, so the nearest official
-  // contract is selected on the strategy-confirmed side (not a stale UI side).
+  if(!automatic) userSelectedSymbol=true;
+  // Carry the verified setup direction before the option chain renders, so
+  // nearest-strike selection cannot inherit a stale CE/PE side.
   selectedOptionSide=side;
   document.querySelector('#ce-select').classList.toggle('active',side==='CE');
   document.querySelector('#pe-select').classList.toggle('active',side==='PE');
+  if(selectedSymbol===symbol&&!chartRestoredFromCache) {
+    if(!selectedContractSymbol||!selectedContractSymbol.endsWith(side)) renderOptionStrikes(selectedUnderlyingPrice);
+    return;
+  }
   void selectSymbol(symbol);
 }
 
@@ -1365,7 +1390,7 @@ function renderFnoSearchResults(payload, sequence) {
       fnoSearchResults.replaceChildren();
       const note=document.createElement('div');note.className='empty-inline';note.textContent='Selected '+item.symbol+' · loading verified chart and option chain…';
       fnoSearchResults.append(note);
-      selectSymbol(item.symbol);
+      selectUserSymbol(item.symbol);
     });
     fnoSearchResults.append(button);
   }

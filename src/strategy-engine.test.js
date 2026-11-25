@@ -78,14 +78,14 @@ test('common confirmation accepts exactly 1.20x breakout volume', () => {
 });
 test('pressure threshold accepts 40% body and a close within the top/bottom 35%', () => {
   const bullish=pressureVolumeRows('LONG');
-  bullish[20]={...bullish[20],open:100,high:104,low:99,close:102,volume:120};
+  bullish[20]={...bullish[20],open:100,high:103,low:98,close:102,volume:120};
   const buy=confirmBreakoutPressureVolume(bullish,'LONG',101,bullish[20].time);
   assert.equal(buy.ok,true);
   assert.equal(buy.bodyStrength,0.4);
   assert.equal(buy.relativeVolume,1.2);
 
   const bearish=pressureVolumeRows('SHORT');
-  bearish[20]={...bearish[20],open:100,high:101,low:96,close:98,volume:120};
+  bearish[20]={...bearish[20],open:100,high:102,low:97,close:98,volume:120};
   const sell=confirmBreakoutPressureVolume(bearish,'SHORT',99,bearish[20].time);
   assert.equal(sell.ok,true);
   assert.equal(sell.bodyStrength,0.4);

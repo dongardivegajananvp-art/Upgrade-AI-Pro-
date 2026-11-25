@@ -13,6 +13,10 @@ export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols =
 
 // Keep the currently selected option ahead of background F&O subscriptions.
 // The caller still sends one symbol per paced batch; this only changes FIFO order.
+export function resolveSelectedOptionOnUnderlyingChange(previousUnderlying, nextUnderlying, selectedOption = null) {
+  return previousUnderlying === nextUnderlying ? selectedOption : null;
+}
+
 export function prioritizeSubscriptionQueue(pendingSymbols = [], prioritySymbol = null) {
   const queue = [...new Set((Array.isArray(pendingSymbols) ? pendingSymbols : [])
     .filter(symbol => typeof symbol === 'string' && symbol))];

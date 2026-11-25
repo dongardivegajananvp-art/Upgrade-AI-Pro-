@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE,
-  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS
+  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS, getFnoScanSliceKey, shouldResetFnoScanCursor
 } from './rolling-fno-scanner.js';
 
 const universe=Array.from({length:218},(_,i)=>({symbol:`NSE:STOCK${String(i).padStart(3,'0')}-EQ`}));
@@ -109,4 +109,13 @@ test('fresh never-scanned symbol takes priority over a due previously scanned sy
   const ticks=new Map([[old,tick(old)],[fresh,tick(fresh)]]);
   const ledger=new Map([[old,{scannedAt:new Date(now-FNO_SYMBOL_RESCAN_COOLDOWN_MS).toISOString()}]]);
   assert.equal(getNextFreshFnoScanSymbol([old,fresh],ticks,ledger,now),fresh);
+});
+
+test('scanner cursor resets when active slice membership changes without a rotation-index change',()=>{
+  const previous=['NSE:A-EQ','NSE:B-EQ'];
+  const next=['NSE:A-EQ','NSE:C-EQ'];
+  const previousKey=getFnoScanSliceKey(previous);
+  assert.equal(shouldResetFnoScanCursor(4,4,previousKey,getFnoScanSliceKey(next)),true);
+  assert.equal(shouldResetFnoScanCursor(4,4,previousKey,getFnoScanSliceKey(previous)),false);
+  assert.equal(shouldResetFnoScanCursor(4,5,previousKey,previousKey),true);
 });

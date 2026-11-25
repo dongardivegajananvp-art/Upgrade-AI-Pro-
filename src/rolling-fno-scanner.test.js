@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE,
+  buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE,
   getNextFnoRotationIndex, getFnoScanBatchSize
 } from './rolling-fno-scanner.js';
 
@@ -51,4 +51,20 @@ test('history-backed scanner advertises one new symbol per minute under the guar
   assert.equal(FNO_SCAN_PER_SLICE,1);
   assert.equal(getFnoScanBatchSize(218,0),1);
   assert.equal(getFnoScanBatchSize(218,217),1);
+});
+
+
+test('WebSocket rotates eight new symbols per minute while REST history scan remains one per minute',()=>{
+  assert.equal(FNO_SCAN_PER_SLICE,1);
+  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,8);
+  const visited=new Set();
+  let start=0,rotations=0;
+  do{
+    for(const item of buildFnoRotationSlice(universe,start,20)) visited.add(item.symbol);
+    start=getNextFnoRotationIndex(universe.length,start,FNO_SOCKET_ROTATION_ADVANCE);
+    rotations++;
+    assert.ok(rotations<=Math.ceil(universe.length/FNO_SOCKET_ROTATION_ADVANCE));
+  }while(start!==0);
+  assert.equal(visited.size,218);
+  assert.equal(rotations,28);
 });

@@ -56,7 +56,308 @@ test('retest trigger still requires original completed-candle price-level cross'
   const retest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,true);
   assert.equal(retest.ok,true);
   assert.equal(retest.candleTime,rows[20].time);
+  const missing=confirmStrategyTriggerCandle(rows,'LONG',105,rows[21].time,true);
+  assert.equal(missing.ok,false);
 });
+
+test('multi-timeframe research returns an explainable score only with verified daily, 15m and 5m candles', () => {
+  const now=1800000000000;
+  const make=(count,step,base)=>Array.from({length:count},(_,i)=>({time:base+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
+  const five=make(60,300,now/1000-60*300),daily=make(60,86400,now/1000-60*86400),fifteen=make(60,900,now/1000-60*900);
+  const setup={strategy:'EMA20_EMA50_TREND',side:'LONG',confirmedAt:five.at(-1).time};
+  const result=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick:{exchangeTime:now/1000,receivedAt:now},setup,now});
+  assert.equal(result.status,'COMPLETE');
+  assert.ok(result.qualityScore>=85&&result.qualityScore<=100);
+  assert.equal(result.timeframes.daily,'BULLISH');
+  assert.equal(result.timeframes.fifteenMinute,'BULLISH');
+  assert.ok(result.evidence.some(line=>line.includes('Completed-candle strategy structure: verified')));
+  assert.equal('directionalPressure' in result.points,false);
+  assert.equal('breakoutVolume' in result.points,false);
+  assert.equal(result.targetR,2.5);
+  assert.equal(result.targetMethod,'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE');
+});
+test('multi-timeframe research refuses to invent a score when 15m history is incomplete', () => {
+  const now=1800000000000;
+  const make=(count,step,base=1700000000)=>Array.from({length:count},(_,i)=>({time:base+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
+  const recentDaily=make(60,86400,now/1000-60*86400);
+  const result=analyzeSetupResearch({candles:make(60,300),dailyCandles:recentDaily,fifteenMinuteCandles:make(12,900),tick:{exchangeTime:now/1000,receivedAt:now},setup:{side:'LONG',confirmedAt:1700017700},now});
+  assert.equal(result.status,'UNAVAILABLE');
+  assert.match(result.reason,/50 verified 15-minute/);
+});
+
+
+test('diagnostic ledger reports all nine strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
+  const now=1800000000000;
+  const result=detectNineStrategySetup({underlyingCandles:[],underlyingTick:null,now});
+  assert.equal(result.strategyLedger.length,9);
+  assert.ok(result.strategyLedger.every(row=>row.status==='BLOCKED'&&row.reason));
+  assert.deepEqual(result.strategyLedger.map(row=>row.strategy),STRATEGIES);
+});
+
+test('direction-aware option selection is not actionable until independent live gates pass', async () => {
+  const { chooseDirectionalOption } = await import('./option-selection.js');
+  const rows=[
+    {symbol:'NSE:ABC100CE',option_type:'CE',strike_price:100},
+    {symbol:'NSE:ABC105CE',option_type:'CE',strike_price:105},
+    {symbol:'NSE:ABC100PE',option_type:'PE',strike_price:100}
+  ];
+  const call=chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'LONG'});
+  const put=chooseDirectionalOption({optionsChain:rows,underlyingPrice:101,side:'SHORT'});
+  assert.equal(call.side,'CE');
+  assert.equal(call.strike,105);
+  assert.equal(put.side,'PE');
+  assert.equal(put.strike,100);
+  assert.equal(call.actionable,false);
+  assert.equal(chooseDirectionalOption({optionsChain:rows,underlyingPrice:104,side:'FLAT'}).status,'UNAVAILABLE');
+});
+
+
+test('diagnostic ledger uses strategy-specific rejection reasons when verified windows are available', () => {
+  const now=Date.parse('2026-11-19T05:00:00Z');
+  const start=Math.floor(now/1000)-60*300;
+  const candles=Array.from({length:60},(_,i)=>({time:start+i*300,open:100,high:100.5,low:99.5,close:100,volume:100}));
+  const result=detectNineStrategySetup({underlyingCandles:candles,underlyingTick:{price:100,exchangeTime:now/1000,receivedAt:now},now});
+  assert.equal(result.strategyLedger.length,9);
+  assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED'].includes(row.status)&&row.reason));
+  assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
+  assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('daily candles')));
+});
+
+test('early option entry exposes exact tick-aligned trigger while waiting inside the same 5-minute candle', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i,completed:true};
+  });
+  const optionCandles=Array.from({length:3},(_,i)=>({
+    time:start+(47+i)*300,open:103+i,high:104+i,low:102+i,close:103.5+i,volume:500+i,completed:true
+  }));
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const optionTick={symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({
+    underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,optionTick,contract,dailyCandles:[],fifteenMinuteCandles:[],
+    isTopGainer:false,researchEnabled:false,now
+  });
+  assert.equal(result.status,'WAITING_FOR_OPTION_BREAKOUT');
+  assert.equal(result.entryTriggerPrice,106.05);
+  assert.equal(result.optionTickSize,.05);
+  assert.equal(result.contract,contract.symbol);
+  assert.equal(result.optionSide,'CE');
+});
+
+test('option entry requires ordered prior-range, bullish-breakout and bullish-retest candles', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i};
+  });
+  const optionCandles=[
+    {time:start+47*300,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const base={underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionTick:{symbol:contract.symbol,price:105.5,exchangeTime:now/1000,receivedAt:now},
+    contract,optionCandles,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now};
+  const valid=evaluateNineStrategies(base);
+  assert.equal(valid.status,'WAITING_FOR_OPTION_BREAKOUT');
+  assert.equal(valid.entryTriggerPrice,106.05);
+  const invalid=evaluateNineStrategies({...base,optionCandles:[
+    optionCandles[0],optionCandles[1],
+    {...optionCandles[2],low:102.5,close:103,open:104}
+  ]});
+  assert.equal(invalid.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(invalid.reason,/confirmation candle must retest/i);
+});
+
+test('confirmed option entry returns Entry/SL/Target/RR and the retest candle timestamp', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i};
+  });
+  const optionCandles=[
+    {time:start+47*300,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,
+    optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now
+  });
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.optionCandleTime,optionCandles[2].time);
+  assert.equal(result.entry,106.05);
+  assert.equal(result.stopLoss,103.95);
+  assert.equal(result.rr,2);
+  assert.equal(result.optionConfirmation,'COMPLETED_BULLISH_BREAKOUT_RETEST');
+  assertStaleOptionQuoteBlocks(underlyingCandles,'LONG','EMA20_EMA50_TREND');
+});
+
+test('confirmed PE entry supports a bearish underlying while requiring bullish option-premium breakout and 2R', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=200-i*1.2,close=open-1.2;
+    return {time:start+i*300,open,high:open+.1,low:close-.1,close,volume:i===49?2000:1000+i};
+  });
+  const optionCandles=[
+    {time:start+47*300,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150PE',underlying:'ABC',side:'PE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-PE-150'};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:139.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,
+    optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now
+  });
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'EMA20_EMA50_TREND');
+  assert.equal(result.underlyingSide,'SHORT');
+  assert.equal(result.optionSide,'PE');
+  assert.equal(result.entry,106.05);
+  assert.equal(result.rr,2);
+  assert.equal(result.optionConfirmation,'COMPLETED_BULLISH_BREAKOUT_RETEST');
+});
+
+test('research-enabled entry remains blocked until verified daily and 15-minute context is complete', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i*1.2,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i};
+  });
+  const optionCandles=[
+    {time:start+47*300,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:start+48*300,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:159.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,
+    optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:true,now
+  });
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(result.reason,/50 verified daily candles/i);
+  assert.equal(result.entry,undefined);
+  assert.equal(result.stopLoss,undefined);
+  assert.equal(result.target,undefined);
+});
+
+test('non-retest strategies validate their trigger candle without pressure or volume gates', () => {
+  const rows=Array.from({length:22},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  rows[20]={time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:200};
+  rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:150};
+  const nonRetest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,false);
+  assert.equal(nonRetest.ok,true);
+
+  const retest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,true);
+  assert.equal(retest.ok,true);
+  assert.equal(retest.candleTime,rows[20].time);
+});
+
+
+test('top-gainer breakout uses two contiguous candles and no fixed 20-candle volume warm-up', () => {
+  const now=1800006901000;
+  const start=Math.floor(now/1000)-2*300;
+  const underlyingCandles=Array.from({length:2},(_,i)=>i===1
+    ? {time:start+i*300,open:100,high:103,low:99.8,close:102.5,volume:250}
+    : {time:start+i*300,open:100,high:101,low:99,close:100,volume:100});
+  const result=detectNineStrategySetup({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
+    isTopGainer:true,researchEnabled:false,now
+  });
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(topGainer.status,'DETECTED');
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='BLOCKED'));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
+});
+
+
+test('top-gainer scanner fails closed on a gap, duplicate, or reversed completed 5-minute window', () => {
+  const now=1800006900000;
+  const base=Math.floor(now/1000)-2*300;
+  const baseline=[{time:base,open:100,high:101,low:99,close:100,volume:100}];
+  const breakout={time:base+300,open:100,high:103,low:99.8,close:102,volume:250};
+  const tick={symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now};
+  const variants=[
+    [{...baseline[0],time:base+300},breakout],
+    [{...baseline[0],time:base-300},breakout],
+    [breakout,...baseline]
+  ];
+  for(const underlyingCandles of variants){
+    const result=detectNineStrategySetup({underlyingCandles,underlyingTick:tick,isTopGainer:true,researchEnabled:false,now});
+    assert.notEqual(result.status,'UNDERLYING_SETUP_CONFIRMED');
+    assert.ok(result.status==='DATA_UNAVAILABLE_NO_TRADE'||result.status==='NO_TRADE');
+  }
+});
+
+test('option premium gate rejects a missing 5-minute candle even when the latest quote is fresh', () => {
+  const now=1800006300000;
+  const underlyingCandles=Array.from({length:21},(_,i)=>i===20
+    ? {time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:250}
+    : {time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100});
+  const optionCandles=[
+    {time:1800005100,open:103,high:104,low:102,close:103.5,volume:500},
+    {time:1800005400,open:104,high:105,low:103,close:104.5,volume:510},
+    {time:1800006000,open:105,high:106,low:104,close:105.5,volume:520}
+  ];
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:.05,expiry:now/1000+7*86400,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.1,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,
+    optionTick:{symbol:contract.symbol,price:106.1,exchangeTime:now/1000,receivedAt:now},
+    contract,isTopGainer:true,researchEnabled:false,now
+  });
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(result.reason,/3 contiguous completed 5-minute candles/i);
+});
+
+test('opening-range setup confirms first breakout after the opening candle without a 20-candle warm-up', () => {
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
+  const baseline=[{time:start,open:100,high:101,low:99,close:100,volume:100}];
+  const breakout={time:start+300,open:100,high:103,low:99.5,close:102.5,volume:200};
+  const setup=detectOpeningRange([...baseline,breakout],555,103);
+  assert.equal(setup.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(setup.side,'LONG');
+  const confirmation=confirmBreakoutPressureVolume([...baseline,breakout],'LONG',101,breakout.time);
+  assert.equal(confirmation.ok,true);
+  assert.equal(confirmation.candleTime,breakout.time);
+  assert.equal('pressure' in confirmation,false);
+  assert.equal('relativeVolume' in confirmation,false);
+});
+
+test('breakout candle confirmation enforces directional pressure and relative volume', () => {
+  const bullishRows=pressureVolumeRows('LONG');
+  const bearishRows=pressureVolumeRows('SHORT');
+  assert.equal(confirmBreakoutPressureVolume(bullishRows,'LONG',101,bullishRows.at(-1).time).ok,true);
+  assert.equal(confirmBreakoutPressureVolume(bearishRows,'SHORT',99,bearishRows.at(-1).time).ok,true);
+  const noVolume=pressureVolumeRows('LONG'); noVolume[20]={...noVolume[20],volume:0};
+  assert.equal(confirmBreakoutPressureVolume(noVolume,'LONG',101,noVolume[20].time).ok,false);
+  const weak=pressureVolumeRows('LONG'); weak[20]={...weak[20],close:100.5};
+  assert.equal(confirmBreakoutPressureVolume(weak,'LONG',101,weak[20].time).ok,false);
+});
+
+
 // Direct detector fixtures supplement the aggregate ledger tests. These
 // fixtures exercise representative positive and negative paths without
 // relaxing the common freshness, candle-continuity or option-entry gates.

@@ -248,18 +248,18 @@ export function confirmBreakoutPressureVolume(rows, side, breakoutLevel = null, 
   const bodyStrength = Math.abs(body) / range;
   const closeLocation = (number(candle.close) - number(candle.low)) / range;
   const pressureOk = side === 'LONG'
-    ? body > 0 && bodyStrength >= 0.50 && closeLocation >= 0.65
-    : body < 0 && bodyStrength >= 0.50 && closeLocation <= 0.35;
+    ? body > 0 && bodyStrength >= 0.40 && closeLocation >= 0.65
+    : body < 0 && bodyStrength >= 0.40 && closeLocation <= 0.35;
   if (!pressureOk) return { ok: false, reason: side === 'LONG'
-    ? 'Buying pressure is weak: candle body must be at least 50% of range and close in the top 35%'
-    : 'Selling pressure is weak: candle body must be at least 50% of range and close in the bottom 35%',
+    ? 'Buying pressure is weak: candle body must be at least 40% of range and close in the top 35%'
+    : 'Selling pressure is weak: candle body must be at least 40% of range and close in the bottom 35%',
     bodyStrength, closeLocation };
   const averagePriorVolume = baseline.reduce((sum, row) => sum + number(row.volume), 0) / baseline.length;
   const relativeVolume = number(candle.volume) / averagePriorVolume;
-  if (!(relativeVolume >= 1.25)) return { ok: false, reason: 'Breakout/breakdown volume must be at least 1.25x the average of all available prior contiguous same-session 5-minute candles', averagePriorVolume, relativeVolume };
+  if (!(relativeVolume >= 1.20)) return { ok: false, reason: 'Breakout/breakdown volume must be at least 1.20x the average of all available prior contiguous same-session 5-minute candles', averagePriorVolume, relativeVolume };
   return {
     ok: true,
-    reason: side === 'LONG' ? 'Strong buying pressure and 1.25x relative breakout volume confirmed' : 'Strong selling pressure and 1.25x relative breakdown volume confirmed',
+    reason: side === 'LONG' ? 'Strong buying pressure and 1.20x relative breakout volume confirmed' : 'Strong selling pressure and 1.20x relative breakdown volume confirmed',
     candleTime: number(candle.time), breakoutVolume: number(candle.volume), averagePriorVolume,
     relativeVolume: Number(relativeVolume.toFixed(2)), baselineCandleCount: baseline.length, bodyStrength: Number(bodyStrength.toFixed(2)),
     closeLocation: Number(closeLocation.toFixed(2)),
@@ -329,8 +329,8 @@ export function detectFlagVolume(rows) {
   const impulseUp=number(impulse.at(-1).close)>number(impulse[0].close);
   const impulseDown=number(impulse.at(-1).close)<number(impulse[0].close);
   if(avgFlag>=avgPrior*0.75)return null;
-  if(impulseUp&&number(last.close)>high&&number(last.volume)>=avgFlag*1.25)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last);
-  if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.25)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
+  if(impulseUp&&number(last.close)>high&&number(last.volume)>=avgFlag*1.20)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last);
+  if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.20)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
   return null;
 }
 export function detectOpeningRange(rows, sessionStartMinute = 555) {
@@ -489,7 +489,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles','No two comparable swing highs/lows, neckline break, and subsequent neckline retest were all confirmed');
   consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
-  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','Flag volume did not contract below 75% of impulse volume or breakout volume did not reach 1.25x flag average');
+  consider('FLAG_BREAKOUT_VOLUME',w30,()=>detectFlagVolume(rows),'Requires 30 contiguous completed 5-minute candles','Flag volume did not contract below 75% of impulse volume or breakout volume did not reach 1.20x flag average');
   consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','No completed 5-minute candle broke and retested the first-candle/15-minute opening range');
   // Apply one identical pressure+volume gate to every strategy signal.
   const rejectedForConfirmation = [];

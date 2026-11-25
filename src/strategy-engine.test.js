@@ -719,7 +719,7 @@ test('end-to-end flag price-breakout is independently selectable when continuati
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:400});
   rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:400});
-  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:108,high:112,low:104,close:108,volume:100});
+  for(let i=0;i<12;i++)rows.push({time:start+(17+i)*300,open:108,high:109.5,low:107.5,close:108,volume:0});
   rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:600});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));

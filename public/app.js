@@ -5,6 +5,8 @@ const labels = [
   ['BSE:SENSEX-INDEX','sensex','sensex-change']
 ];
 let selectedSymbol = null;
+let symbolSelectionGeneration = 0;
+let optionSelectionGeneration = 0;
 let refreshRunning = false;
 let chartRestoredFromCache = false;
 const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
@@ -577,7 +579,12 @@ async function selectSymbol(symbol, livePrice = null) {
   // A persisted chart is display-only. Selecting that same symbol must still
   // fetch current verified FYERS history; never let a cache hit suppress reload.
   if (symbol === selectedSymbol && !chartRestoredFromCache) return;
+  const selectionGeneration = ++symbolSelectionGeneration;
+  optionSelectionGeneration++;
   selectedSymbol = symbol;
+  selectedContractSymbol = null;
+  optionChainRows = [];
+  selectedUnderlyingPrice = null;
   researchContextReadySymbol = null;
   researchContextRetryAt = 0;
   chartRestoredFromCache = false;
@@ -597,6 +604,7 @@ async function selectSymbol(symbol, livePrice = null) {
   document.querySelector('#option-status').textContent = 'LOADING VERIFIED FYERS OPTION CHAIN';
   document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
   document.querySelector('#option-quantity').textContent = '—';
+  document.querySelector('#strike-select').replaceChildren(new Option('WAITING FOR VERIFIED CONTRACTS',''));
   const title = document.querySelector('#symbol');
   const area = document.querySelector('#chart-area');
   title.textContent = symbol + ' · LOADING VERIFIED FYERS HISTORY';
@@ -614,13 +622,14 @@ async function selectSymbol(symbol, livePrice = null) {
     if (!selectionResponse.ok || !['UNDERLYING_PINNED_TO_SOCKET_SLICE','UNCHANGED'].includes(selection.status)) {
       throw new Error(selection.reason || 'Underlying socket subscription was not confirmed');
     }
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
   } catch (error) {
     // Live socket pinning is required for fresh-tick trading gates, not for
     // independently verified historical candles. Keep the chart available
     // while clearly marking the live feed as unavailable and NO TRADE.
     socketPinError = String(error.message || 'Underlying socket subscription was not confirmed');
   }
-  if (selectedSymbol !== symbol) return;
+  if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
 
   try {
     const response = await fetch('/api/history?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
@@ -628,13 +637,13 @@ async function selectSymbol(symbol, livePrice = null) {
     if (!response.ok || !Array.isArray(data.candles) || !data.candles.length) {
       throw new Error(data.reason || 'Verified FYERS history is unavailable');
     }
-    if (selectedSymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
 
     drawHistoryChart(data.candles);
     selectedUnderlyingPrice = Number(livePrice) > 0 ? Number(livePrice) : (Number(data.candles.at(-1)?.close) || null);
     title.textContent = symbol + ' · FYERS HISTORY · ' + (data.count ?? data.candles.length) + ' COMPLETED 5-MIN CANDLES' + (socketPinError ? ' · LIVE FEED UNAVAILABLE · NO TRADE' : '');
   } catch (error) {
-    if (selectedSymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     area.replaceChildren();
     const note = document.createElement('div');
     note.className = 'chart-empty';
@@ -647,10 +656,10 @@ async function selectSymbol(symbol, livePrice = null) {
   // Option selection is downstream of the chart. Its failure must never erase
   // verified underlying history or change the chart's availability status.
   try {
-    await clearSelectedOption();
-    if (selectedSymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
+    // The backend atomically clears any prior option when the underlying changes.
     // Keep the user-facing option-chain request ahead of daily/15m research warmup.
-    await loadOptionChain(symbol, selectedUnderlyingPrice);
+    await loadOptionChain(symbol, selectedUnderlyingPrice, '', selectionGeneration);
   } catch (error) {
     if (selectedSymbol !== symbol) return;
     document.querySelector('#option-status').textContent =
@@ -661,13 +670,14 @@ async function selectSymbol(symbol, livePrice = null) {
   // there, while the already-rendered history chart remains intact.
   try {
     await ensureResearchContext(symbol);
-    if (selectedSymbol !== symbol || researchContextReadySymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration || researchContextReadySymbol !== symbol) return;
     const researchResponse = await fetch('/api/research?symbol=' + encodeURIComponent(symbol), { cache: 'no-store' });
     const researchPayload = await readJsonResponse(researchResponse, 'RESEARCH /api/research');
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     if (!researchResponse.ok) throw new Error(researchPayload.reason || 'Research request failed · HTTP ' + researchResponse.status);
-    if (selectedSymbol === symbol) renderResearchResults(researchPayload);
+    renderResearchResults(researchPayload);
   } catch (error) {
-    if (selectedSymbol !== symbol) return;
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     document.querySelector('#research-status').textContent = 'RESEARCH UNAVAILABLE · NO TRADE';
     const results = document.querySelector('#research-results');
     results.replaceChildren();
@@ -1029,7 +1039,7 @@ async function clearSelectedOption() {
     await fetch('/api/select-option', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({symbol:null}) });
   } catch {}
 }
-async function loadOptionChain(symbol, underlyingPrice, timestamp = '') {
+async function loadOptionChain(symbol, underlyingPrice, timestamp = '', selectionGeneration = symbolSelectionGeneration) {
   const status = document.querySelector('#option-status');
   status.textContent = 'LOADING FYERS OPTION CHAIN';
   try {
@@ -1037,6 +1047,7 @@ async function loadOptionChain(symbol, underlyingPrice, timestamp = '') {
     if (timestamp) query.set('timestamp', timestamp);
     const response = await fetch('/api/option-chain?' + query.toString(), {cache:'no-store'});
     const payload = await readJsonResponse(response, 'OPTION CHAIN /api/option-chain');
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable · HTTP ' + response.status);
     const data = payload.data || payload;
     optionChainRows = Array.isArray(data.optionsChain) ? data.optionsChain : [];
@@ -1056,6 +1067,7 @@ async function loadOptionChain(symbol, underlyingPrice, timestamp = '') {
     renderOptionStrikes(underlyingPrice);
     status.textContent = 'FYERS CHAIN LOADED · CONTRACT MASTER CHECK REQUIRED';
   } catch (error) {
+    if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     optionChainRows = [];
     document.querySelector('#strike-select').replaceChildren(new Option('—',''));
     status.textContent = 'OPTION CHAIN UNAVAILABLE · ' + String(error.message || 'No verified contracts');
@@ -1219,6 +1231,7 @@ async function evaluateSelectedSetup() {
   finally { setupEvaluationRunning=false; }
 }
 async function autoSelectDirectionalOption(optionSide) {
+  const requestGeneration=++optionSelectionGeneration;
   const requestedUnderlying=selectedSymbol,requestedSide=optionSide;
   const status=document.querySelector('#option-status');
   const expiry=document.querySelector('#expiry-select').value;
@@ -1228,7 +1241,7 @@ async function autoSelectDirectionalOption(optionSide) {
     const response=await fetch('/api/auto-select-option',{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({underlying:requestedUnderlying,side:requestedSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
     const result=await response.json();
-    if(selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
+    if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     if(!response.ok||result.status!=='AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason||'Automatic option selection failed');
     selectedContractSymbol=result.contract.symbol;
     setupOptionTrigger=null; setupRetryAfter=0; chartSetupLevels=null; renderChartViewport();
@@ -1240,7 +1253,7 @@ async function autoSelectDirectionalOption(optionSide) {
     setupEvaluationDone=false;
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch(error) {
-    if(selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
+    if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
     document.querySelector('#option-quantity').textContent='—';
     status.textContent='AUTO OPTION NOT VERIFIED · '+String(error.message||'No action');
@@ -1248,6 +1261,7 @@ async function autoSelectDirectionalOption(optionSide) {
 }
 async function selectOptionContract(symbol) {
   if (!symbol) return;
+  const requestGeneration=++optionSelectionGeneration;
   const requestedUnderlying=selectedSymbol,requestedSymbol=symbol;
   const status = document.querySelector('#option-status');
   selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
@@ -1257,7 +1271,7 @@ async function selectOptionContract(symbol) {
       method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({symbol:requestedSymbol})
     });
     const result = await response.json();
-    if(selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
+    if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
     selectedContractSymbol = result.contract.symbol;
     setupOptionTrigger = null; setupRetryAfter = 0;
@@ -1269,7 +1283,7 @@ async function selectOptionContract(symbol) {
     status.textContent = result.contract.side + ' · STRIKE ' + showNumber(result.contract.strike) + ' · EXP ' + showExpiry(result.contract.expiry) + ' · LOT ' + showNumber(result.contract.lotSize,0) + ' · TICK ' + showNumber(result.contract.tickSize,4) + ' · MASTER VERIFIED · ' + subscriptionState + ' · LIVE TICK PENDING';
     document.querySelector('#setup-state').textContent='WAITING FOR FRESH UNDERLYING + OPTION TICKS';
   } catch (error) {
-    if(selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
+    if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     selectedContractSymbol = null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
     document.querySelector('#option-quantity').textContent = '—';
     status.textContent = 'CONTRACT NOT VERIFIED · ' + String(error.message || 'No action');

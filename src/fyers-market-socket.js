@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -365,6 +365,17 @@ export function setFnoUniverse(items) {
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;
   if (next === selectedUnderlyingSymbol) return { status: 'UNCHANGED', symbol: next };
+  const previousUnderlying = selectedUnderlyingSymbol;
+  const previousOption = selectedOptionSymbol;
+  selectedOptionSymbol = resolveSelectedOptionOnUnderlyingChange(previousUnderlying, next, selectedOptionSymbol);
+  if (previousOption && !selectedOptionSymbol) {
+    optionFirstTickLoggedFor = null;
+    optionSubscriptionRequestedAt = null;
+    optionLastTickAt = null;
+    optionSubscriptionError = null;
+    optionSubscriptionStatus = 'NOT_SELECTED';
+    console.info('[FYERS_DATA] prior option cleared on underlying change:', JSON.stringify({ previousUnderlying, nextUnderlying: next, clearedOption: previousOption }));
+  }
   selectedUnderlyingSymbol = next;
   selectedLiveCandle = null;
   lastCumulativeVolume = null;

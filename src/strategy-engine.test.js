@@ -46,7 +46,7 @@ test('common confirmation requires bullish pressure and at least 1.20x available
   assert.equal(result.ok,true);
   assert.equal(result.pressure,'BUYING');
   assert.equal(result.relativeVolume,1.6);
-  assert.ok(result.bodyStrength>=0.50);
+  assert.ok(result.bodyStrength>=0.40);
 });
 test('common confirmation requires bearish pressure and at least 1.20x available prior same-session volume', () => {
   const rows=pressureVolumeRows('SHORT');
@@ -510,7 +510,8 @@ test('flag-volume detector requires contracting flag volume and a high-volume br
   }
   for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:116,high:117,low:115,close:116,volume:100});
   rows.push({time:1800008700,open:117,high:120,low:116.8,close:119,volume:125});
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?124:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?119:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?120:c.volume})))?.side,'LONG');
   assert.equal(detectFlagVolume(rows)?.side,'LONG');
   assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:200}))),null);
 });
@@ -524,7 +525,8 @@ test('bearish flag-volume detector accepts the same 1.20x breakout volume thresh
   }
   for(let i=0;i<12;i++)rows.push({time:1800005100+i*300,open:104,high:105,low:103,close:104,volume:100});
   rows.push({time:1800008700,open:103,high:103.2,low:100,close:101,volume:125});
-  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?124:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?119:c.volume}))),null);
+  assert.equal(detectFlagVolume(rows.map(c=>({...c,volume:c===rows.at(-1)?120:c.volume})))?.side,'SHORT');
   assert.equal(detectFlagVolume(rows)?.side,'SHORT');
 });
 

@@ -523,7 +523,15 @@ async function readJsonResponse(response, endpoint) {
   }
 }
 async function ensureResearchContext(symbol) {
-  if (!symbol || researchContextReadySymbol === symbol || Date.now() < researchContextRetryAt) return;
+  if (!symbol) return;
+  // Index charts do not require equity daily/15m research context. Mark them
+  // ready locally rather than repeatedly requesting an endpoint that correctly
+  // accepts only official NSE F&O underlyings.
+  if (labels.some(([indexSymbol]) => indexSymbol === symbol)) {
+    researchContextReadySymbol = symbol;
+    return;
+  }
+  if (researchContextReadySymbol === symbol || Date.now() < researchContextRetryAt) return;
   if (researchContextLoadingSymbol === symbol && researchContextLoadingPromise) return researchContextLoadingPromise;
   researchContextLoadingSymbol = symbol;
   const pending = (async () => {

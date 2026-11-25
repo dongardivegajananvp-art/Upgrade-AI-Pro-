@@ -299,6 +299,21 @@ test('PWA updates activate the versioned shell, evict old caches and never inter
   assert.match(serviceWorker, /u\.pathname\.startsWith\('\/api\/'\)\)return/);
 });
 
+test('research daily and 15m context warmup is sequential under the shared REST governor', () => {
+  const start = server.indexOf("if (url.pathname === '/api/research-context')");
+  const end = server.indexOf("if (url.pathname === '/api/research/historical-universe')", start);
+  const flow = server.slice(start, end);
+  const daily = flow.indexOf("const daily = await getDailyHistory");
+  const fifteen = flow.indexOf("const fifteenMinute = await getFifteenMinuteHistory");
+  assert.ok(daily >= 0 && fifteen > daily, 'daily context is loaded before 15m context');
+  assert.doesNotMatch(flow, /Promise\.all\(/, 'context warmup does not enqueue a request burst');
+});
+
+test('index chart selection does not request equity-only research context', () => {
+  assert.match(app, /labels\.some\(\(\[indexSymbol\]\) => indexSymbol === symbol\)/);
+  assert.match(app, /researchContextReadySymbol = symbol;[\s\S]*?return;/);
+});
+
 test('live setup history requests are sequenced and never weaken the shared REST governor', () => {
   const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
   const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);

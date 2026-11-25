@@ -385,7 +385,10 @@ const server = http.createServer(async (req,res) => {
       if (url.pathname === '/api/research-context') {
         const symbol = url.searchParams.get('symbol');
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
-        const [daily,fifteenMinute] = await Promise.all([getDailyHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-daily'),getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-15m')]);
+        // Keep context warmup inside the shared REST pacing instead of
+        // enqueueing two lower-priority history requests as a burst.
+        const daily = await getDailyHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-daily');
+        const fifteenMinute = await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-15m');
         return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
       }
       if (url.pathname === '/api/research/historical-universe') {

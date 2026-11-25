@@ -35,6 +35,8 @@ let selectedUnderlyingSymbol = null;
 let selectedLiveCandle = null;
 let lastCumulativeVolume = null;
 const ticks = new Map();
+const indexLiveCandles = new Map();
+const indexLastCumulativeVolume = new Map();
 const fnoWebsocketCandles = createFnoWebsocketCandleBuilder({maxSymbols:300,maxCandlesPerSymbol:120});
 // Bounded, rate-limited observability: first tick per symbol, then at most once/minute.
 const tickTelemetryLoggedAt = new Map();
@@ -202,6 +204,27 @@ function accept(item) {
   const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   const sessionWasReady = sessionFeedReady(tick.receivedAt);
   ticks.set(symbol, tick);
+  if (INDEX_SYMBOLS.includes(symbol)) {
+    const bucket = Math.floor(exchangeTime / 300) * 300;
+    const local = new Date((bucket + 19800) * 1000);
+    const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+    if (minute >= 555 && minute < 930) {
+      let candle = indexLiveCandles.get(symbol);
+      if (!candle || candle.time !== bucket) {
+        candle = { time: bucket, open: price, high: price, low: price, close: price, volume: 0, completed: false, source: 'FYERS_LIVE_TICKS' };
+        indexLiveCandles.set(symbol, candle);
+      } else {
+        candle.high = Math.max(candle.high, price);
+        candle.low = Math.min(candle.low, price);
+        candle.close = price;
+      }
+      if (tick.cumulativeVolume !== null) {
+        const previousVolume = indexLastCumulativeVolume.get(symbol);
+        if (previousVolume !== undefined && tick.cumulativeVolume >= previousVolume) candle.volume += tick.cumulativeVolume - previousVolume;
+        indexLastCumulativeVolume.set(symbol, tick.cumulativeVolume);
+      }
+    }
+  }
   if (universe.some(item => item.symbol === symbol)) fnoWebsocketCandles.ingest(symbol,tick);
   if (shouldActivateFnoSliceOnFeedRecovery(sessionWasReady, sessionFeedReady(tick.receivedAt), universe.length)) {
     console.info('[FYERS_DATA] fresh index feed restored; activating first F&O slice immediately');
@@ -508,7 +531,7 @@ export function getMarketData(now = Date.now()) {
   const indices = {};
   for (const symbol of INDEX_SYMBOLS) {
     const tick = ticks.get(symbol) || null;
-    indices[symbol] = tick ? { ...tick, fresh: isFresh(tick, now) } : null;
+    indices[symbol] = tick ? { ...tick, fresh: isFresh(tick, now), liveCandle: isFresh(tick, now) && indexLiveCandles.has(symbol) ? { ...indexLiveCandles.get(symbol) } : null } : null;
   }
   const rolling = buildRollingFnoLeaderboard({ universe, ticks, now, slotCount: SCAN_PER_SLICE, rotationIntervalMs: ROTATION_INTERVAL_MS });
   const topGainers = rolling.topGainers;

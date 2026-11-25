@@ -1,6 +1,6 @@
 // Process liveness stays independent from broker availability; dependency state is reported truthfully.
 export function buildHealthStatus({
-  market = {}, masterCurrent = false, sessionDate = null, loadedDate = null,
+  market = {}, masterCurrent = false, marketSessionOpen = false, sessionDate = null, loadedDate = null,
   ordersEnabled = false, scanner = {}, scanPerSlice = null, rotationIntervalMs = null,
   rest = {}, runtimeMemory = {}, authStatus = {}
 } = {}) {
@@ -13,6 +13,7 @@ export function buildHealthStatus({
   const accountFeedStatus = positions.ok && orderbook.ok ? 'VERIFIED'
     : [positions.status,orderbook.status].some(status=>status==='ERROR') ? 'ERROR' : 'NOT_VERIFIED';
   const blockers = [];
+  if (!marketSessionOpen) blockers.push('NSE_MARKET_CLOSED');
   if (!authStatus.tokenStored) blockers.push('FYERS_AUTH_NOT_READY');
   if (market.socketStatus !== 'CONNECTED') blockers.push('WEBSOCKET_NOT_CONNECTED');
   if (indices.filter(tick => Boolean(tick?.fresh)).length !== 3) blockers.push('THREE_FRESH_INDEX_TICKS_REQUIRED');
@@ -41,6 +42,7 @@ export function buildHealthStatus({
     marketPipelineReadiness: { status: blockers.length ? 'WAIT' : 'MARKET_DATA_READY', blockers },
     app: 'Upgrade AI Pro',
     mode: 'NSE_ONLY',
+    marketSession: marketSessionOpen ? 'OPEN' : 'CLOSED',
     marketData: market.socketStatus || 'NOT_STARTED',
     indexFeed: {
       freshCount: indices.filter(tick => Boolean(tick?.fresh)).length,

@@ -15,7 +15,7 @@ import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { isEligibleForResearchWarmup } from './src/research-warmup-eligibility.js';
 import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
-import { getNextFreshFnoScanSymbol } from './src/rolling-fno-scanner.js';
+import { getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor } from './src/rolling-fno-scanner.js';
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession } from './src/nse-session.js';
@@ -66,6 +66,8 @@ let fnoStrategyScanTimer = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
 let fnoStrategyScanRotation = null;
+let fnoStrategyScanActiveKey = null;
+let fnoStrategyScanNextAllowedAt = 0;
 let fnoStrategyScanLoggedRotation = null;
 let fnoStrategyScanRetryAt = 0;
 let fnoStrategyScanRetrySymbol = null;
@@ -99,12 +101,19 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.status=restGate.cooldownActive?'FYERS_REST_COOLDOWN_WAIT':'FYERS_REST_RECOVERY_PROBE_WAIT';
       return;
     }
-    if (fnoStrategyScanRotation !== snapshot.rotationIndex) {
+    const activeSliceKey=getFnoScanSliceKey(active);
+    if (shouldResetFnoScanCursor(fnoStrategyScanRotation,snapshot.rotationIndex,fnoStrategyScanActiveKey,activeSliceKey)) {
+      const resetReason=fnoStrategyScanRotation!==snapshot.rotationIndex?'ROTATION_CHANGED':'ACTIVE_SYMBOL_MEMBERSHIP_CHANGED';
       fnoStrategyScanRotation=snapshot.rotationIndex;
+      fnoStrategyScanActiveKey=activeSliceKey;
       fnoStrategyScanCursor=0;
       fnoStrategyScanStats.sliceScannedCount=0;
-      // Research warmups deliberately survive slice rotation; eligible candidates
-      // discovered in the previous slice must not be discarded.
+      console.info('[FYERS_SCANNER] scan cursor reset:',JSON.stringify({
+        reason:resetReason,rotationIndex:snapshot.rotationIndex,activeCount:active.length,
+        firstActiveSymbol:active[0]||null,lastActiveSymbol:active.at(-1)||null
+      }));
+      // Research warmups deliberately survive slice rotation and manual selection
+      // changes; eligible candidates discovered in the previous slice are retained.
     }
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
@@ -146,6 +155,11 @@ function startFnoStrategyScanner() {
       return;
     }
     if (fnoStrategyScanCursor>=scanLimit) return;
+    if (Date.now()<fnoStrategyScanNextAllowedAt) {
+      fnoStrategyScanStats.status='WAITING_FOR_SCAN_INTERVAL';
+      fnoStrategyScanStats.lastReason='Global scanner cadence: one new underlying history scan per 60 seconds';
+      return;
+    }
     const normalSymbol=getNextFreshFnoScanSymbol(active,snapshot.ticks,fnoSymbolScanLedger,Date.now());
     const retryCandidate=retryPendingActive;
     const symbol=retryCandidate ? fnoStrategyScanRetrySymbol : normalSymbol;
@@ -167,6 +181,7 @@ function startFnoStrategyScanner() {
     if(!retryCandidate) fnoStrategyScanCursor++;
     fnoStrategyScanStats.status='RUNNING';
     const scanStartedAt=Date.now();
+    fnoStrategyScanNextAllowedAt=scanStartedAt+60_000;
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});

@@ -66,6 +66,7 @@ test('multi-timeframe research returns an explainable score only with verified d
   const five=make(60,300,now/1000-60*300),daily=make(60,86400,now/1000-60*86400),fifteen=make(60,900,now/1000-60*900);
   const setup={strategy:'EMA20_EMA50_TREND',side:'LONG',confirmedAt:five.at(-1).time};
   const result=analyzeSetupResearch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick:{exchangeTime:now/1000,receivedAt:now},setup,now});
+  for(const row of [...five,...daily,...fifteen]) delete row.volume;
   assert.equal(result.status,'COMPLETE');
   assert.ok(result.qualityScore>=85&&result.qualityScore<=100);
   assert.equal(result.timeframes.daily,'BULLISH');
@@ -627,6 +628,8 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan after original
     {time:start+900,open:101.2,high:102,low:100.9,close:101.7,volume:180}
   ];
   const option=makeOptionPipelineFields(start+300,'CE');
+  for(const candle of underlyingCandles) candle.volume=0;
+  option.optionCandles=option.optionCandles.map(c=>({...c,volume:0}));
   option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:101.7,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
   assert.equal(result.status,'SETUP_CONFIRMED');

@@ -16,15 +16,30 @@ test('market readiness requires all three fresh indices, selected underlying and
   const tick={fresh:true,price:100,exchangeTime:1800000000};
   const market={socketStatus:'CONNECTED',indices:{a:tick,b:tick,c:tick},selectedUnderlying:tick,selectedOption:tick,
     fno:{status:'ROTATING_LIVE_COVERAGE',universeCount:218,activeCount:20,observedCount:218,coverageComplete:true,topGainers:[{fresh:true}]}};
-  const ready=buildHealthStatus({market,masterCurrent:true,authStatus:{tokenStored:true},scanner:{status:'RUNNING'},
+  const ready=buildHealthStatus({market,masterCurrent:true,marketSessionOpen:true,authStatus:{tokenStored:true},scanner:{status:'RUNNING'},
     rest:{cooldownActive:false,recoveryProbeRequired:false}});
   assert.equal(ready.marketPipelineReadiness.status,'MARKET_DATA_READY');
   assert.deepEqual(ready.marketPipelineReadiness.blockers,[]);
   assert.equal(ready.indexFeed.freshCount,3);
   assert.equal(ready.fno.topGainersFreshCount,1);
-  const blocked=buildHealthStatus({market,masterCurrent:true,authStatus:{tokenStored:true},scanner:{status:'RUNNING'},
+  const blocked=buildHealthStatus({market,masterCurrent:true,marketSessionOpen:true,authStatus:{tokenStored:true},scanner:{status:'RUNNING'},
     rest:{cooldownActive:true,recoveryProbeRequired:true}});
   assert.equal(blocked.marketPipelineReadiness.status,'WAIT');
   assert.ok(blocked.marketPipelineReadiness.blockers.includes('FYERS_REST_COOLDOWN_ACTIVE'));
   assert.ok(blocked.marketPipelineReadiness.blockers.includes('FYERS_REST_RECOVERY_PROBE_REQUIRED'));
+});
+
+
+test('closed NSE session keeps market readiness at WAIT even when feed ticks are fresh',()=>{
+  const tick={fresh:true,price:100,exchangeTime:1800000000};
+  const market={socketStatus:'CONNECTED',indices:{a:tick,b:tick,c:tick},selectedUnderlying:tick,selectedOption:tick,
+    fno:{status:'ROTATING_LIVE_COVERAGE',universeCount:218,activeCount:20,observedCount:218,coverageComplete:true,topGainers:[{fresh:true}]}};
+  const result=buildHealthStatus({market,masterCurrent:true,marketSessionOpen:false,authStatus:{tokenStored:true},scanner:{status:'RUNNING'},
+    rest:{cooldownActive:false,recoveryProbeRequired:false}});
+  assert.equal(result.ok,true);
+  assert.equal(result.processLiveness,'ALIVE');
+  assert.equal(result.marketSession,'CLOSED');
+  assert.equal(result.marketPipelineReadiness.status,'WAIT');
+  assert.ok(result.marketPipelineReadiness.blockers.includes('NSE_MARKET_CLOSED'));
+  assert.equal(result.orders,'DISABLED');
 });

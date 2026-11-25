@@ -528,7 +528,7 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && url.pathname === '/health') {
     const market = getSessionMarketData();
     return send(res,200,buildHealthStatus({
-      market, masterCurrent:isFnoMasterCurrent(), sessionDate:getNseSessionDate(),
+      market, masterCurrent:isFnoMasterCurrent(), marketSessionOpen:isNseRegularSession(Date.now()), sessionDate:getNseSessionDate(),
       loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(), authStatus:getAuthStatus(),
       scanner:fnoStrategyScanStats, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
       rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,

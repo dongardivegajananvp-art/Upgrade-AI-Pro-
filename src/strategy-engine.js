@@ -330,7 +330,7 @@ export function detectFlagVolume(rows) {
   const impulseDown=number(impulse.at(-1).close)<number(impulse[0].close);
   if(avgFlag>=avgPrior*0.75)return null;
   if(impulseUp&&number(last.close)>high&&number(last.volume)>=avgFlag*1.25)return candidate('FLAG_BREAKOUT_VOLUME','LONG',high,last);
-  if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.5)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
+  if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.25)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
   return null;
 }
 export function detectOpeningRange(rows, sessionStartMinute = 555) {

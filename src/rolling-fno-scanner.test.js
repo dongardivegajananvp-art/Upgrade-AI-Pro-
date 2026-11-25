@@ -60,7 +60,7 @@ test('WebSocket rotates eight new symbols per minute while REST history scan rem
   const visited=new Set();
   let start=0,rotations=0;
   do{
-    for(const item of buildFnoRotationSlice(universe,start,20)) visited.add(item.symbol);
+    for(const symbol of buildFnoRotationSlice(universe,start,20)) visited.add(symbol);
     start=getNextFnoRotationIndex(universe.length,start,FNO_SOCKET_ROTATION_ADVANCE);
     rotations++;
     assert.ok(rotations<=Math.ceil(universe.length/FNO_SOCKET_ROTATION_ADVANCE));

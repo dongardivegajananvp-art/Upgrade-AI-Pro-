@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -68,4 +68,10 @@ test('selected option priority preserves deduplication and leaves unrelated queu
     ['NSE:A-EQ','NSE:B-EQ','NSE:A-EQ','NSE:C-EQ'],
     'NSE:OPTION26DECCE'
   ), ['NSE:A-EQ','NSE:B-EQ','NSE:C-EQ']);
+});
+
+test('changing selected underlying atomically clears the prior option; unchanged underlying preserves it', () => {
+  assert.equal(resolveSelectedOptionOnUnderlyingChange('NSE:ANGELONE-EQ','NSE:ABB-EQ','NSE:ANGELONE26DEC345CE'), null);
+  assert.equal(resolveSelectedOptionOnUnderlyingChange('NSE:ABB-EQ','NSE:ABB-EQ','NSE:ABB26DEC7000CE'), 'NSE:ABB26DEC7000CE');
+  assert.equal(resolveSelectedOptionOnUnderlyingChange(null,'NSE:ABB-EQ',null), null);
 });

@@ -243,7 +243,7 @@ async function refresh() {
           Number(optionTick.price) + setupOptionTrigger.tickSize * 1e-7 >= setupOptionTrigger.entryTriggerPrice) {
         setupOptionTrigger = null; setupEvaluationDone = false;
       }
-      if (!setupEvaluationDone && !setupEvaluationRunning && selectedTick?.fresh && selectedTick.symbol === selectedSymbol) evaluateSelectedSetup();
+      // Entry evaluation is dispatched once below, after every readiness check is refreshed.
     }
     else if (selectedContractSymbol) {
       optionLtp.textContent = optionTick ? 'STALE · NOT ACTIONABLE' : 'WAITING FOR LIVE OPTION TICK';
@@ -252,6 +252,17 @@ async function refresh() {
         optionStatus.textContent = baseStatus + (optionTick ? ' · LIVE TICK STALE' : ' · LIVE TICK PENDING');
       }
     }
+    // Centralized dispatch: this runs after status, contract and research readiness
+    // have all been refreshed, not only inside the option-LTP rendering branch.
+    const selectedUnderlyingFresh=Boolean(underlyingTick?.fresh && underlyingTick.symbol===selectedSymbol);
+    const selectedOptionFresh=Boolean(optionTick?.fresh && optionTick.symbol===selectedContractSymbol);
+    if(!setupEvaluationDone && !setupEvaluationRunning && selectedUnderlyingFresh &&
+       selectedOptionFresh && researchContextReadySymbol===selectedSymbol &&
+       selectedContractSymbol && Date.now()>=setupRetryAfter) {
+      void evaluateSelectedSetup();
+    }
+    renderEntryEvaluationGate(md);
+
     const indices = md.indices || {};
     if (selectedSymbol && labels.some(([symbol]) => symbol === selectedSymbol)) {
       const indexTick = indices[selectedSymbol];
@@ -1116,6 +1127,32 @@ function renderResearchResults(setup) {
       row.append(label,reason);container.append(row);
     }
   }
+}
+function renderEntryEvaluationGate(md) {
+  let panel=document.getElementById('entry-eval-gate');
+  if(!panel) {
+    panel=document.createElement('div');
+    panel.id='entry-eval-gate';
+    panel.className='empty-inline';
+    panel.setAttribute('aria-live','polite');
+    const ledger=document.getElementById('setup-ledger');
+    if(ledger?.parentNode) ledger.parentNode.insertBefore(panel,ledger.nextSibling);
+  }
+  const underlying=md?.selectedUnderlying;
+  const option=md?.selectedOption;
+  const checks=[
+    ['UNDERLYING',Boolean(selectedSymbol && underlying?.symbol===selectedSymbol && underlying?.fresh)],
+    ['OFFICIAL CONTRACT',Boolean(selectedContractSymbol)],
+    ['OPTION TICK',Boolean(selectedContractSymbol && option?.symbol===selectedContractSymbol && option?.fresh)],
+    ['DAILY/15M CONTEXT',researchContextReadySymbol===selectedSymbol],
+  ];
+  const blockers=checks.filter(([,ok])=>!ok).map(([name])=>name);
+  let state='READY · WAITING FOR EVALUATION';
+  if(setupEvaluationRunning) state='ENTRY EVALUATION RUNNING';
+  else if(setupEvaluationDone) state='EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER';
+  else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
+  else if(blockers.length) state='BLOCKED · '+blockers.join(' + ');
+  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ');
 }
 async function evaluateSelectedSetup() {
   // Do not race the option-triggered entry evaluation against the lower-priority

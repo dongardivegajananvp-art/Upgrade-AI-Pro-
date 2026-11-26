@@ -64,12 +64,13 @@ test('overlapping socket slices cover new F&O symbols without skipping the overl
   assert.equal(second[19],'NSE:STOCK20-EQ');
 });
 
-test('selected underlying is pinned without duplicates or changing the rotation start', () => {
+test('selected underlying is separate from the deterministic rolling slice', () => {
   const universe=Array.from({length:30},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
-  const slice=buildFnoRotationSlice(universe,0,20,'NSE:STOCK29-EQ');
-  assert.equal(slice.length,20);
-  assert.equal(slice.at(-1),'NSE:STOCK29-EQ');
-  assert.equal(new Set(slice).size,20);
+  const baseline=buildFnoRotationSlice(universe,0,20);
+  const selected=buildFnoRotationSlice(universe,0,20,'NSE:STOCK29-EQ');
+  assert.equal(selected.length,20);
+  assert.deepEqual(selected,baseline);
+  assert.ok(!selected.includes('NSE:STOCK29-EQ'));
 });
 
 test('one-symbol-per-minute F&O scan rotation covers all 218 symbols exactly once', () => {

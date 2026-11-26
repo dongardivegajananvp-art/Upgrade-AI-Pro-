@@ -60,7 +60,7 @@ test('retest trigger still requires original completed-candle price-level cross'
   assert.equal(missing.ok,false);
 });
 
-test('multi-timeframe research returns an explainable score only with fresh contiguous 15m and 5m candles', () => {
+test('15m and 5m research returns an explainable score without any daily candles', () => {
   const now=1800000000000;
   const make=(count,step,base)=>Array.from({length:count},(_,i)=>({time:base+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
   const five=make(60,300,now/1000-60*300),fifteen=make(60,900,now/1000-60*900);
@@ -81,7 +81,7 @@ test('multi-timeframe research refuses to invent a score when 15m history is inc
   const make=(count,step,base=1700000000)=>Array.from({length:count},(_,i)=>({time:base+i*step,open:100+i,high:101+i,low:99+i,close:100.8+i,volume:100+i}));
   const result=analyzeSetupResearch({candles:make(60,300),fifteenMinuteCandles:make(12,900),tick:{exchangeTime:now/1000,receivedAt:now},setup:{side:'LONG',confirmedAt:1700017700},now});
   assert.equal(result.status,'UNAVAILABLE');
-  assert.match(result.reason,/50 verified 15-minute/);
+  assert.match(result.reason,/50 fresh, contiguous completed 15-minute/);
 });
 
 

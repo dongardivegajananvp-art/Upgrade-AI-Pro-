@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v17/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v17/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -193,7 +193,7 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v17/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -242,7 +242,7 @@ test('chart requests ten completed NSE trading sessions and renders day partitio
 test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
   const snapshotSource = app.includes('normalizeChartSnapshot');
   assert.ok(snapshotSource);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v16/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v17/);
 });
 
 test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {
@@ -337,4 +337,17 @@ test('live ticks never replace the chart loading or history-error state when com
   assert.ok(historyGuard >= 0 && clearArea > historyGuard,
     'renderer must preserve loading/error content until verified completed candles exist');
   assert.match(renderer, /chartLiveCandle[\s\S]*?chartCandles/);
+});
+
+test('entry gate mirrors the actual option-breakout result and stale ticks revoke verified levels', () => {
+  assert.match(app, /let setupEvaluationStatus = null;/);
+  assert.match(app, /setupEvaluationStatus==='SETUP_CONFIRMED'/);
+  assert.match(app, /SIGNAL VERIFIED · OPTION BREAKOUT CONFIRMED/);
+  assert.match(app, /WAITING FOR OPTION BREAKOUT · TRIGGER/);
+  assert.match(app, /\['OPTION BREAKOUT',optionBreakoutConfirmed\]/);
+  assert.match(app, /Previously verified setup invalidated: selected option tick is no longer fresh/);
+  assert.match(app, /for\(const id of \['setup-entry','setup-sl','setup-target','setup-rr'\]\).*textContent='—'/);
+  assert.match(app, /15M RESEARCH CONTEXT:/);
+  assert.match(app, /UNDERLYING SETUP ONLY · OPTION CHECK PENDING/);
+  assert.doesNotMatch(app, /EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER/);
 });

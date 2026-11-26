@@ -74,6 +74,8 @@ test('entry evaluation retries transient stale ticks and network/server failures
   assert.match(app, /Date\.now\(\) \+ 5000/);
   assert.match(app, /Date\.now\(\)\+15000/);
   assert.match(app, /response\.status>=500/);
+  assert.match(app, /setupEvaluationDone=false; setupEvaluationStatus='DATA_UNAVAILABLE_NO_TRADE'/);
+  assert.match(app, /setupEvaluationDone=false;\s*setupRetryAfter=Date\.now\(\)\+15000/);
 });
 
 test('directional and manual option-selection responses cannot overwrite a newer symbol, side or strike', () => {

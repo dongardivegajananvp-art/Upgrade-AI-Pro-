@@ -16,7 +16,7 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-I
 const MAX_UNDERLYING_SLOTS = 80;
 // The shared REST governor permits only a small background budget. Keep the
 // history-backed scanner to one new symbol per minute until WebSocket-built
-// candles replace per-symbol history reads; socket observation still rotates 20 slots.
+// candles replace per-symbol history reads; socket observation keeps 80 equities active and rotates one new symbol/minute.
 const SCAN_PER_SLICE = FNO_SCAN_PER_SLICE;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
@@ -329,7 +329,7 @@ function applyFnoRotation(advance = false) {
       const nextPinned=observed.map(item=>item.symbol).filter(Boolean).slice(0,5);
       // Pin the five highest recently observed F&O gainers across rotations.
       // This keeps their WebSocket feed alive instead of dropping them when the
-      // 20-symbol market-wide slice advances; stale ticks remain non-actionable.
+      // 80-symbol market-wide slice advances; stale ticks remain non-actionable.
       if(nextPinned.length) pinnedTopGainerSymbols=nextPinned;
       syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, true), advance ? 'fno-rotation-with-top-gainer-pins' : 'fno-slice-selection-with-top-gainer-pins');
     } catch (error) {
@@ -570,6 +570,12 @@ export function getMarketData(now = Date.now()) {
   const fnoTickCoverage = {
     activeSymbols: activeFnoSymbols.length,
     pinnedTopGainerSymbols:[...pinnedTopGainerSymbols],
+    pinnedTopGainerCoverage:pinnedTopGainerSymbols.map(symbol=>{
+      const tick=ticks.get(symbol)||null;
+      return {symbol,status:!tick?'NO_TICK':isFresh(tick,now)?'FRESH':'STALE',
+        receiveAgeSeconds:tick?Math.max(0,Math.floor((now-tick.receivedAt)/1000)):null,
+        exchangeAgeSeconds:tick?Math.max(0,Math.floor(now/1000-tick.exchangeTime)):null};
+    }),
     withTick: activeFnoTicks.filter(item => item.tick).length,
     fresh: activeFnoTicks.filter(item => isFresh(item.tick, now)).length,
     stale: activeFnoTicks.filter(item => item.tick && !isFresh(item.tick, now)).length,

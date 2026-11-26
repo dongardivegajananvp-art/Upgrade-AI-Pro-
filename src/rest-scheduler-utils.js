@@ -2,6 +2,14 @@ export const REST_RECOVERY_REQUIRED_ON_START = true;
 
 export const REST_PRIORITY = Object.freeze({ ENTRY:100, OPTION_CHAIN:90, CHART:80, INTERACTIVE:60, RESEARCH:40, CONTEXT:30, ACCOUNT:20, SCANNER:10, WARMUP:-20 });
 
+// Account reads are background-class work for fairness, but they are excluded
+// from the scanner/research background cap so positions and order status retain
+// access to the shared global budget.
+export function isRestBackgroundPriority(priority = 0) {
+  const value = Number(priority) || 0;
+  return value < REST_PRIORITY.CHART && value !== REST_PRIORITY.ACCOUNT;
+}
+
 export function canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted = false, priority } = {}) {
   return !Boolean(recoveryProbeRequired) || (!Boolean(recoveryProbeAttempted) && Number(priority) >= REST_PRIORITY.CHART);
 }
@@ -137,12 +145,13 @@ export function buildRestRateLimitContext({ requestRecord, requestSources = [], 
 // Cloudflare 1015 was observed on mixed REST traffic at only eight requests/minute.
 // Apply a conservative process-local rolling budget to every FYERS REST endpoint,
 // not only /history. This is an application safety guard, not a published FYERS quota.
-export function getRestRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 6, windowMs = 60_000, minPriority = Number.NEGATIVE_INFINITY, maxPriority = Number.POSITIVE_INFINITY) {
+export function getRestRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 6, windowMs = 60_000, minPriority = Number.NEGATIVE_INFINITY, maxPriority = Number.POSITIVE_INFINITY, excludedPriorities = []) {
   const current = Number(now);
+  const excluded = new Set((Array.isArray(excludedPriorities) ? excludedPriorities : []).map(Number));
   const limit = Math.max(1, Math.floor(Number(maxRequests) || 6));
   const window = Math.max(1, Number(windowMs) || 60_000);
   const recent = requests
-    .filter(item => Number(item?.priority || 0) >= Number(minPriority) && Number(item?.priority || 0) <= Number(maxPriority))
+    .filter(item => !excluded.has(Number(item?.priority || 0)) && Number(item?.priority || 0) >= Number(minPriority) && Number(item?.priority || 0) <= Number(maxPriority))
     .map(item => Date.parse(item?.at))
     .filter(at => Number.isFinite(at) && at <= current && current - at < window)
     .sort((a, b) => a - b);
@@ -153,12 +162,13 @@ export function getRestRequestWindowWaitMs(requests = [], now = Date.now(), maxR
 // Cloudflare 1015 was observed on /data/history at 11 requests in one minute.
 // Keep this endpoint below that observed edge threshold with a conservative
 // rolling-window ceiling; this is an application guard, not FYERS' published plan limit.
-export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 8, windowMs = 60_000, minPriority = Number.NEGATIVE_INFINITY, maxPriority = Number.POSITIVE_INFINITY) {
+export function getHistoryRequestWindowWaitMs(requests = [], now = Date.now(), maxRequests = 8, windowMs = 60_000, minPriority = Number.NEGATIVE_INFINITY, maxPriority = Number.POSITIVE_INFINITY, excludedPriorities = []) {
   const current = Number(now);
+  const excluded = new Set((Array.isArray(excludedPriorities) ? excludedPriorities : []).map(Number));
   const limit = Math.max(1, Math.floor(Number(maxRequests) || 8));
   const window = Math.max(1, Number(windowMs) || 60_000);
   const recent = requests
-    .filter(item => item?.path === '/history' && Number(item?.priority || 0) >= Number(minPriority) && Number(item?.priority || 0) <= Number(maxPriority))
+    .filter(item => item?.path === '/history' && !excluded.has(Number(item?.priority || 0)) && Number(item?.priority || 0) >= Number(minPriority) && Number(item?.priority || 0) <= Number(maxPriority))
     .map(item => Date.parse(item?.at))
     .filter(at => Number.isFinite(at) && at <= current && current - at < window)
     .sort((a, b) => a - b);
@@ -232,6 +242,16 @@ export function isRestQueueExpired(enqueuedAt, now = Date.now(), maxAgeMs = 0) {
   const current = Number(now);
   const maxAge = Math.max(0, Number(maxAgeMs) || 0);
   return !Number.isFinite(queuedAt) || !Number.isFinite(current) || current - queuedAt >= maxAge;
+}
+
+// Wake the drain at the earliest queued-job deadline instead of sleeping past
+// an ENTRY/ACCOUNT TTL while waiting for a rolling request budget to recover.
+export function getRestQueueExpiryWaitMs(jobs = [], now = Date.now()) {
+  const current = Number(now);
+  const waits = (Array.isArray(jobs) ? jobs : []).map(job =>
+    Number(job?.enqueuedAt) + Math.max(0, Number(job?.maxQueueAgeMs) || 0) - current
+  ).filter(Number.isFinite);
+  return waits.length ? Math.max(0, Math.min(...waits)) : 0;
 }
 
 export function buildRestEndpointHealth(requests = [], now = Date.now()) {

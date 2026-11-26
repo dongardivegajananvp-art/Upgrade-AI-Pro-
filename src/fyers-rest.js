@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -164,21 +164,22 @@ async function drainRestQueue() {
       // Cloudflare 1015 was observed on mixed traffic (history, option-chain,
       // positions and orderbook) at eight upstream requests/minute. Guard the
       // entire FYERS REST origin, while reserving half the conservative budget
-      // for selected chart/option/Entry work. Account, scanner, research and
-      // warmup remain lower priority and cannot consume those interactive slots.
+      // for selected chart/option/Entry work. Scanner, research and warmup are
+      // capped as background traffic; Account Feed is exempt from that cap but
+      // remains below selected chart/option/Entry priorities.
       const eligibleIndex = findFairRestQueueIndex(restQueue, recentUpstreamRequests, Date.now(), job => {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
         const totalWindowWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
-        const backgroundWindowWait = job.priority < REST_PRIORITY.CHART
-          ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+        const backgroundWindowWait = isRestBackgroundPriority(job.priority)
+          ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
           : 0;
         if (totalWindowWait > 0 || backgroundWindowWait > 0) return false;
         // Keep the stricter existing /history-specific background protection as
         // a second guard; global request pacing applies to every REST path.
         if (job.url.pathname === '/history') {
           const historyWindowWait = getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8);
-          const historyBackgroundWait = job.priority < REST_PRIORITY.CHART
-            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          const historyBackgroundWait = isRestBackgroundPriority(job.priority)
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
             : 0;
           return historyWindowWait === 0 && historyBackgroundWait === 0;
         }
@@ -187,18 +188,20 @@ async function drainRestQueue() {
       if (eligibleIndex < 0) {
         const waits = restQueue.map(job => {
           const totalWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);
-          const backgroundWait = job.priority < REST_PRIORITY.CHART
-            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          const backgroundWait = isRestBackgroundPriority(job.priority)
+            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
             : 0;
           const historyWait = job.url.pathname === '/history'
             ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8)
             : 0;
-          const historyBackgroundWait = job.url.pathname === '/history' && job.priority < REST_PRIORITY.CHART
-            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
+          const historyBackgroundWait = job.url.pathname === '/history' && isRestBackgroundPriority(job.priority)
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
             : 0;
           return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait);
         }).filter(value => value > 0);
-        await restQueueWakeSignal.wait(Math.max(1, waits.length ? Math.min(...waits) : 1));
+        const budgetWait = waits.length ? Math.min(...waits) : 1;
+        const expiryWait = getRestQueueExpiryWaitMs(restQueue, Date.now());
+        await restQueueWakeSignal.wait(Math.max(1, expiryWait > 0 ? Math.min(budgetWait, expiryWait) : budgetWait));
         continue;
       }
       const [job] = restQueue.splice(eligibleIndex, 1);

@@ -576,7 +576,7 @@ test('end-to-end Top Gainer pipeline rejects wrong option direction and incomple
   assert.match(wrongSide.reason,/option side does not match/);
   const missingCandle=evaluateNineStrategies({...input,optionCandles:[]});
   assert.equal(missingCandle.status,'DATA_UNAVAILABLE_NO_TRADE');
-  assert.match(missingCandle.reason,/one fresh completed 5-minute candle/);
+  assert.match(missingCandle.reason,/latest completed candle is stale/);
 });
 
 test('end-to-end Top Gainer pipeline waits below premium trigger and blocks chasing beyond 0.5R',()=>{

@@ -118,7 +118,7 @@ function currentSessionRows(rows) {
   const key = istDayKey(number(rows.at(-1).time));
   return rows.filter(candle => istDayKey(number(candle.time)) === key);
 }
-function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = null) {
+function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = null, minimumCount = 2) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
   }
@@ -141,7 +141,8 @@ function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = n
     };
     return { error: label + ' latest completed candle is stale; diagnostics=' + JSON.stringify(diagnostic) };
   }
-  if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
+  const requiredCount = Math.max(1, Math.floor(Number(minimumCount) || 2));
+  if (window.completed.length < requiredCount) return { error: label + ' requires at least ' + requiredCount + ' completed 5-minute candle(s)' };
   return { rows: window.completed, last: window.lastClosed };
 }
 function pivotHigh(rows, i, width=2) {
@@ -488,7 +489,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const chosen=setup;
   const contractGate=validateStrategyOptionContract({strategy:chosen.strategy,underlyingSide:chosen.side,underlyingSymbol:underlyingTick?.symbol,contract,now});
   if(!contractGate.ok)return blockDetected(contractGate.reason);
-  const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds);
+  const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds,null,1);
   if(o.error)return blockDetected(o.error);
   if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
   const premiumRows=o.rows,tickSize=number(contract.tickSize);

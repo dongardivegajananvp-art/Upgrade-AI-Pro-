@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
+  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, getRestTotalWindowLimit, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -206,8 +206,19 @@ test('interactive Entry and Chart work retain priority over fair background clas
   assert.equal(jobs[findFairRestQueueIndex(jobs,[],now,job=>job.id!=='entry')].id,'chart');
 });
 
+test('non-Entry REST traffic leaves two global request slots reserved for Entry', () => {
+  assert.equal(getRestTotalWindowLimit(100),6);
+  for (const priority of [90,80,60,40,30,20,10,-20]) assert.equal(getRestTotalWindowLimit(priority),4);
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const fourNonEntry=Array.from({length:4},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:80}));
+  assert.ok(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(80))>0);
+  assert.equal(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(100)),0);
+  const sixTotal=[...fourNonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:100}))];
+  assert.ok(getRestRequestWindowWaitMs(sixTotal,now,getRestTotalWindowLimit(100))>0);
+});
+
 test('queued REST requests expire at their exact deadline and invalid timestamps fail closed', () => {
-  assert.equal(getRestQueueMaxAgeMs(100),10000);
+  assert.equal(getRestQueueMaxAgeMs(100),20000);
   assert.equal(getRestQueueMaxAgeMs(90),15000);
   assert.equal(getRestQueueMaxAgeMs(80),30000);
   assert.equal(getRestQueueMaxAgeMs(20),30000);

@@ -1311,6 +1311,7 @@ async function evaluateSelectedSetup() {
     }
     if(response.status>=500) {
       setupEvaluationStatus='SERVER_UNAVAILABLE'; setupEvaluationReason=String(setup.reason||'Temporary server error');
+      setupEvaluationDone=false;
       setupRetryAfter=Date.now()+15000;
       state.textContent='SERVER TEMPORARILY UNAVAILABLE · ENTRY CHECK WILL RETRY';
       state.dataset.state='blocked';
@@ -1338,7 +1339,7 @@ async function evaluateSelectedSetup() {
       chartSetupLevels = null; renderChartViewport();
       state.textContent=setup.status==='WAITING_FOR_OPTION_BREAKOUT'&&Number.isFinite(Number(setup.entryTriggerPrice))?'WAITING FOR OPTION BREAKOUT · TRIGGER ₹'+showNumber(setup.entryTriggerPrice)+' · LIVE TICK WATCH':(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
     }
-  } catch(error) { setupEvaluationDone=true; setupEvaluationStatus='DATA_UNAVAILABLE_NO_TRADE'; setupEvaluationReason=String(error.message||'Temporary request failure'); setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
+  } catch(error) { setupEvaluationDone=false; setupEvaluationStatus='DATA_UNAVAILABLE_NO_TRADE'; setupEvaluationReason=String(error.message||'Temporary request failure'); setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
 function selectCandidateForEntry(candidate, options={}) {

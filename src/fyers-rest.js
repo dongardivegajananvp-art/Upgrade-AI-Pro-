@@ -164,8 +164,9 @@ async function drainRestQueue() {
       // Cloudflare 1015 was observed on mixed traffic (history, option-chain,
       // positions and orderbook) at eight upstream requests/minute. Guard the
       // entire FYERS REST origin, while reserving half the conservative budget
-      // for selected chart/option/Entry work. Account, scanner, research and
-      // warmup remain lower priority and cannot consume those interactive slots.
+      // for selected chart/option/Entry work. Scanner, research and warmup are
+      // capped as background traffic; Account Feed is exempt from that cap but
+      // remains below selected chart/option/Entry priorities.
       const eligibleIndex = findFairRestQueueIndex(restQueue, recentUpstreamRequests, Date.now(), job => {
         if (recoveryProbeRequired && !canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority })) return false;
         const totalWindowWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 6);

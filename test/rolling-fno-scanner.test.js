@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex, getFnoScanSliceSymbols } from '../src/rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex, getFnoSliceScanSymbols } from '../src/rolling-fno-scanner.js';
 const now = Date.parse('2026-11-19T06:00:00Z');
 const sec = Date.parse('2026-11-19T05:59:55Z') / 1000;
 test('ranks rolling observations across all symbols and exposes partial coverage', () => {
@@ -92,8 +92,8 @@ test('three-symbol-per-minute F&O scan rotation covers all 218 symbols exactly o
   assert.equal(getFnoScanBatchSize(218,0,3),3);
   assert.equal(getNextFnoRotationIndex(218,213,3),216);
   assert.equal(getNextFnoRotationIndex(218,216,3),0);
-  assert.equal(getFnoScanSliceSymbols(buildFnoRotationSlice(universe,0,80),3)[0],'NSE:STOCK0-EQ');
-  assert.equal(getFnoScanSliceSymbols(buildFnoRotationSlice(universe,3,80),3)[0],'NSE:STOCK3-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,80),3)[0],'NSE:STOCK0-EQ');
+  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,3,80),3)[0],'NSE:STOCK3-EQ');
   const rollingWindow=buildRollingFnoLeaderboard({universe,ticks:new Map(),now,slotCount:80,rotationIntervalMs:60000});
   assert.equal(rollingWindow.maxObservationAgeSeconds,240);
 });

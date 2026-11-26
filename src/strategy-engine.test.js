@@ -117,7 +117,7 @@ test('diagnostic ledger uses strategy-specific rejection reasons when verified w
   const candles=Array.from({length:60},(_,i)=>({time:start+i*300,open:100,high:100.5,low:99.5,close:100,volume:100}));
   const result=detectNineStrategySetup({underlyingCandles:candles,underlyingTick:{price:100,exchangeTime:now/1000,receivedAt:now},now});
   assert.equal(result.strategyLedger.length,9);
-  assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED'].includes(row.status)&&row.reason));
+  assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED','SKIPPED_AFTER_FIRST_PASS'].includes(row.status)&&row.reason));
   assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
   assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('15-minute candles')));
 });
@@ -277,8 +277,10 @@ test('top-gainer breakout uses two contiguous candles and no fixed 20-candle vol
   assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
   const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
   assert.equal(topGainer.status,'DETECTED');
-  assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='BLOCKED'));
-  assert.ok(result.strategyLedger.some(row=>row.strategy==='FIFTEEN_MIN_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
+  assert.equal(result.strategyLedger.filter(row=>row.status==='DETECTED').length,1);
+  assert.ok(result.strategyLedger.filter(row=>row.strategy!=='TOP_GAINER_MOMENTUM_BREAKOUT').every(row=>['BLOCKED','SKIPPED_AFTER_FIRST_PASS'].includes(row.status)));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='FIFTEEN_MIN_TREND_5M_PULLBACK'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
 });
 
 

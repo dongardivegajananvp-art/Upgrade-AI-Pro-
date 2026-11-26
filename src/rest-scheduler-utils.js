@@ -235,7 +235,7 @@ export function getRestQueueMaxAgeMs(priority = 0) {
   const value = Number(priority) || 0;
   // Entry may wait behind one in-flight FYERS call (12s timeout) plus pacing.
   // Exchange-timestamped ticks are revalidated after all history requests finish.
-  if (value >= REST_PRIORITY.ENTRY) return 20_000;
+  if (value >= REST_PRIORITY.ENTRY) return 60_000;
   if (value >= REST_PRIORITY.OPTION_CHAIN) return 15_000;
   if (value >= REST_PRIORITY.CHART) return 30_000;
   // CONTEXT and RESEARCH (priorities 30/40) often need two sequential

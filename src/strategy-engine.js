@@ -378,7 +378,15 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   if(u.error)return fail(u.error);
   const rows=u.rows,last=u.last;
   const candidates=[], evaluated=[], blocked=[], strategyLedger=[];
+  const triggerRejected=[];
   const consider=(name,eligible,detect,blockedReason,rejectedReason='Latest completed candle does not meet this strategy pattern/trigger conditions')=>{
+    // One stock advances only its first fully confirmed strategy to the Entry
+    // pipeline. Remaining strategies are deliberately skipped for this symbol;
+    // the next symbol scan will evaluate them there.
+    if(candidates.length){
+      strategyLedger.push({strategy:name,status:'SKIPPED_AFTER_FIRST_PASS',reason:'A higher-priority strategy already passed; Entry verification has priority'});
+      return;
+    }
     if(!eligible){
       blocked.push(name);
       strategyLedger.push({strategy:name,status:'BLOCKED',reason:blockedReason});
@@ -386,12 +394,20 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     }
     evaluated.push(name);
     const result=detect();
-    if(result){
-      candidates.push(result);
-      strategyLedger.push({strategy:name,status:'DETECTED',reason:'Strategy pattern and trigger conditions detected; common confirmation/research gates still apply',side:result.side,confirmedAt:result.confirmedAt});
-    } else {
+    if(!result){
       strategyLedger.push({strategy:name,status:'REJECTED',reason:rejectedReason});
+      return;
     }
+    const requireOriginalCross=['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(result.strategy);
+    const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,requireOriginalCross);
+    if(!confirmation.ok){
+      triggerRejected.push({strategy:result.strategy,reason:confirmation.reason});
+      strategyLedger.push({strategy:name,status:'REJECTED',reason:confirmation.reason});
+      return;
+    }
+    result.triggerConfirmation=confirmation;
+    candidates.push(result);
+    strategyLedger.push({strategy:name,status:'DETECTED',reason:'First valid strategy passed its own completed-candle trigger; Entry verification starts immediately',side:result.side,confirmedAt:result.confirmedAt});
   };
   // Each strategy validates only the candle history it actually consumes.
   // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
@@ -400,7 +416,8 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
   const fifteenValid=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
-  consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
+  // Execute in specificity order. Once one strategy passes its own trigger,
+  // this symbol moves to option/Entry verification without waiting for the rest.
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
   consider('FIFTEEN_MIN_TREND_5M_PULLBACK',w50&&fifteenValid,()=>detectFifteenMinuteTrendPullback(rows,fifteenMinuteCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 fresh, contiguous completed FYERS 15-minute candles','15-minute and 5-minute EMA20/EMA50 alignment, 5-minute EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
@@ -411,22 +428,8 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
   consider('FLAG_BREAKOUT_PRICE_STRUCTURE',w30,()=>detectFlagPriceStructure(rows),'Requires 30 contiguous completed 5-minute candles','No flag impulse, consolidation range, and completed price breakout confirmed');
   consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute),sessionRows.length<1?'No completed current-session opening-range candle is available':'Current-session candles are not contiguous','No completed 5-minute candle broke and retested the first-candle/15-minute opening range');
-  // Strategy-specific price structure is the trigger confirmation.
-  // No common directional-pressure or volume gate is applied.
-  const triggerRejected=[];
-  const confirmedCandidates=candidates.filter(item=>{
-    const requireOriginalCross=['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(item.strategy);
-    const confirmation=confirmStrategyTriggerCandle(rows,item.side,item.breakoutLevel,item.confirmedAt,requireOriginalCross);
-    if(!confirmation.ok){
-      triggerRejected.push({strategy:item.strategy,reason:confirmation.reason});
-      const row=strategyLedger.find(entry=>entry.strategy===item.strategy);
-      if(row){row.status='REJECTED';row.reason=confirmation.reason;}
-      return false;
-    }
-    item.triggerConfirmation=confirmation;
-    return true;
-  });
-  candidates.splice(0,candidates.length,...confirmedCandidates);
+  consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
+  strategyLedger.sort((a,b)=>STRATEGIES.indexOf(a.strategy)-STRATEGIES.indexOf(b.strategy));
   if(!candidates.length){
     if(triggerRejected.length)return{status:'NO_TRADE',reason:'Strategy price-level confirmation could not be verified',rejectedStrategies:triggerRejected,evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
     if(!evaluated.length)return {...fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', ')),strategyLedger};

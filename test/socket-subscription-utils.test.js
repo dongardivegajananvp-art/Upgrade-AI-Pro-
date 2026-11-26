@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation } from '../src/socket-subscription-utils.js';
 
 test('subscription delta avoids duplicate additions and removes obsolete symbols', () => {
   assert.deepEqual(getSocketSubscriptionDelta(['A', 'B', 'A'], ['B', 'C', 'C']), {
@@ -98,6 +98,14 @@ test('socket close diagnostics preserve provider detail while bounding log size'
 });
 
 
-test('FYERS subscription pacing uses a conservative 2.5-second interval after observed 1015 errors', () => {
-  assert.equal(SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, 2500);
+test('FYERS subscription pacing uses bounded batches and six control messages per minute', () => {
+  assert.equal(SOCKET_SUBSCRIPTION_BATCH_SIZE, 5);
+  assert.equal(SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, 10_000);
+  assert.deepEqual(splitSubscriptionBatches(['A','B','C','D','E','F'], SOCKET_SUBSCRIPTION_BATCH_SIZE), [['A','B','C','D','E'],['F']]);
+});
+
+test('F&O rotation waits until paced subscriptions drain and rate-limit cooldown ends', () => {
+  assert.equal(shouldAdvanceFnoRotation({pendingCount: 1, cooldownActive: false}), false);
+  assert.equal(shouldAdvanceFnoRotation({pendingCount: 0, cooldownActive: true}), false);
+  assert.equal(shouldAdvanceFnoRotation({pendingCount: 0, cooldownActive: false}), true);
 });

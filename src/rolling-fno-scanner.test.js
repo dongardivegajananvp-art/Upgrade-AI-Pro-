@@ -11,22 +11,23 @@ test('218-symbol F&O rotation covers the full universe with bounded overlapping 
   const visited=new Set();
   let start=0,iterations=0;
   do{
-    const slice=buildFnoRotationSlice(universe,start,20);
-    assert.ok(slice.length<=20);
+    const slice=buildFnoRotationSlice(universe,start,80);
+    assert.ok(slice.length<=80);
     for(const symbol of slice)visited.add(symbol);
-    start=getNextFnoRotationIndex(universe.length,start,8);
+    start=getNextFnoRotationIndex(universe.length,start,FNO_SOCKET_ROTATION_ADVANCE);
     iterations++;
-    assert.ok(iterations<=universe.length);
+    assert.ok(iterations<=Math.ceil(universe.length/FNO_SOCKET_ROTATION_ADVANCE));
   }while(start!==0);
   assert.equal(visited.size,218);
-  assert.equal(getFnoScanBatchSize(218,216,8),2);
+  assert.equal(iterations,73);
+  assert.equal(getFnoScanBatchSize(218,216,FNO_SCAN_PER_SLICE),2);
 });
 
 test('selected underlying does not replace symbols in the stable rolling slice',()=>{
-  const baseline=buildFnoRotationSlice(universe,0,20);
-  const selectedA=buildFnoRotationSlice(universe,0,20,'NSE:STOCK217-EQ');
-  const selectedB=buildFnoRotationSlice(universe,0,20,'NSE:STOCK150-EQ');
-  assert.equal(baseline.length,20);
+  const baseline=buildFnoRotationSlice(universe,0,80);
+  const selectedA=buildFnoRotationSlice(universe,0,80,'NSE:STOCK217-EQ');
+  const selectedB=buildFnoRotationSlice(universe,0,80,'NSE:STOCK150-EQ');
+  assert.equal(baseline.length,80);
   assert.deepEqual(selectedA,baseline);
   assert.deepEqual(selectedB,baseline);
   assert.ok(!selectedA.includes('NSE:STOCK217-EQ'));
@@ -50,26 +51,27 @@ test('rolling leaderboard excludes stale and old-session observations from live 
 });
 
 
-test('history-backed scanner advertises one new symbol per minute under the guarded REST budget',()=>{
-  assert.equal(FNO_SCAN_PER_SLICE,1);
-  assert.equal(getFnoScanBatchSize(218,0),1);
+test('history-backed scanner uses all three guarded REST background slots per minute',()=>{
+  assert.equal(FNO_SCAN_PER_SLICE,3);
+  assert.equal(getFnoScanBatchSize(218,0),3);
+  assert.equal(getFnoScanBatchSize(218,216),2);
   assert.equal(getFnoScanBatchSize(218,217),1);
 });
 
 
-test('WebSocket rotates one new symbol per minute to match one REST scan slot',()=>{
-  assert.equal(FNO_SCAN_PER_SLICE,1);
-  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,1);
+test('WebSocket rotates three new symbols per minute to match three REST scan slots',()=>{
+  assert.equal(FNO_SCAN_PER_SLICE,3);
+  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,3);
   const visited=new Set();
   let start=0,rotations=0;
   do{
-    for(const symbol of buildFnoRotationSlice(universe,start,20)) visited.add(symbol);
+    for(const symbol of buildFnoRotationSlice(universe,start,80)) visited.add(symbol);
     start=getNextFnoRotationIndex(universe.length,start,FNO_SOCKET_ROTATION_ADVANCE);
     rotations++;
     assert.ok(rotations<=Math.ceil(universe.length/FNO_SOCKET_ROTATION_ADVANCE));
   }while(start!==0);
   assert.equal(visited.size,218);
-  assert.equal(rotations,218);
+  assert.equal(rotations,73);
 });
 
 test('scanner picks the oldest fresh symbol and skips stale active ticks without losing the slot',()=>{
@@ -82,15 +84,18 @@ test('scanner picks the oldest fresh symbol and skips stale active ticks without
   assert.equal(getNextFreshFnoScanSymbol([symbols[1]],ticks,ledger,now),null);
 });
 
-test('one-symbol-per-minute rotation keeps every symbol active for twenty scan slots',()=>{
-  const total=218, slots=20, advance=FNO_SOCKET_ROTATION_ADVANCE;
+test('three-symbol-per-minute rotation keeps each symbol in the 80-symbol window for at least 26 rotations',()=>{
+  const total=218, slots=26, activeSlots=80, advance=FNO_SOCKET_ROTATION_ADVANCE;
   let start=0;
   for(let minute=0;minute<slots;minute++){
-    const active=buildFnoRotationSlice(universe,start,slots);
-    assert.ok(active.includes(universe[19].symbol));
+    const active=buildFnoRotationSlice(universe,start,activeSlots);
+    assert.ok(active.includes(universe[79].symbol));
     start=getNextFnoRotationIndex(total,start,advance);
   }
-  assert.equal(start,20);
+  assert.equal(start,78);
+  assert.ok(buildFnoRotationSlice(universe,start,activeSlots).includes(universe[79].symbol));
+  start=getNextFnoRotationIndex(total,start,advance);
+  assert.equal(buildFnoRotationSlice(universe,start,activeSlots).includes(universe[79].symbol),false);
 });
 
 test('scanner does not spend another REST slot rescanning the same symbol inside cooldown',()=>{

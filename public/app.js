@@ -571,7 +571,7 @@ async function readJsonResponse(response, endpoint) {
 }
 async function ensureResearchContext(symbol) {
   if (!symbol) return;
-  // Index charts do not require equity daily/15m research context. Mark them
+  // Index charts do not require equity 15m/5m trend context context. Mark them
   // ready locally rather than repeatedly requesting an endpoint that correctly
   // accepts only official NSE F&O underlyings.
   if (labels.some(([indexSymbol]) => indexSymbol === symbol)) {
@@ -692,7 +692,7 @@ async function selectSymbol(symbol, livePrice = null) {
   try {
     if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     // The backend atomically clears any prior option when the underlying changes.
-    // Keep the user-facing option-chain request ahead of daily/15m research warmup.
+    // Keep the user-facing option-chain request ahead of 15m/5m trend context warmup.
     await loadOptionChain(symbol, selectedUnderlyingPrice, '', selectionGeneration);
   } catch (error) {
     if (selectedSymbol !== symbol) return;
@@ -1162,7 +1162,7 @@ function renderResearchResults(setup) {
     const name=document.createElement('strong');name.textContent='#'+item.rank+' '+item.strategy;
     const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
     head.append(name,score);
-    const tf=document.createElement('p');tf.textContent='Daily '+item.timeframes.daily+' · 15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
+    const tf=document.createElement('p');tf.textContent='Daily '+15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
     const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
     const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
     const invalid=document.createElement('small');invalid.textContent='Invalidation: '+item.invalidation;
@@ -1196,14 +1196,14 @@ function renderEntryEvaluationGate(md) {
     ['OFFICIAL CONTRACT',Boolean(selectedContractSymbol)],
     ['OPTION TICK',Boolean(selectedContractSymbol && option?.symbol===selectedContractSymbol && option?.fresh)],
   ];
-  const dailyContextReady=researchContextReadySymbol===selectedSymbol;
+  const fifteenMinuteContextReady=researchContextReadySymbol===selectedSymbol;
   const blockers=checks.filter(([,ok])=>!ok).map(([name])=>name);
   let state='READY · WAITING FOR EVALUATION';
   if(setupEvaluationRunning) state='ENTRY EVALUATION RUNNING';
   else if(setupEvaluationDone) state='EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER';
   else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
   else if(blockers.length) state='BLOCKED · '+blockers.join(' + ');
-  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · DAILY STRATEGY CONTEXT: '+(dailyContextReady?'READY':'OPTIONAL FOR OTHER 8 STRATEGIES');
+  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · 15M TREND CONTEXT: '+(fifteenMinuteContextReady?'READY':'OPTIONAL FOR OTHER 8 STRATEGIES');
 }
 async function evaluateSelectedSetup() {
   // Live entry is driven by the selected underlying/option freshness and each
@@ -1219,7 +1219,7 @@ async function evaluateSelectedSetup() {
   researchResults.replaceChildren();
   const researchNote=document.createElement('div');
   researchNote.className='empty-inline';
-  researchNote.textContent='Checking verified FYERS daily, 15-minute and completed 5-minute candles for the selected stock.';
+  researchNote.textContent='Checking verified FYERS 15-minute trend and completed 5-minute candles for the selected stock.';
   researchResults.append(researchNote);
   for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
   chartSetupLevels = null;

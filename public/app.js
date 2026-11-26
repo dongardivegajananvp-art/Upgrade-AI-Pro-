@@ -1260,8 +1260,8 @@ function renderEntryEvaluationGate(md) {
     ['UNDERLYING',Boolean(selectedSymbol && underlying?.symbol===selectedSymbol && underlying?.fresh)],
     ['OFFICIAL CONTRACT',Boolean(selectedContractSymbol)],
     ['OPTION TICK',Boolean(selectedContractSymbol && option?.symbol===selectedContractSymbol && option?.fresh)],
-    ['OPTION BREAKOUT',optionBreakoutConfirmed],
   ];
+  if(['SETUP_CONFIRMED','WAITING_FOR_OPTION_BREAKOUT'].includes(setupEvaluationStatus)) checks.push(['OPTION BREAKOUT',optionBreakoutConfirmed]);
   const fifteenMinuteContextReady=researchContextReadySymbol===selectedSymbol;
   const blockers=checks.filter(([,ok])=>!ok).map(([name])=>name);
   let state='READY · WAITING FOR EVALUATION';

@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
+  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -287,4 +287,31 @@ test('REST queue wake signal still resumes naturally when its pacing deadline ex
   const startedAt = Date.now();
   await signal.wait(5);
   assert.ok(Date.now() - startedAt >= 0);
+});
+
+
+test('Account feed is exempt from the scanner/research background cap but remains below interactive work', () => {
+  assert.equal(isRestBackgroundPriority(20), false);
+  assert.equal(isRestBackgroundPriority(40), true);
+  assert.equal(isRestBackgroundPriority(10), true);
+  assert.equal(isRestBackgroundPriority(80), false);
+  const now=Date.UTC(2026,10,26,5,0,0);
+  const recent=[
+    {at:new Date(now-50000).toISOString(),priority:40},
+    {at:new Date(now-40000).toISOString(),priority:10},
+    {at:new Date(now-30000).toISOString(),priority:20}
+  ];
+  assert.equal(getRestRequestWindowWaitMs(recent,now,3,60000,Number.NEGATIVE_INFINITY,79,[20]),0);
+  assert.ok(getRestRequestWindowWaitMs(recent,now,2,60000,Number.NEGATIVE_INFINITY,79,[20])>0);
+});
+
+test('REST drain wakes at the earliest queued request expiry instead of oversleeping its TTL', () => {
+  const now=10000;
+  const jobs=[
+    {enqueuedAt:1000,maxQueueAgeMs:30000},
+    {enqueuedAt:5000,maxQueueAgeMs:10000}
+  ];
+  assert.equal(getRestQueueExpiryWaitMs(jobs,now),5000);
+  assert.equal(getRestQueueExpiryWaitMs(jobs,15000),0);
+  assert.equal(getRestQueueExpiryWaitMs([],now),0);
 });

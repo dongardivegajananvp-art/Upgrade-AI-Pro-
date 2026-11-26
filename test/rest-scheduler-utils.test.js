@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, getRestTotalWindowLimit, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
+  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, getRestAccountWindowWaitMs, getRestTotalWindowLimit, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -208,11 +208,13 @@ test('interactive Entry and Chart work retain priority over fair background clas
 
 test('non-Entry REST traffic leaves two global request slots reserved for Entry', () => {
   assert.equal(getRestTotalWindowLimit(100),6);
-  for (const priority of [90,80,60,40,30,20,10,-20]) assert.equal(getRestTotalWindowLimit(priority),4);
+  for (const priority of [90,80,60,40,30,10,-20]) assert.equal(getRestTotalWindowLimit(priority),4);
+  assert.equal(getRestTotalWindowLimit(20),6);
   const now=Date.UTC(2026,10,23,5,0,0);
   const fourNonEntry=Array.from({length:4},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:80}));
   assert.ok(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(80))>0);
   assert.equal(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(100)),0);
+  assert.equal(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(20)),0);
   const sixTotal=[...fourNonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:100}))];
   assert.ok(getRestRequestWindowWaitMs(sixTotal,now,getRestTotalWindowLimit(100))>0);
 });
@@ -325,4 +327,18 @@ test('REST drain wakes at the earliest queued request expiry instead of overslee
   assert.equal(getRestQueueExpiryWaitMs(jobs,now),5000);
   assert.equal(getRestQueueExpiryWaitMs(jobs,15000),0);
   assert.equal(getRestQueueExpiryWaitMs([],now),0);
+});
+
+
+test('Account positions and orderbook retain two reserved slots without increasing the six-request global budget', () => {
+  const now=Date.UTC(2026,10,26,5,0,0);
+  const fourOtherRequests=Array.from({length:4},(_,i)=>({at:new Date(now-i*1000).toISOString(),priority:40}));
+  assert.equal(getRestAccountWindowWaitMs(fourOtherRequests,now),0);
+  const firstAccount=[...fourOtherRequests,{at:new Date(now-500).toISOString(),priority:20}];
+  assert.equal(getRestAccountWindowWaitMs(firstAccount,now),0);
+  const bothAccount=[...firstAccount,{at:new Date(now-250).toISOString(),priority:20}];
+  assert.ok(getRestAccountWindowWaitMs(bothAccount,now)>0);
+  assert.equal(getRestTotalWindowLimit(20),6);
+  assert.equal(getRestTotalWindowLimit(80),4);
+  assert.equal(getRestQueueMaxAgeMs(20),65_000);
 });

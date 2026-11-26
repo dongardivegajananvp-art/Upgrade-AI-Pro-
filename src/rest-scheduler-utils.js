@@ -225,9 +225,17 @@ export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Dat
 
 // Queue age limits prevent requests whose UI/market context has expired from
 // being submitted upstream after a long rate-governor wait.
+export function getRestTotalWindowLimit(priority = 0) {
+  // Four of six global requests/minute are available to non-Entry work.
+  // Two slots remain reserved for the live Entry verification path.
+  return Number(priority) >= REST_PRIORITY.ENTRY ? 6 : 4;
+}
+
 export function getRestQueueMaxAgeMs(priority = 0) {
   const value = Number(priority) || 0;
-  if (value >= REST_PRIORITY.ENTRY) return 10_000;
+  // Entry may wait behind one in-flight FYERS call (12s timeout) plus pacing.
+  // Exchange-timestamped ticks are revalidated after all history requests finish.
+  if (value >= REST_PRIORITY.ENTRY) return 20_000;
   if (value >= REST_PRIORITY.OPTION_CHAIN) return 15_000;
   if (value >= REST_PRIORITY.CHART) return 30_000;
   // CONTEXT and RESEARCH (priorities 30/40) often need two sequential

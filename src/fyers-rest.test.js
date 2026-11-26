@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, getRestTotalWindowLimit, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, getRestTotalWindowLimit, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, getRestRecoveryProbeRetryDelayMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getFifteenMinuteCacheValidUntil, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -133,6 +133,14 @@ test('after a 429 cooldown, only a selected chart or higher-priority request may
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.ENTRY}),false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.ENTRY}),true);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:false,priority:REST_PRIORITY.SCANNER}),true);
+});
+
+test('transient REST recovery probe failures use bounded exponential retry delays', () => {
+  assert.equal(getRestRecoveryProbeRetryDelayMs(1), 30_000);
+  assert.equal(getRestRecoveryProbeRetryDelayMs(2), 60_000);
+  assert.equal(getRestRecoveryProbeRetryDelayMs(3), 120_000);
+  assert.equal(getRestRecoveryProbeRetryDelayMs(20), 5 * 60_000);
+  assert.equal(getRestRecoveryProbeRetryDelayMs(0), 30_000);
 });
 
 test('every backend restart starts behind an interactive REST recovery gate', () => {

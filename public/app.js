@@ -38,6 +38,8 @@ let chartGestureActive = false;
 let chartLastTouchTap = 0;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
+let setupEvaluationStatus = null;
+let setupEvaluationReason = '';
 let setupLastBucket = null;
 let setupOptionTrigger = null;
 let setupRetryAfter = 0;
@@ -104,7 +106,7 @@ async function refreshUniverseScan() {
       const card=document.createElement('button');card.type='button';card.className='research-card';
       const head=document.createElement('div');head.className='research-card-head';
       const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
-      const score=document.createElement('b');score.textContent=item.qualityScore===null?'PRICE STRUCTURE · OPTION CHECK PENDING':item.qualityScore+'/100 · '+item.grade;
+      const score=document.createElement('b');score.textContent=item.qualityScore===null?'UNDERLYING SETUP ONLY · OPTION CHECK PENDING':item.qualityScore+'/100 · '+item.grade;
       head.append(title,score);
       const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
       const target=document.createElement('small');target.textContent=item.qualityScore===null?'Risk rule: Entry/SL/Target only after official option verification · RR ≥ 2':'AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
@@ -322,6 +324,21 @@ async function refresh() {
     }
     const selectedUnderlyingFresh=Boolean(underlyingTick?.fresh && underlyingTick.symbol===selectedSymbol);
     const selectedOptionFresh=Boolean(optionTick?.fresh && optionTick.symbol===selectedContractSymbol);
+    if(!setupEvaluationRunning && ['SETUP_CONFIRMED','WAITING_FOR_OPTION_BREAKOUT'].includes(setupEvaluationStatus) &&
+       (!selectedUnderlyingFresh || !selectedOptionFresh)) {
+      setupEvaluationStatus='DATA_UNAVAILABLE_NO_TRADE';
+      setupEvaluationReason=!selectedUnderlyingFresh
+        ? 'Previously verified setup invalidated: selected underlying tick is no longer fresh'
+        : 'Previously verified setup invalidated: selected option tick is no longer fresh';
+      setupEvaluationDone=false;
+      setupOptionTrigger=null;
+      chartSetupLevels=null;
+      for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
+      renderChartViewport();
+      const setupState=document.querySelector('#setup-state');
+      setupState.textContent='NO TRADE · '+setupEvaluationReason;
+      setupState.dataset.state='blocked';
+    }
     if(!setupEvaluationDone && !setupEvaluationRunning && selectedUnderlyingFresh &&
        selectedOptionFresh &&
        selectedContractSymbol && Date.now()>=setupRetryAfter) {
@@ -561,7 +578,7 @@ async function selectIndexSymbol(symbol) {
   userSelectedSymbol=true;
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
   selectedSymbol = symbol; researchContextReadySymbol = null; researchContextRetryAt = 0; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
-  setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
+  setupEvaluationDone = true; setupEvaluationRunning = false; setupEvaluationStatus = null; setupEvaluationReason = ''; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
   title.textContent=symbol+' · LOADING VERIFIED FYERS INDEX HISTORY';
   area.replaceChildren();
@@ -660,6 +677,8 @@ async function selectSymbol(symbol, livePrice = null) {
   chartSetupLevels = null;
   setupEvaluationDone = false;
   setupEvaluationRunning = false;
+  setupEvaluationStatus = null;
+  setupEvaluationReason = '';
   chartLiveCandle = null;
   // A prior index selection must not leave index-only labels visible while a
   // stock is loading. Reset every dependent panel immediately on symbol change.
@@ -1236,25 +1255,32 @@ function renderEntryEvaluationGate(md) {
   }
   const underlying=md?.selectedUnderlying;
   const option=md?.selectedOption;
+  const optionBreakoutConfirmed=setupEvaluationStatus==='SETUP_CONFIRMED';
   const checks=[
     ['UNDERLYING',Boolean(selectedSymbol && underlying?.symbol===selectedSymbol && underlying?.fresh)],
     ['OFFICIAL CONTRACT',Boolean(selectedContractSymbol)],
     ['OPTION TICK',Boolean(selectedContractSymbol && option?.symbol===selectedContractSymbol && option?.fresh)],
+    ['OPTION BREAKOUT',optionBreakoutConfirmed],
   ];
   const fifteenMinuteContextReady=researchContextReadySymbol===selectedSymbol;
   const blockers=checks.filter(([,ok])=>!ok).map(([name])=>name);
   let state='READY · WAITING FOR EVALUATION';
   if(setupEvaluationRunning) state='ENTRY EVALUATION RUNNING';
-  else if(setupEvaluationDone) state='EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER';
-  else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
+  else if(setupEvaluationStatus==='WAITING_FOR_OPTION_BREAKOUT') state='WAITING FOR OPTION BREAKOUT · TRIGGER ₹'+showNumber(setupOptionTrigger?.entryTriggerPrice);
   else if(blockers.length) state='BLOCKED · '+blockers.join(' + ');
-  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · 15M HISTORY: '+(fifteenMinuteContextReady?'READY':'WARMING · ENTRY EVALUATION USES FRESH 15M/5M');
+  else if(setupEvaluationDone && setupEvaluationStatus==='SETUP_CONFIRMED') state='SIGNAL VERIFIED · OPTION BREAKOUT CONFIRMED';
+  else if(setupEvaluationDone && ['NO_TRADE','DATA_UNAVAILABLE_NO_TRADE'].includes(setupEvaluationStatus)) state=(setupEvaluationStatus==='NO_TRADE'?'NO TRADE':'DATA UNAVAILABLE · NO TRADE')+(setupEvaluationReason?' · '+setupEvaluationReason:'');
+  else if(setupEvaluationDone && setupEvaluationStatus==='RATE_LIMITED') state='FYERS REST COOLDOWN · ENTRY CHECK PAUSED';
+  else if(setupEvaluationDone && setupEvaluationStatus==='SERVER_UNAVAILABLE') state='SERVER UNAVAILABLE · NO TRADE';
+  else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
+  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · 15M RESEARCH CONTEXT: '+(fifteenMinuteContextReady?'READY':'WARMING');
 }
 async function evaluateSelectedSetup() {
   // Live entry is driven by the selected underlying/option freshness and each
   // strategy's own price rules. Research warmup is a separate ranking panel.
   if (setupEvaluationRunning || setupEvaluationDone || !selectedSymbol || !selectedContractSymbol) return;
   setupEvaluationRunning = true;
+  setupEvaluationStatus='EVALUATING'; setupEvaluationReason='';
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;
   const state=document.querySelector('#setup-state');
   state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
@@ -1275,6 +1301,7 @@ async function evaluateSelectedSetup() {
     if(selectedSymbol!==evaluatedSymbol||selectedContractSymbol!==evaluatedContract)return;
     setupEvaluationDone = true;
     if(response.status===429) {
+      setupEvaluationStatus='RATE_LIMITED'; setupEvaluationReason=String(setup.reason||'FYERS REST cooldown');
       setupOptionTrigger=null;
       setupRetryAfter=Number.isFinite(Number(setup.retryAt))&&Number(setup.retryAt)>Date.now()
         ?Number(setup.retryAt):Date.now()+60*60*1000;
@@ -1283,12 +1310,14 @@ async function evaluateSelectedSetup() {
       return;
     }
     if(response.status>=500) {
+      setupEvaluationStatus='SERVER_UNAVAILABLE'; setupEvaluationReason=String(setup.reason||'Temporary server error');
       setupRetryAfter=Date.now()+15000;
       state.textContent='SERVER TEMPORARILY UNAVAILABLE · ENTRY CHECK WILL RETRY';
       state.dataset.state='blocked';
       return;
     }
     setupOptionTrigger = null; setupRetryAfter = 0;
+    setupEvaluationStatus=String(setup.status||'NO_TRADE'); setupEvaluationReason=String(setup.reason||'');
     if (Array.isArray(setup.researchRanking) || Array.isArray(setup.strategyLedger)) renderResearchResults(setup);
     const marketStatus = await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     setupLastBucket = marketStatus?.selectedUnderlying?.exchangeTime ? Math.floor(Number(marketStatus.selectedUnderlying.exchangeTime)/300)*300 : setupLastBucket;
@@ -1309,7 +1338,7 @@ async function evaluateSelectedSetup() {
       chartSetupLevels = null; renderChartViewport();
       state.textContent=setup.status==='WAITING_FOR_OPTION_BREAKOUT'&&Number.isFinite(Number(setup.entryTriggerPrice))?'WAITING FOR OPTION BREAKOUT · TRIGGER ₹'+showNumber(setup.entryTriggerPrice)+' · LIVE TICK WATCH':(setup.status||'NO TRADE')+' · '+(setup.reason||'No confirmed setup'); state.dataset.state='blocked';
     }
-  } catch(error) { setupEvaluationDone=true; setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
+  } catch(error) { setupEvaluationDone=true; setupEvaluationStatus='DATA_UNAVAILABLE_NO_TRADE'; setupEvaluationReason=String(error.message||'Temporary request failure'); setupRetryAfter=Date.now()+15000; chartSetupLevels=null; renderChartViewport(); state.textContent='NO TRADE · TEMPORARY REQUEST FAILURE · RETRY SCHEDULED'; state.dataset.state='blocked'; }
   finally { setupEvaluationRunning=false; }
 }
 function selectCandidateForEntry(candidate, options={}) {
@@ -1343,7 +1372,7 @@ async function autoSelectDirectionalOption(optionSide) {
   const requestedUnderlying=selectedSymbol,requestedSide=optionSide;
   const status=document.querySelector('#option-status');
   const expiry=document.querySelector('#expiry-select').value;
-  selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
+  selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true; setupEvaluationStatus=null; setupEvaluationReason='';
   optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='AUTO'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
   status.textContent='AUTO-SELECTING '+optionSide+' · VERIFYING FYERS MASTER';
   let retryStatus=0;
@@ -1386,7 +1415,7 @@ async function selectOptionContract(symbol) {
   const requestGeneration=++optionSelectionGeneration;
   const requestedUnderlying=selectedSymbol,requestedSymbol=symbol;
   const status = document.querySelector('#option-status');
-  selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
+  selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true; setupEvaluationStatus=null; setupEvaluationReason='';
   optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='MANUAL'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
   status.textContent = 'VERIFYING EXACT CONTRACT IN FYERS MASTER';
   let retryStatus=0;

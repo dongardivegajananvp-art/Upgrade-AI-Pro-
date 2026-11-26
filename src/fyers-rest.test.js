@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, getRestTotalWindowLimit, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getFifteenMinuteCacheValidUntil, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -157,6 +157,20 @@ test('background history budget preserves two rolling-window slots for Entry and
 });
 
 
+test('global FYERS REST budget reserves two of six requests per minute for live Entry', () => {
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ENTRY), 6);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.CHART), 4);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.OPTION_CHAIN), 4);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ACCOUNT), 4);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.SCANNER), 4);
+  const now=Date.UTC(2026,10,23,5,0,0);
+  const nonEntry=Array.from({length:4},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.CHART}));
+  assert.ok(getRestRequestWindowWaitMs(nonEntry,now,getRestTotalWindowLimit(REST_PRIORITY.CHART))>0);
+  assert.equal(getRestRequestWindowWaitMs(nonEntry,now,getRestTotalWindowLimit(REST_PRIORITY.ENTRY)),0);
+  const allSix=[...nonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.ENTRY}))];
+  assert.ok(getRestRequestWindowWaitMs(allSix,now,getRestTotalWindowLimit(REST_PRIORITY.ENTRY))>0);
+});
+
 test('global FYERS REST budget counts every endpoint and preserves interactive headroom', () => {
   const now = Date.UTC(2026, 10, 23, 5, 0, 0);
   const requests = [
@@ -215,7 +229,7 @@ test('fair REST selector never chooses a request rejected by the budget gate', (
 
 
 test('queued REST work has strict freshness deadlines by request class', () => {
-  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ENTRY), 10_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ENTRY), 20_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.OPTION_CHAIN), 15_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.CHART), 30_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ACCOUNT), 30_000);

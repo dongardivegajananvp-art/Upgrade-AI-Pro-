@@ -12,6 +12,12 @@ test('option chain and contract verification retry transient server failures and
   assert.equal(getOptionRetryDelayMs(0),10_000);
 });
 
+test('transient stale-feed responses wrapped in HTTP 200 are retried', () => {
+  assert.equal(getOptionRetryDelayMs(200,'Fresh selected-underlying FYERS tick is required'),10_000);
+  assert.equal(getOptionRetryDelayMs(200,'Underlying tick became stale while the FYERS option chain was loading'),10_000);
+  assert.equal(getOptionRetryDelayMs(200,'No suitable directional option candidate'),null);
+});
+
 test('permanent client errors and successful responses do not retry', () => {
   assert.equal(getOptionRetryDelayMs(200),null);
   assert.equal(getOptionRetryDelayMs(400),null);

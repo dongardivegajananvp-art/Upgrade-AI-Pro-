@@ -47,21 +47,20 @@ function flatCandles(count,baseTime,interval) {
   return Array.from({length:count},(_,i)=>({time:baseTime+i*interval,open:100,high:100.1,low:99.9,close:100,volume:1000}));
 }
 
-test('early breakout watch requires fresh tick and aligned daily plus 15m trends', () => {
+test('early breakout watch requires fresh tick and aligned 15m plus 5m trends', () => {
   const now=Date.parse('2026-11-19T08:00:00Z');
   const start=Date.parse('2026-11-19T03:45:00Z')/1000;
   const five=Array.from({length:50},(_,i)=>{const open=100+i*.1,close=open+.1;return{time:start+i*300,open,high:close+.1,low:open-.1,close,volume:1000};});
-  const daily=risingCandles(50,100,.5,86400,now/1000-86400);
-  const fifteen=[
+    const fifteen=[
     ...sessionRisingFifteen('2026-11-17',25,100,.2),
     ...sessionRisingFifteen('2026-11-18',25,105,.2),
     ...sessionRisingFifteen('2026-11-19',17,110,.2)
   ];
   const tick={price:five.at(-1).high+.1,exchangeTime:now/1000,receivedAt:now};
-  const watch=analyzeEarlyWatch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick,now});
+  const watch=analyzeEarlyWatch({candles:five,fifteenMinuteCandles:fifteen,tick,now});
   assert.equal(watch.status,'WATCH');
   assert.equal(watch.side,'LONG');
-  assert.equal(analyzeEarlyWatch({candles:five,dailyCandles:daily,fifteenMinuteCandles:fifteen,tick:{...tick,receivedAt:now-20000},now}).status,'NO_WATCH');
+  assert.equal(analyzeEarlyWatch({candles:five,fifteenMinuteCandles:fifteen,tick:{...tick,receivedAt:now-20000},now}).status,'NO_WATCH');
 });
 
 function sessionRisingFifteen(day,count,start,step) {
@@ -93,14 +92,13 @@ test('research targets adapt to aligned trend versus range regime without reduci
   assert.equal(aligned.marketRegime,'TRENDING_BULLISH');
   assert.equal(aligned.confidenceCalibration.status,'PENDING_REALIZED_OUTCOME_SAMPLE');
   const flatBase=exchangeTime-20*300;
-  const flatFive=flatCandles(20,flatBase,300);
-  const flatDaily=flatCandles(50,exchangeTime-49*86400,86400);
-  const flatFifteen=[
+  const flatFive=flatCandles(50,exchangeTime-49*300,300);
+    const flatFifteen=[
     ...sessionFlatFifteen('2026-11-17'),
     ...sessionFlatFifteen('2026-11-18'),
     ...sessionFlatFifteen('2026-11-19',17)
   ];
-  const range=analyzeSetupResearch({candles:flatFive,dailyCandles:flatDaily,fifteenMinuteCandles:flatFifteen,tick,setup:{...setup,confirmedAt:flatFive.at(-1).time},now});
+  const range=analyzeSetupResearch({candles:flatFive,fifteenMinuteCandles:flatFifteen,tick,setup:{...setup,confirmedAt:flatFive.at(-1).time},now});
   assert.equal(range.status,'COMPLETE',range.reason);
   assert.equal(range.marketRegime,'RANGE/NEUTRAL');
   assert.equal(range.targetR,2);
@@ -108,21 +106,19 @@ test('research targets adapt to aligned trend versus range regime without reduci
 });
 
 
-test('multi-timeframe research rejects stale completed daily context', () => {
-  const now=Date.parse('2026-11-19T08:00:00Z'), exchangeTime=now/1000;
-  const tick={price:110,exchangeTime,receivedAt:now};
+test('multi-timeframe research rejects stale completed 15m context',()=>{
+  const now=Date.parse('2026-11-19T08:00:00Z'),exchangeTime=now/1000,tick={price:110,exchangeTime,receivedAt:now};
   const five=risingCandles(50,100,.1,300,exchangeTime-300);
-  const recentDaily=risingCandles(50,100,.5,86400,exchangeTime-86400);
-  const staleDaily=recentDaily.map(c=>({...c,time:c.time-10*86400}));
   const fifteen=[
     ...sessionRisingFifteen('2026-11-17',25,100,.2),
     ...sessionRisingFifteen('2026-11-18',25,105,.2),
     ...sessionRisingFifteen('2026-11-19',17,110,.2)
   ];
-  const setup={side:'LONG',strategy:'EMA20_EMA50_TREND',confirmedAt:five.at(-1).time,breakoutConfirmation:{pressure:'BUYING'}};
-  const result=analyzeSetupResearch({candles:five,dailyCandles:staleDaily,fifteenMinuteCandles:fifteen,tick,setup,now});
+  const staleFifteen=fifteen.map(c=>({...c,time:c.time-10*86400}));
+  const setup={side:'LONG',strategy:'EMA20_EMA50_TREND',confirmedAt:five.at(-1).time};
+  const result=analyzeSetupResearch({candles:five,fifteenMinuteCandles:staleFifteen,tick,setup,now});
   assert.equal(result.status,'UNAVAILABLE');
-  assert.match(result.reason,/daily candle is stale/i);
+  assert.match(result.reason,/50 fresh, contiguous completed 15-minute candles/i);
 });
 
 

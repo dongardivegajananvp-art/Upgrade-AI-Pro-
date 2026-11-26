@@ -63,7 +63,7 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
       reason: /did not break/
     },
     {
-      strategy: 'DAILY_TREND_5M_PULLBACK',
+      strategy: 'FIFTEEN_MIN_TREND_5M_PULLBACK',
       input: neutralPipeline(),
       status: 'REJECTED',
       reason: /EMA20 pullback touch/
@@ -118,14 +118,14 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
   }
 });
 
-test('full evaluator blocks daily pullback when verified daily history is absent', () => {
+test('full evaluator blocks 15m trend pullback when fresh 15m history is absent', () => {
   const input = neutralPipeline({ daily: false });
   const result = evaluateNineStrategies(input);
-  assertNoActionablePlan(result, 'DAILY_TREND_5M_PULLBACK');
+  assertNoActionablePlan(result, 'FIFTEEN_MIN_TREND_5M_PULLBACK');
   assert.equal(result.status, 'NO_TRADE');
-  const row = result.strategyLedger.find(item => item.strategy === 'DAILY_TREND_5M_PULLBACK');
+  const row = result.strategyLedger.find(item => item.strategy === 'FIFTEEN_MIN_TREND_5M_PULLBACK');
   assert.equal(row.status, 'BLOCKED');
-  assert.match(row.reason, /50 valid completed FYERS daily candles/);
+  assert.match(row.reason, /50 fresh, contiguous completed FYERS 15-minute candles/);
 });
 
 test('full evaluator blocks Top Gainer strategy when current verified membership is absent', () => {

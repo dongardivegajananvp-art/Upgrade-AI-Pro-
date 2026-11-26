@@ -22,11 +22,14 @@ test('218-symbol F&O rotation covers the full universe with bounded overlapping 
   assert.equal(getFnoScanBatchSize(218,216,8),2);
 });
 
-test('selected underlying remains pinned without expanding the 20-symbol slice',()=>{
-  const slice=buildFnoRotationSlice(universe,0,20,'NSE:STOCK217-EQ');
-  assert.equal(slice.length,20);
-  assert.ok(slice.includes('NSE:STOCK217-EQ'));
-  assert.equal(new Set(slice).size,20);
+test('selected underlying does not replace symbols in the stable rolling slice',()=>{
+  const baseline=buildFnoRotationSlice(universe,0,20);
+  const selectedA=buildFnoRotationSlice(universe,0,20,'NSE:STOCK217-EQ');
+  const selectedB=buildFnoRotationSlice(universe,0,20,'NSE:STOCK150-EQ');
+  assert.equal(baseline.length,20);
+  assert.deepEqual(selectedA,baseline);
+  assert.deepEqual(selectedB,baseline);
+  assert.ok(!selectedA.includes('NSE:STOCK217-EQ'));
 });
 
 test('rolling leaderboard excludes stale and old-session observations from live Top Gainers',()=>{

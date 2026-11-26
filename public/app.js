@@ -67,7 +67,7 @@ async function refreshUniverseScan() {
   try {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
-    // Once a fully verified Top-3 candidate exists, automatically route the #1
+    // Once a fresh completed-candle price setup exists, route the #1
     // candidate into read-only CE/PE verification unless the user has chosen
     // a chart symbol manually. This never places an order.
     if(data.marketSession==='OPEN'&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
@@ -81,7 +81,7 @@ async function refreshUniverseScan() {
     container.replaceChildren();
     status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 show fresh FYERS ticks with completed 5m price setups; daily context is strategy-specific and AI research scoring is separate. Option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
@@ -93,10 +93,10 @@ async function refreshUniverseScan() {
       const card=document.createElement('button');card.type='button';card.className='research-card';
       const head=document.createElement('div');head.className='research-card-head';
       const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
-      const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
+      const score=document.createElement('b');score.textContent=item.qualityScore===null?'PRICE STRUCTURE · OPTION CHECK PENDING':item.qualityScore+'/100 · '+item.grade;
       head.append(title,score);
       const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
-      const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
+      const target=document.createElement('small');target.textContent=item.qualityScore===null?'Risk rule: Entry/SL/Target only after official option verification · RR ≥ 2':'AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
       const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
       card.append(head,evidence,target,reason);
       card.addEventListener('click',()=>void selectCandidateForEntry(item));
@@ -104,7 +104,7 @@ async function refreshUniverseScan() {
     }
     if(!(data.top3||[]).length) {
       const blocked=document.createElement('small');
-      blocked.textContent='No verified Top 3 yet. Missing/stale data and unconfirmed patterns are not scored.';
+      blocked.textContent='No fresh completed-candle price setup yet. Missing/stale data and unconfirmed patterns are not promoted.';
       container.append(blocked);
     }
     // Keep the default DOM intentionally small on mobile. Detailed ledgers are
@@ -237,7 +237,7 @@ async function refresh() {
     const md = s.marketData || {};
     if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
     renderMovers(md.fno || {});
-    if (selectedSymbol && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
+    if (selectedSymbol && setupEvaluationDone && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
       void ensureResearchContext(selectedSymbol).catch(() => {});
     }
     const optionTick = md.selectedOption;
@@ -292,7 +292,7 @@ async function refresh() {
     const selectedUnderlyingFresh=Boolean(underlyingTick?.fresh && underlyingTick.symbol===selectedSymbol);
     const selectedOptionFresh=Boolean(optionTick?.fresh && optionTick.symbol===selectedContractSymbol);
     if(!setupEvaluationDone && !setupEvaluationRunning && selectedUnderlyingFresh &&
-       selectedOptionFresh && researchContextReadySymbol===selectedSymbol &&
+       selectedOptionFresh &&
        selectedContractSymbol && Date.now()>=setupRetryAfter) {
       void evaluateSelectedSetup();
     }
@@ -634,7 +634,7 @@ async function selectSymbol(symbol, livePrice = null) {
   document.querySelector('#setup-state').dataset.state = 'blocked';
   document.querySelector('#chart-candle-status').textContent = 'COMPLETED STOCK CANDLES · LIVE CANDLE VERIFYING';
   document.querySelector('#research-status').textContent = 'STOCK RESEARCH · LOADING VERIFIED CONTEXT';
-  document.querySelector('#research-results').textContent = 'Waiting for verified daily and 15-minute context. No setup is inferred.';
+  document.querySelector('#research-results').textContent = 'Research ranking warms separately. Live setup checks use each strategy’s own verified price rules.';
   document.querySelector('#option-status').textContent = 'LOADING VERIFIED FYERS OPTION CHAIN';
   document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
   document.querySelector('#option-quantity').textContent = '—';
@@ -1195,21 +1195,19 @@ function renderEntryEvaluationGate(md) {
     ['UNDERLYING',Boolean(selectedSymbol && underlying?.symbol===selectedSymbol && underlying?.fresh)],
     ['OFFICIAL CONTRACT',Boolean(selectedContractSymbol)],
     ['OPTION TICK',Boolean(selectedContractSymbol && option?.symbol===selectedContractSymbol && option?.fresh)],
-    ['DAILY/15M CONTEXT',researchContextReadySymbol===selectedSymbol],
   ];
+  const dailyContextReady=researchContextReadySymbol===selectedSymbol;
   const blockers=checks.filter(([,ok])=>!ok).map(([name])=>name);
   let state='READY · WAITING FOR EVALUATION';
   if(setupEvaluationRunning) state='ENTRY EVALUATION RUNNING';
   else if(setupEvaluationDone) state='EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER';
   else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
   else if(blockers.length) state='BLOCKED · '+blockers.join(' + ');
-  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ');
+  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · DAILY STRATEGY CONTEXT: '+(dailyContextReady?'READY':'OPTIONAL FOR OTHER 8 STRATEGIES');
 }
 async function evaluateSelectedSetup() {
-  // Do not race the option-triggered entry evaluation against the lower-priority
-  // daily/15m context warmup. Once context is ready, these histories are cached
-  // and the setup can fetch only genuinely missing inputs.
-  if (researchContextReadySymbol !== selectedSymbol) return;
+  // Live entry is driven by the selected underlying/option freshness and each
+  // strategy's own price rules. Research warmup is a separate ranking panel.
   if (setupEvaluationRunning || setupEvaluationDone || !selectedSymbol || !selectedContractSymbol) return;
   setupEvaluationRunning = true;
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;

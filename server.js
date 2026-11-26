@@ -653,15 +653,24 @@ const server = http.createServer(async (req,res) => {
         // Each history accessor reuses its verified in-memory cache / single-flight.
         const underlyingHistory = await getFiveMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-5m');
         const optionHistory = await getFiveMinuteHistory(body.contract,Date.now(),REST_PRIORITY.ENTRY,'setup-option-5m');
-        const dailyHistory = await getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily');
-        const fifteenMinuteHistory = await getFifteenMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-15m');
+        // Daily history is strategy-specific: only DAILY_TREND_5M_PULLBACK
+        // needs it. A missing daily response must not block the other eight
+        // independent 5m price-structure strategies. 15m AI research is ranking
+        // metadata, not a universal live-entry prerequisite.
+        let dailyHistory = {candles:[],count:0,source:'UNAVAILABLE_OPTIONAL_DAILY_CONTEXT'};
+        try {
+          dailyHistory = await getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily');
+        } catch(error) {
+          console.warn('[SETUP_EVAL] optional daily context unavailable; non-daily strategies remain eligible:',String(error.message||error).slice(0,160));
+        }
         console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,
           underlying5mCount:underlyingHistory.candles.length,
           option5mCount:optionHistory.candles.length,
           optionLastCompletedCandleTime:optionHistory.candles.at(-1)?.time||null,
-          dailyCount:dailyHistory.candles.length,fifteenMinuteCount:fifteenMinuteHistory.candles.length,
-          sources:[underlyingHistory.source,optionHistory.source,dailyHistory.source,fifteenMinuteHistory.source]
+          dailyCount:dailyHistory.candles.length,dailyContextRequiredOnlyFor:'DAILY_TREND_5M_PULLBACK',
+          fifteenMinuteResearchRequired:false,
+          sources:[underlyingHistory.source,optionHistory.source,dailyHistory.source]
         }));
         // Re-read after REST work: never let history latency silently weaken the
         // strict 10-second underlying/option WebSocket freshness gates.
@@ -675,8 +684,8 @@ const server = http.createServer(async (req,res) => {
         const result = evaluateNineStrategies({
           underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,
           optionCandles:optionHistory.candles,optionTick:latestOption,contract,
-          dailyCandles:dailyHistory.candles,fifteenMinuteCandles:fifteenMinuteHistory.candles,
-          isTopGainer,researchEnabled:true,now:Date.now()
+          dailyCandles:dailyHistory.candles,fifteenMinuteCandles:[],
+          isTopGainer,researchEnabled:false,now:Date.now()
         });
         console.info('[SETUP_EVAL] completed:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,status:result.status,

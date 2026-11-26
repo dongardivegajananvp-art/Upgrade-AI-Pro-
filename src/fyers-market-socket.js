@@ -75,7 +75,7 @@ function sessionFeedReady(now = Date.now()) {
 }
 
 function desiredSocketSubscriptions() {
-  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, activeFnoSymbols, selectedOptionSymbol, sessionFeedReady());
+  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionFeedReady());
 }
 function pruneSocketSymbolState() {
   const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol].filter(Boolean);
@@ -324,7 +324,7 @@ function applyFnoRotation(advance = false) {
   }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, next, selectedOptionSymbol, true), advance ? 'fno-rotation' : 'fno-slice-selection');
+      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, selectedUnderlyingSymbol], selectedOptionSymbol, true), advance ? 'fno-rotation' : 'fno-slice-selection');
     } catch (error) {
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';

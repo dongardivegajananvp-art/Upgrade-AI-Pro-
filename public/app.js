@@ -81,7 +81,7 @@ async function refreshUniverseScan() {
     container.replaceChildren();
     status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 show fresh FYERS ticks with completed 5m price setups; daily context is strategy-specific and AI research scoring is separate. Option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 show fresh FYERS ticks with completed 5m price setups; 15m trend + 5m price structure drive strategy discovery; research scoring is separate. Option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
@@ -1162,7 +1162,7 @@ function renderResearchResults(setup) {
     const name=document.createElement('strong');name.textContent='#'+item.rank+' '+item.strategy;
     const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
     head.append(name,score);
-    const tf=document.createElement('p');tf.textContent='Daily '+15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
+    const tf=document.createElement('p');tf.textContent='15m '+item.timeframes.fifteenMinute+' · 5m '+item.timeframes.fiveMinute;
     const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
     const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
     const invalid=document.createElement('small');invalid.textContent='Invalidation: '+item.invalidation;
@@ -1203,7 +1203,7 @@ function renderEntryEvaluationGate(md) {
   else if(setupEvaluationDone) state='EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER';
   else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
   else if(blockers.length) state='BLOCKED · '+blockers.join(' + ');
-  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · 15M TREND CONTEXT: '+(fifteenMinuteContextReady?'READY':'OPTIONAL FOR OTHER 8 STRATEGIES');
+  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · 15M HISTORY: '+(fifteenMinuteContextReady?'READY':'WARMING · ENTRY EVALUATION USES FRESH 15M/5M');
 }
 async function evaluateSelectedSetup() {
   // Live entry is driven by the selected underlying/option freshness and each
@@ -1219,7 +1219,7 @@ async function evaluateSelectedSetup() {
   researchResults.replaceChildren();
   const researchNote=document.createElement('div');
   researchNote.className='empty-inline';
-  researchNote.textContent='Checking verified FYERS 15-minute trend and completed 5-minute candles for the selected stock.';
+  researchNote.textContent='Checking fresh FYERS 15-minute trend and completed 5-minute price candles for the selected stock.';
   researchResults.append(researchNote);
   for(const id of ['setup-entry','setup-sl','setup-target','setup-rr']) document.getElementById(id).textContent='—';
   chartSetupLevels = null;

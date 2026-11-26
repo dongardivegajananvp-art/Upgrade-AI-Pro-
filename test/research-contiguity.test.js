@@ -42,7 +42,7 @@ test('multi-timeframe research accepts contiguous verified session windows', () 
   assert.equal(result.status,'COMPLETE');
 });
 
-test('multi-timeframe research blocks a gap in the latest 20 five-minute candles', () => {
+test('multi-timeframe research blocks a gap in the latest 50 five-minute candles', () => {
   const f=fixtures();
   f.fiveMinute[10].time += 300;
   const result=analyzeSetupResearch({
@@ -50,7 +50,7 @@ test('multi-timeframe research blocks a gap in the latest 20 five-minute candles
     tick:f.tick,setup:f.setup,now:f.now
   });
   assert.equal(result.status,'UNAVAILABLE');
-  assert.match(result.reason,/20 completed 5-minute.*contiguous/i);
+  assert.match(result.reason,/50 completed 5-minute.*contiguous/i);
 });
 
 test('multi-timeframe research blocks a gap in the latest 50 fifteen-minute candles', () => {
@@ -61,5 +61,5 @@ test('multi-timeframe research blocks a gap in the latest 50 fifteen-minute cand
     tick:f.tick,setup:f.setup,now:f.now
   });
   assert.equal(result.status,'UNAVAILABLE');
-  assert.match(result.reason,/50 completed 15-minute.*contiguous/i);
+  assert.match(result.reason,/50 fresh, contiguous completed 15-minute/i);
 });

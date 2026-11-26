@@ -327,6 +327,12 @@ test('live setup uses 5m price triggers and does not wait for universal daily/15
   assert.doesNotMatch(flow, /Promise\.all\(/, 'setup history reads are not queued as a burst');
   assert.match(flow, /REST_PRIORITY\.ENTRY/, 'mandatory setup reads retain ENTRY priority');
 });
+test('Top-3 handoff is based on completed price setups, not universal AI research scores', () => {
+  assert.match(app, /data\.top3\[0\]/);
+  assert.match(app, /PRICE STRUCTURE · OPTION CHECK PENDING/);
+  assert.doesNotMatch(app, /daily and 15m research gates pass/);
+  assert.match(app, /Option tick\/candles and fixed 2R are checked before an entry is confirmed/);
+});
 test('entry evaluation is independent of research warmup and account polling yields to REST work', () => {
   assert.match(app, /selectedOptionFresh &&/);
   assert.doesNotMatch(app, /selectedOptionFresh && researchContextReadySymbol===selectedSymbol/);

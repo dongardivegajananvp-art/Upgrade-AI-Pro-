@@ -1,4 +1,5 @@
 import { isNseRegularSession, normalizeTopGainersSnapshot, resolveTopGainersView, normalizeChartSnapshot } from './session-snapshot.js';
+import { getOptionRetryDelayMs } from './option-retry-policy.js';
 const labels = [
   ['NSE:NIFTY50-INDEX','nifty','nifty-change'],
   ['NSE:NIFTYBANK-INDEX','bank','bank-change'],
@@ -11,6 +12,13 @@ let symbolSelectionGeneration = 0;
 let optionSelectionGeneration = 0;
 let optionSelectionRetryAt = 0;
 let optionSelectionRetrySymbol = null;
+let optionSelectionRetryMode = 'MANUAL';
+let optionSelectionRetrySide = null;
+let optionSelectionRetryExpiry = null;
+let optionChainRetryAt = 0;
+let optionChainRetrySymbol = null;
+let optionChainRetryTimestamp = '';
+let optionChainRetryGeneration = 0;
 let refreshRunning = false;
 let chartRestoredFromCache = false;
 const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
@@ -81,7 +89,8 @@ async function refreshUniverseScan() {
       }
     }
     container.replaceChildren();
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
+    const lastScanAt=data.scanner?.lastScanAt?new Date(data.scanner.lastScanAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'WAITING';
+    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · SCAN '+Math.round(Number(data.scanIntervalMs||20000)/1000)+'s · LAST '+lastScanAt+' · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 show fresh FYERS ticks with completed 5m price setups; 15m trend + 5m price structure drive strategy discovery; research scoring is separate. Option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
     container.append(note);
@@ -291,11 +300,25 @@ async function refresh() {
     }
     // Centralized dispatch: this runs after status, contract and research readiness
     // have all been refreshed, not only inside the option-LTP rendering branch.
-    if(optionSelectionRetrySymbol && optionSelectionRetryAt && Date.now()>=optionSelectionRetryAt &&
-       selectedSymbol && selectedContractSymbol===null && document.querySelector('#strike-select').value===optionSelectionRetrySymbol) {
-      const retrySymbol=optionSelectionRetrySymbol;
-      optionSelectionRetryAt=0;
-      void selectOptionContract(retrySymbol);
+    if(optionSelectionRetryAt && Date.now()>=optionSelectionRetryAt && selectedSymbol && selectedContractSymbol===null) {
+      if(optionSelectionRetryMode==='AUTO' && optionSelectionRetrySymbol===selectedSymbol &&
+         optionSelectionRetrySide===selectedOptionSide && document.querySelector('#expiry-select').value===optionSelectionRetryExpiry) {
+        const retrySide=optionSelectionRetrySide;
+        optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='MANUAL';
+        optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
+        void autoSelectDirectionalOption(retrySide);
+      } else if(optionSelectionRetryMode==='MANUAL' && optionSelectionRetrySymbol &&
+                document.querySelector('#strike-select').value===optionSelectionRetrySymbol) {
+        const retrySymbol=optionSelectionRetrySymbol;
+        optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
+        void selectOptionContract(retrySymbol);
+      }
+    }
+    if(optionChainRetryAt && Date.now()>=optionChainRetryAt && selectedSymbol===optionChainRetrySymbol &&
+       symbolSelectionGeneration===optionChainRetryGeneration && selectedUnderlyingPrice>0 && optionChainRows.length===0) {
+      const retrySymbol=optionChainRetrySymbol, retryTimestamp=optionChainRetryTimestamp, retryGeneration=optionChainRetryGeneration;
+      optionChainRetryAt=0; optionChainRetrySymbol=null; optionChainRetryTimestamp=''; optionChainRetryGeneration=0;
+      void loadOptionChain(retrySymbol,selectedUnderlyingPrice,retryTimestamp,retryGeneration);
     }
     const selectedUnderlyingFresh=Boolean(underlyingTick?.fresh && underlyingTick.symbol===selectedSymbol);
     const selectedOptionFresh=Boolean(optionTick?.fresh && optionTick.symbol===selectedContractSymbol);
@@ -632,7 +655,8 @@ async function selectSymbol(symbol, livePrice = null) {
   chartRestoredFromCache = false;
   resetChartViewport();
   setupOptionTrigger = null; setupRetryAfter = 0;
-  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
+  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='MANUAL'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
+  optionChainRetryAt=0; optionChainRetrySymbol=null; optionChainRetryTimestamp=''; optionChainRetryGeneration=0;
   chartSetupLevels = null;
   setupEvaluationDone = false;
   setupEvaluationRunning = false;
@@ -1089,11 +1113,14 @@ async function clearSelectedOption() {
 }
 async function loadOptionChain(symbol, underlyingPrice, timestamp = '', selectionGeneration = symbolSelectionGeneration) {
   const status = document.querySelector('#option-status');
+  optionChainRetryAt=0; optionChainRetrySymbol=null; optionChainRetryTimestamp=''; optionChainRetryGeneration=0;
   status.textContent = 'LOADING FYERS OPTION CHAIN';
+  let retryStatus=0;
   try {
     const query = new URLSearchParams({symbol, strikecount:'10'});
     if (timestamp) query.set('timestamp', timestamp);
     const response = await fetch('/api/option-chain?' + query.toString(), {cache:'no-store'});
+    retryStatus=response.status;
     const payload = await readJsonResponse(response, 'OPTION CHAIN /api/option-chain');
     if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     if (!response.ok || payload.s !== 'ok') throw new Error(payload.reason || payload.message || 'FYERS option chain unavailable · HTTP ' + response.status);
@@ -1118,7 +1145,16 @@ async function loadOptionChain(symbol, underlyingPrice, timestamp = '', selectio
     if (selectedSymbol !== symbol || selectionGeneration !== symbolSelectionGeneration) return;
     optionChainRows = [];
     document.querySelector('#strike-select').replaceChildren(new Option('—',''));
-    status.textContent = 'OPTION CHAIN UNAVAILABLE · ' + String(error.message || 'No verified contracts');
+    const retryDelayMs=getOptionRetryDelayMs(retryStatus);
+    if(retryDelayMs!==null) {
+      optionChainRetryAt=Date.now()+retryDelayMs;
+      optionChainRetrySymbol=symbol;
+      optionChainRetryTimestamp=timestamp;
+      optionChainRetryGeneration=selectionGeneration;
+      status.textContent='OPTION CHAIN TEMPORARILY UNAVAILABLE · RETRY IN '+Math.round(retryDelayMs/1000)+'s · '+String(error.message||'FYERS request failed');
+    } else {
+      status.textContent = 'OPTION CHAIN UNAVAILABLE · ' + String(error.message || 'No verified contracts');
+    }
   }
 }
 function renderOptionStrikes(underlyingPrice) {
@@ -1308,14 +1344,18 @@ async function autoSelectDirectionalOption(optionSide) {
   const status=document.querySelector('#option-status');
   const expiry=document.querySelector('#expiry-select').value;
   selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
+  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='AUTO'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
   status.textContent='AUTO-SELECTING '+optionSide+' · VERIFYING FYERS MASTER';
+  let retryStatus=0;
   try {
     const response=await fetch('/api/auto-select-option',{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({underlying:requestedUnderlying,side:requestedSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
+    retryStatus=response.status;
     const result=await response.json();
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     if(!response.ok||result.status!=='AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason||'Automatic option selection failed');
     selectedContractSymbol=result.contract.symbol;
+    optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='MANUAL'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
     setupOptionTrigger=null; setupRetryAfter=0; chartSetupLevels=null; renderChartViewport();
     const strikeSelect=document.querySelector('#strike-select');
     if(optionChainRows.some(row=>row.symbol===selectedContractSymbol)) strikeSelect.value=selectedContractSymbol;
@@ -1327,8 +1367,16 @@ async function autoSelectDirectionalOption(optionSide) {
   } catch(error) {
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
+    const retryDelayMs=getOptionRetryDelayMs(retryStatus);
+    if(retryDelayMs!==null) {
+      optionSelectionRetryAt=Date.now()+retryDelayMs;
+      optionSelectionRetrySymbol=requestedUnderlying;
+      optionSelectionRetryMode='AUTO';
+      optionSelectionRetrySide=requestedSide;
+      optionSelectionRetryExpiry=expiry;
+    }
     document.querySelector('#option-quantity').textContent='—';
-    status.textContent='AUTO OPTION NOT VERIFIED · '+String(error.message||'No action');
+    status.textContent='AUTO OPTION NOT VERIFIED · '+String(error.message||'No action')+(retryDelayMs!==null?' · RETRY IN '+Math.round(retryDelayMs/1000)+'s':'');
   }
 }
 async function selectOptionContract(symbol) {
@@ -1337,21 +1385,19 @@ async function selectOptionContract(symbol) {
   const requestedUnderlying=selectedSymbol,requestedSymbol=symbol;
   const status = document.querySelector('#option-status');
   selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
-  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
+  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='MANUAL'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
   status.textContent = 'VERIFYING EXACT CONTRACT IN FYERS MASTER';
-  let retryableFailure=true;
-  let retryDelayMs=10_000;
+  let retryStatus=0;
   try {
     const response = await fetch('/api/select-option', {
       method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({symbol:requestedSymbol})
     });
-    retryableFailure=response.status===429 || response.status>=500;
-    retryDelayMs=response.status===429?30_000:10_000;
+    retryStatus=response.status;
     const result = await response.json();
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
     selectedContractSymbol = result.contract.symbol;
-    optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
+    optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='MANUAL'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
     setupOptionTrigger = null; setupRetryAfter = 0;
     chartSetupLevels = null; renderChartViewport();
     setupEvaluationDone = false;
@@ -1363,9 +1409,10 @@ async function selectOptionContract(symbol) {
   } catch (error) {
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     selectedContractSymbol = null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
-    if(retryableFailure) { optionSelectionRetryAt=Date.now()+retryDelayMs; optionSelectionRetrySymbol=requestedSymbol; }
+    const retryDelayMs=getOptionRetryDelayMs(retryStatus);
+    if(retryDelayMs!==null) { optionSelectionRetryAt=Date.now()+retryDelayMs; optionSelectionRetrySymbol=requestedSymbol; optionSelectionRetryMode='MANUAL'; }
     document.querySelector('#option-quantity').textContent = '—';
-    status.textContent = 'CONTRACT NOT VERIFIED · ' + String(error.message || 'No action');
+    status.textContent = 'CONTRACT NOT VERIFIED · ' + String(error.message || 'No action') + (retryDelayMs!==null?' · RETRY IN '+Math.round(retryDelayMs/1000)+'s':'');
   }
 }
 document.querySelector('#ce-select').addEventListener('click',()=>{

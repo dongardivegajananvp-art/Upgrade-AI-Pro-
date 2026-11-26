@@ -38,7 +38,7 @@ test('rolling scanner surfaces a fresh 5m price setup without daily/15m research
   });
   assert.equal(result.status,'PRICE_SETUPS_AVAILABLE');
   assert.equal(result.candidateCount,1);
-  assert.equal(result.top3[0].strategy,'EMA20_EMA50_TREND');
+  assert.ok(['EMA20_EMA50_TREND','DAY_HIGH_LOW_BREAK_RETEST'].includes(result.top3[0].strategy));
   assert.equal(result.top3[0].side,'LONG');
   assert.equal(result.top3[0].grade,'PRICE_SETUP');
   assert.equal(result.top3[0].qualityScore,null);

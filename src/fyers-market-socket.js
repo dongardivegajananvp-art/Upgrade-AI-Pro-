@@ -75,7 +75,7 @@ function sessionFeedReady(now = Date.now()) {
   return isNseRegularSession(now) && INDEX_SYMBOLS.some(symbol => isFresh(ticks.get(symbol), now));
 }
 
-function desiredSocketSubscriptions() {
+function desiredSocketSubscriptions(now = Date.now()) {
   return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, isNseRegularSession(now));
 }
 function pruneSocketSymbolState() {

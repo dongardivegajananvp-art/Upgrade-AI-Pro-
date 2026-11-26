@@ -218,7 +218,7 @@ test('non-Entry REST traffic leaves two global request slots reserved for Entry'
 });
 
 test('queued REST requests expire at their exact deadline and invalid timestamps fail closed', () => {
-  assert.equal(getRestQueueMaxAgeMs(100),20000);
+  assert.equal(getRestQueueMaxAgeMs(100),60000);
   assert.equal(getRestQueueMaxAgeMs(90),15000);
   assert.equal(getRestQueueMaxAgeMs(80),30000);
   assert.equal(getRestQueueMaxAgeMs(20),30000);

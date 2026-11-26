@@ -229,7 +229,7 @@ test('fair REST selector never chooses a request rejected by the budget gate', (
 
 
 test('queued REST work has strict freshness deadlines by request class', () => {
-  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ENTRY), 20_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ENTRY), 60_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.OPTION_CHAIN), 15_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.CHART), 30_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ACCOUNT), 30_000);

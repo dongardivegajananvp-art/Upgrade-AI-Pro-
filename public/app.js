@@ -9,6 +9,8 @@ let userSelectedSymbol = false;
 let lastAutoTop3CandidateKey = null;
 let symbolSelectionGeneration = 0;
 let optionSelectionGeneration = 0;
+let optionSelectionRetryAt = 0;
+let optionSelectionRetrySymbol = null;
 let refreshRunning = false;
 let chartRestoredFromCache = false;
 const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
@@ -289,6 +291,12 @@ async function refresh() {
     }
     // Centralized dispatch: this runs after status, contract and research readiness
     // have all been refreshed, not only inside the option-LTP rendering branch.
+    if(optionSelectionRetrySymbol && optionSelectionRetryAt && Date.now()>=optionSelectionRetryAt &&
+       selectedSymbol && selectedContractSymbol===null && document.querySelector('#strike-select').value===optionSelectionRetrySymbol) {
+      const retrySymbol=optionSelectionRetrySymbol;
+      optionSelectionRetryAt=0;
+      void selectOptionContract(retrySymbol);
+    }
     const selectedUnderlyingFresh=Boolean(underlyingTick?.fresh && underlyingTick.symbol===selectedSymbol);
     const selectedOptionFresh=Boolean(optionTick?.fresh && optionTick.symbol===selectedContractSymbol);
     if(!setupEvaluationDone && !setupEvaluationRunning && selectedUnderlyingFresh &&

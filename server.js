@@ -9,7 +9,7 @@ import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } f
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
 import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
-import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getDailyHistory, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { isEligibleForResearchWarmup } from './src/research-warmup-eligibility.js';
@@ -117,7 +117,7 @@ function startFnoStrategyScanner() {
     }
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
-    // Daily/15m warmups so research preparation cannot starve F&O coverage.
+    // 15m context refreshes so research preparation cannot starve F&O coverage.
     const retryPendingActive=Boolean(fnoStrategyScanRetrySymbol && active.includes(fnoStrategyScanRetrySymbol) &&
       isFreshFnoTick(snapshot.ticks.get(fnoStrategyScanRetrySymbol),Date.now()));
     const shouldWarmup=!retryPendingActive && fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
@@ -127,14 +127,13 @@ function startFnoStrategyScanner() {
       if (!warmupSymbol) return;
       fnoStrategyScanBusy=true;
       fnoStrategyScanStats.warmupSymbol=warmupSymbol;
-      fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_15M';
+      fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_15M_5M_CONTEXT';
       try {
-        await getDailyHistory(warmupSymbol,Date.now(),REST_PRIORITY.WARMUP,'scanner-warmup-daily');
         await getFifteenMinuteHistory(warmupSymbol,Date.now(),REST_PRIORITY.WARMUP,'scanner-warmup-15m');
         if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
           throw new Error('Research warmup queue completion state was not registered');
         }
-        fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_15M_CACHED';
+        fnoStrategyScanStats.warmupStatus='VERIFIED_15M_5M_CONTEXT_CACHED';
         fnoStrategyScanStats.warmupLastCompletedSymbol=warmupSymbol;
         fnoStrategyScanStats.warmupLastFailure=null;
         fnoStrategyScanStats.warmupLastRetryAt=null;
@@ -407,9 +406,8 @@ const server = http.createServer(async (req,res) => {
         if (!validateNseSymbol(symbol)) return send(res,400,{status:'INVALID_SYMBOL',reason:'A verified NSE F&O underlying is required'});
         // Keep context warmup inside the shared REST pacing instead of
         // enqueueing two lower-priority history requests as a burst.
-        const daily = await getDailyHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-daily');
         const fifteenMinute = await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'research-context-15m');
-        return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,daily:{count:daily.count,source:daily.source},fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source}});
+        return send(res,200,{status:'RESEARCH_CONTEXT_WARM',symbol,timeframes:{fifteenMinute:{count:fifteenMinute.count,source:fifteenMinute.source,lastCompletedCandleTime:fifteenMinute.lastCompletedCandleTime,ageSeconds:fifteenMinute.ageSeconds}},entryContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE'});
       }
       if (url.pathname === '/api/research/historical-universe') {
         if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) return send(res,200,{status:'SYMBOL_MASTER_NOT_LOADED',mode:'HISTORICAL_ONLY',universeCount:0,evaluatedCount:0,blockedCount:0,candidateCount:0,candidates:[],reason:'Current-session official FYERS NSE F&O master is not verified'});
@@ -485,8 +483,9 @@ const server = http.createServer(async (req,res) => {
         if (!underlying?.fresh || underlying.symbol !== symbol) {
           return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Fresh selected-underlying FYERS tick is required for independent research'});
         }
-        const [fiveMinute,daily,fifteenMinute] = await Promise.all([
-          getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-5m'), getDailyHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-daily'), getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-15m')
+        const [fiveMinute,fifteenMinute] = await Promise.all([
+          getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-5m'),
+          getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-15m')
         ]);
         const latestMarket = getMarketData();
         const latestUnderlying = latestMarket.selectedUnderlying;
@@ -496,7 +495,7 @@ const server = http.createServer(async (req,res) => {
         const isTopGainer = (latestMarket.fno?.topGainers || []).some(item => item.symbol === symbol);
         const research = detectNineStrategySetup({
           underlyingCandles:fiveMinute.candles, underlyingTick:latestUnderlying,
-          dailyCandles:daily.candles, fifteenMinuteCandles:fifteenMinute.candles,
+          fifteenMinuteCandles:fifteenMinute.candles,
           isTopGainer, researchEnabled:true, now:Date.now()
         });
         return send(res,200,{
@@ -506,7 +505,7 @@ const server = http.createServer(async (req,res) => {
           research:research.research || null,
           strategyLedger:research.strategyLedger || [],
           underlying:symbol,
-          source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',
+          source:'FYERS_VERIFIED_15M_5M_OHLCV',
           asOfExchangeTime:latestUnderlying.exchangeTime
         });
       }
@@ -653,24 +652,21 @@ const server = http.createServer(async (req,res) => {
         // Each history accessor reuses its verified in-memory cache / single-flight.
         const underlyingHistory = await getFiveMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-5m');
         const optionHistory = await getFiveMinuteHistory(body.contract,Date.now(),REST_PRIORITY.ENTRY,'setup-option-5m');
-        // Daily history is strategy-specific: only DAILY_TREND_5M_PULLBACK
-        // needs it. A missing daily response must not block the other eight
-        // independent 5m price-structure strategies. 15m AI research is ranking
-        // metadata, not a universal live-entry prerequisite.
-        let dailyHistory = {candles:[],count:0,source:'UNAVAILABLE_OPTIONAL_DAILY_CONTEXT'};
-        try {
-          dailyHistory = await getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily');
-        } catch(error) {
-          console.warn('[SETUP_EVAL] optional daily context unavailable; non-daily strategies remain eligible:',String(error.message||error).slice(0,160));
-        }
+        // The strategy context is now 15m trend + 5m price structure.
+        // Daily candles are not fetched or used by the nine-strategy engine.
+        // Fetch 15m history through the same paced ENTRY scheduler; its cache
+        // expires at the next completed 15m bar and rejects stale exchange time.
+        const fifteenMinuteHistory = await getFifteenMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-15m');
         console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,
           underlying5mCount:underlyingHistory.candles.length,
+          underlying15mCount:fifteenMinuteHistory.candles.length,
+          fifteenMinuteLastCompletedCandleTime:fifteenMinuteHistory.lastCompletedCandleTime,
+          fifteenMinuteAgeSeconds:fifteenMinuteHistory.ageSeconds,
           option5mCount:optionHistory.candles.length,
           optionLastCompletedCandleTime:optionHistory.candles.at(-1)?.time||null,
-          dailyCount:dailyHistory.candles.length,dailyContextRequiredOnlyFor:'DAILY_TREND_5M_PULLBACK',
-          fifteenMinuteResearchRequired:false,
-          sources:[underlyingHistory.source,optionHistory.source,dailyHistory.source]
+          strategyContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE',
+          sources:[underlyingHistory.source,fifteenMinuteHistory.source,optionHistory.source]
         }));
         // Re-read after REST work: never let history latency silently weaken the
         // strict 10-second underlying/option WebSocket freshness gates.
@@ -684,7 +680,7 @@ const server = http.createServer(async (req,res) => {
         const result = evaluateNineStrategies({
           underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,
           optionCandles:optionHistory.candles,optionTick:latestOption,contract,
-          dailyCandles:dailyHistory.candles,fifteenMinuteCandles:[],
+          dailyCandles:[],fifteenMinuteCandles:fifteenMinuteHistory.candles,
           isTopGainer,researchEnabled:false,now:Date.now()
         });
         console.info('[SETUP_EVAL] completed:',JSON.stringify({

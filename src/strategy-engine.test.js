@@ -917,9 +917,9 @@ test('Day-Low reversal enters the same fresh-option and fixed 2R risk pipeline',
   const underlyingCandles=[
     {time:start,open:100,high:101.5,low:99,close:100.2,volume:100},
     {time:start+300,open:100.1,high:101.2,low:99.2,close:100.4,volume:100},
-    {time:start+600,open:100,high:100.5,low:99.05,close:100.3,volume:100},
-    {time:start+900,open:100.3,high:101,low:100.2,close:100.8,volume:100},
-    {time:start+1200,open:100.8,high:101,low:100.7,close:100.9,volume:100}
+    {time:start+600,open:100,high:100.5,low:99.2,close:100.1,volume:100},
+    {time:start+900,open:100,high:100.5,low:99.05,close:100.3,volume:100},
+    {time:start+1200,open:100.3,high:101,low:100.2,close:100.8,volume:100}
   ];
   const contract={symbol:'NSE:ABC26NOV100CE',underlying:'ABC',side:'CE',tickSize:0.05,expiry:now/1000+7*86400,strike:100,lotSize:1,fyToken:'ABC-CE-100'};
   const result=evaluateNineStrategies({

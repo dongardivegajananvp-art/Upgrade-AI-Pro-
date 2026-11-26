@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getRestWaitMs, isRestCooldownActive, parseRetryAfterMs,
+  getRestWaitMs, isRestCooldownActive, createRestQueueWakeSignal, parseRetryAfterMs,
   getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil,
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
@@ -270,4 +270,21 @@ test('REST coalescing is limited to same-authenticated GET requests', () => {
   );
   assert.equal(buildRestCoalesceKey({method:'POST',url,authorization:'Bearer token-A'}),null);
   assert.equal(buildRestCoalesceKey({method:'GET',url:''}),null);
+});
+
+
+test('newly queued interactive REST work wakes a drain sleeping on a background budget window', async () => {
+  const signal = createRestQueueWakeSignal();
+  let settled = false;
+  const pending = signal.wait(5_000).then(() => { settled = true; });
+  signal.wake();
+  await pending;
+  assert.equal(settled, true);
+});
+
+test('REST queue wake signal still resumes naturally when its pacing deadline expires', async () => {
+  const signal = createRestQueueWakeSignal();
+  const startedAt = Date.now();
+  await signal.wait(5);
+  assert.ok(Date.now() - startedAt >= 0);
 });

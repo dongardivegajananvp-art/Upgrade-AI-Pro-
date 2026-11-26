@@ -290,3 +290,25 @@ export function buildRestCoalesceKey({method='GET',url,authorization=''}={}) {
   if(verb!=='GET'||typeof url!=='string'||!url)return null;
   return verb+':'+url+':auth:'+String(authorization||'');
 }
+
+
+// Wake the single REST queue drain when newly enqueued work may change priority order.
+export function createRestQueueWakeSignal() {
+  let activeWake = null;
+  return {
+    wait(ms) {
+      return new Promise(resolve => {
+        const timeout = setTimeout(finish, Math.max(0, Number(ms) || 0));
+        function finish() {
+          if (activeWake === finish) activeWake = null;
+          clearTimeout(timeout);
+          resolve();
+        }
+        activeWake = finish;
+      });
+    },
+    wake() {
+      activeWake?.();
+    }
+  };
+}

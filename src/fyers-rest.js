@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, getRestQueueExpiryWaitMs, getRestTotalWindowLimit, isRestBackgroundPriority, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, getRestQueueExpiryWaitMs, getRestTotalWindowLimit, isRestBackgroundPriority, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, getRestRecoveryProbeRetryDelayMs } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -14,6 +14,8 @@ let recoveryProbeRequired = REST_RECOVERY_REQUIRED_ON_START;
 // One recovery probe is permitted after startup or a 429 cooldown. A failed
 // probe stays closed; no queued interactive request may turn into a retry storm.
 let recoveryProbeAttempted = false;
+let recoveryProbeFailureCount = 0;
+let recoveryProbeRetryAt = 0;
 const restQueue = [];
 const inFlightRestJobs = new Map();
 let restQueueSequence = 0;
@@ -149,6 +151,18 @@ async function drainRestQueue() {
         break;
       }
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
+      if (recoveryProbeRequired && recoveryProbeRetryAt > Date.now()) {
+        await restQueueWakeSignal.wait(recoveryProbeRetryAt - Date.now());
+        expireQueuedRestJobs();
+        if (!restQueue.length) break;
+        if (isRestCooldownActive(Date.now(), cooldownUntil)) {
+          const error = new Error('FYERS REST cooldown active; queued request was not sent upstream');
+          for (const pending of restQueue.splice(0)) settleRestJob(pending, false, error);
+          lastRestStatus = 'RATE_LIMITED';
+          break;
+        }
+        restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
+      }
       if (recoveryProbeRequired) {
         const recoveryIndex = restQueue.findIndex(job => canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted, priority: job.priority }));
         if (recoveryIndex < 0) {
@@ -260,6 +274,8 @@ async function drainRestQueue() {
           recoveryProbeRequired = true;
           // The next single probe is permitted only after this cooldown expires.
           recoveryProbeAttempted = false;
+          recoveryProbeRetryAt = cooldownUntil;
+          recoveryProbeFailureCount = 0;
           lastRestStatus = 'RATE_LIMITED';
           const markers = [
             lastRestMeta.retryAfter !== null ? 'Retry-After=' + lastRestMeta.retryAfter : null,
@@ -297,6 +313,11 @@ async function drainRestQueue() {
           break;
         }
         if (!response.ok || body.s === 'error' || Number(body.code) < 0 || (recoveryProbeRequired && body.s !== 'ok')) {
+          if (recoveryProbeRequired && response.status >= 500) {
+            recoveryProbeAttempted = false;
+            recoveryProbeFailureCount++;
+            recoveryProbeRetryAt = Date.now() + getRestRecoveryProbeRetryDelayMs(recoveryProbeFailureCount);
+          }
           lastRestStatus = 'ERROR';
           lastRestError = String(body.message || body.error || `FYERS HTTP ${response.status}`).slice(0, 180);
           settleRestJob(job, false, new Error(lastRestError));
@@ -306,6 +327,8 @@ async function drainRestQueue() {
         lastRestError = null;
         recoveryProbeRequired = false;
         recoveryProbeAttempted = false;
+        recoveryProbeFailureCount = 0;
+        recoveryProbeRetryAt = 0;
         settleRestJob(job, true, body);
       } catch (error) {
         requestRecord.status = 'NETWORK_ERROR';
@@ -314,6 +337,11 @@ async function drainRestQueue() {
         nextRequestAt = Date.now() + MIN_REST_GAP_MS;
         lastRestStatus = 'ERROR';
         lastRestError = String(error?.message || 'FYERS REST request failed').slice(0,180);
+        if (recoveryProbeRequired) {
+          recoveryProbeAttempted = false;
+          recoveryProbeFailureCount++;
+          recoveryProbeRetryAt = Date.now() + getRestRecoveryProbeRetryDelayMs(recoveryProbeFailureCount);
+        }
         settleRestJob(job, false, error);
       }
     }
@@ -617,6 +645,10 @@ export function getRestDiagnostics(now = Date.now()) {
     standardQueueDepth: restQueue.filter(job => job.priority >= 0 && job.priority < 50).length,
     backgroundQueueDepth: restQueue.filter(job => job.priority < 0).length,
     queueDrainActive: drainingRestQueue,
+    recoveryProbeRequired,
+    recoveryProbeAttempted,
+    recoveryProbeFailureCount,
+    recoveryProbeRetryAt: recoveryProbeRetryAt > now ? new Date(recoveryProbeRetryAt).toISOString() : null,
     lastRequestPriority,
     requestsThisMinute,
     requestsToday,

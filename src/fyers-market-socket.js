@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -48,7 +48,7 @@ let socketHasConnected = false;
 // exchange-confirmed subscription state.
 const socketSdkRequestedSymbols = new Set();
 let subscriptionOperationSequence = 0;
-const SUBSCRIPTION_BATCH_SIZE = 1;
+const SUBSCRIPTION_BATCH_SIZE = SOCKET_SUBSCRIPTION_BATCH_SIZE;
 const SUBSCRIPTION_BATCH_INTERVAL_MS = SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS;
 let lastSentSubscriptionBatch = [];
 let pendingSubscriptionSymbols = [];
@@ -361,6 +361,14 @@ export function setFnoUniverse(items) {
     rotationTimer = setInterval(() => {
       if (!sessionFeedReady()) {
         applyFnoRotation(false);
+        return;
+      }
+      // Do not replace a slice while its paced subscription queue is still being
+      // delivered or while FYERS 1015 backoff is active. Otherwise each 60s
+      // rotation discards queued symbols faster than the socket can subscribe.
+      const pendingCount = pendingSubscriptionSymbols.length + pendingSubscriptionSet.size;
+      if (!shouldAdvanceFnoRotation({ pendingCount, cooldownActive: Date.now() < socketRateLimitUntil })) {
+        console.info('[FYERS_DATA] F&O rotation held until subscription queue drains:', JSON.stringify({ pendingCount, rateLimitWaitMs: Math.max(0, socketRateLimitUntil - Date.now()) }));
         return;
       }
       applyFnoRotation(activeFnoSymbols.length > 0 && universe.length > MAX_UNDERLYING_SLOTS);

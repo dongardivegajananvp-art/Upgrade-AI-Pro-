@@ -324,8 +324,8 @@ test('live setup uses 5m price triggers and does not wait for universal daily/15
   assert.ok(underlying >= 0 && option > underlying && daily > option, '5m histories remain mandatory and daily context is loaded best-effort');
   assert.doesNotMatch(flow, /getFifteenMinuteHistory/, '15m research is not a universal entry prerequisite');
   assert.match(flow, /researchEnabled:false/, 'live entry evaluates the strategy-specific price rules directly');
-  assert.doesNotMatch(flow, /Promise\\.all\\(/, 'setup history reads are not queued as a burst');
-  assert.match(flow, /REST_PRIORITY\\.ENTRY/, 'mandatory setup reads retain ENTRY priority');
+  assert.doesNotMatch(flow, /Promise\.all\(/, 'setup history reads are not queued as a burst');
+  assert.match(flow, /REST_PRIORITY\.ENTRY/, 'mandatory setup reads retain ENTRY priority');
 });
 test('entry evaluation is independent of research warmup and account polling yields to REST work', () => {
   assert.match(app, /selectedOptionFresh &&/);
@@ -334,8 +334,8 @@ test('entry evaluation is independent of research warmup and account polling yie
   const entryEnd=app.indexOf('function selectCandidateForEntry',entryStart);
   const entryFlow=app.slice(entryStart,entryEnd);
   assert.doesNotMatch(entryFlow, /researchContextReadySymbol !== selectedSymbol/, 'research panel readiness cannot block live entry evaluation');
-  assert.match(app, /accountRefreshSafe = !restState\\.cooldownActive/);
-  assert.match(app, /Number\\(restState\\.requestsThisMinute \\|\\| 0\\) < 4/);
+  assert.match(app, /accountRefreshSafe = !restState\.cooldownActive/);
+  assert.match(app, /Number\(restState\.requestsThisMinute \|\| 0\) < 4/);
 });
 
 test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {

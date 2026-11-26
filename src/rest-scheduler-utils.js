@@ -256,7 +256,9 @@ export function getRestQueueMaxAgeMs(priority = 0) {
   if (value >= REST_PRIORITY.CHART) return 30_000;
   // CONTEXT and RESEARCH (priorities 30/40) often need two sequential
   // history requests. They must not inherit the shorter ACCOUNT queue TTL.
-  if (value === REST_PRIORITY.ACCOUNT) return 30_000;
+  // Account snapshots are read-only; allow one full conservative rolling window
+  // plus pacing for the two reserved endpoint slots to become available.
+  if (value === REST_PRIORITY.ACCOUNT) return 65_000;
   if (value === REST_PRIORITY.SCANNER) return 10_000;
   return 120_000;
 }

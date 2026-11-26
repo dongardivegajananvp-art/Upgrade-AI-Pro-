@@ -366,7 +366,7 @@ export function setFnoUniverse(items) {
       // Do not replace a slice while its paced subscription queue is still being
       // delivered or while FYERS 1015 backoff is active. Otherwise each 60s
       // rotation discards queued symbols faster than the socket can subscribe.
-      const pendingCount = pendingSubscriptionSymbols.length + pendingSubscriptionSet.size;
+      const pendingCount = pendingSubscriptionSet.size;
       if (!shouldAdvanceFnoRotation({ pendingCount, cooldownActive: Date.now() < socketRateLimitUntil })) {
         console.info('[FYERS_DATA] F&O rotation held until subscription queue drains:', JSON.stringify({ pendingCount, rateLimitWaitMs: Math.max(0, socketRateLimitUntil - Date.now()) }));
         return;

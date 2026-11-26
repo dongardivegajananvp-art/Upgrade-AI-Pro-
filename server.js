@@ -13,7 +13,7 @@ import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHist
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
 import { isEligibleForResearchWarmup } from './src/research-warmup-eligibility.js';
-import { SCANNER_POLL_INTERVAL_MS } from './src/scanner-scheduler.js';
+import { SCANNER_POLL_INTERVAL_MS, FNO_SCAN_MIN_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
 import { getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor } from './src/rolling-fno-scanner.js';
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
@@ -180,7 +180,7 @@ function startFnoStrategyScanner() {
     if(!retryCandidate) fnoStrategyScanCursor++;
     fnoStrategyScanStats.status='RUNNING';
     const scanStartedAt=Date.now();
-    fnoStrategyScanNextAllowedAt=scanStartedAt+60_000;
+    fnoStrategyScanNextAllowedAt=scanStartedAt+FNO_SCAN_MIN_INTERVAL_MS;
     fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});

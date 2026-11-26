@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -101,7 +101,7 @@ export function normalizeFiveMinuteCandles(rows, now = Date.now()) {
     return { time, open, high, low, close, volume, completed: true, source: 'FYERS_HISTORY' };
   }).filter(Boolean).sort((a, b) => a.time - b.time);
 }
-function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+const restQueueWakeSignal = createRestQueueWakeSignal();
 function settleRestJob(job, succeeded, value) {
   if (job?.coalesceKey && inFlightRestJobs.get(job.coalesceKey) === job) inFlightRestJobs.delete(job.coalesceKey);
   const waiters = Array.isArray(job?.waiters) ? job.waiters.splice(0) : [];
@@ -139,7 +139,7 @@ async function drainRestQueue() {
       }
       restQueue.splice(0, restQueue.length, ...sortRestQueue(restQueue));
       const delay = getRestWaitMs(Date.now(), nextRequestAt);
-      if (delay) await wait(delay);
+      if (delay) await restQueueWakeSignal.wait(delay);
       expireQueuedRestJobs();
       if (!restQueue.length) break;
       if (isRestCooldownActive(Date.now(), cooldownUntil)) {
@@ -198,7 +198,7 @@ async function drainRestQueue() {
             : 0;
           return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait);
         }).filter(value => value > 0);
-        await wait(Math.max(1, waits.length ? Math.min(...waits) : 1));
+        await restQueueWakeSignal.wait(Math.max(1, waits.length ? Math.min(...waits) : 1));
         continue;
       }
       const [job] = restQueue.splice(eligibleIndex, 1);
@@ -348,6 +348,8 @@ function scheduledFetch(url, options, priority = 0, source = 'UNCLASSIFIED') {
       return;
     }
     restQueue.splice(0, restQueue.length, ...admission.queue);
+    // A sleeping drain loop must re-evaluate priorities when a new interactive job arrives.
+    restQueueWakeSignal.wake();
     if (admission.dropped) {
       settleRestJob(admission.dropped, false, new Error('FYERS REST queue capacity reached; lower-priority request was displaced before upstream submission'));
     }

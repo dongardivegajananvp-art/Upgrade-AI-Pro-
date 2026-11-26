@@ -12,11 +12,11 @@ const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
 const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
-// Three indices + twenty rotating equities + one selected option = at most 24.
-const MAX_UNDERLYING_SLOTS = 20;
+// Three indices + eighty rotating equities + five pinned Top Gainers + one selected underlying + one selected option = at most 90.
+const MAX_UNDERLYING_SLOTS = 80;
 // The shared REST governor permits only a small background budget. Keep the
 // history-backed scanner to one new symbol per minute until WebSocket-built
-// candles replace per-symbol history reads; socket observation still rotates 20 slots.
+// candles replace per-symbol history reads; socket observation keeps 80 equities active and rotates one new symbol/minute.
 const SCAN_PER_SLICE = FNO_SCAN_PER_SLICE;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
@@ -24,6 +24,7 @@ let socketStatus = 'NOT_STARTED';
 let lastError = null;
 let universe = [];
 let activeFnoSymbols = [];
+let pinnedTopGainerSymbols = [];
 let rotationIndex = 0;
 let rotationTimer = null;
 let selectedOptionSymbol = null;
@@ -75,7 +76,7 @@ function sessionFeedReady(now = Date.now()) {
 }
 
 function desiredSocketSubscriptions() {
-  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionFeedReady());
+  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionFeedReady());
 }
 function pruneSocketSymbolState() {
   const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol].filter(Boolean);
@@ -324,7 +325,13 @@ function applyFnoRotation(advance = false) {
   }
   if (socket && socketStatus === 'CONNECTED') {
     try {
-      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, selectedUnderlyingSymbol], selectedOptionSymbol, true), advance ? 'fno-rotation' : 'fno-slice-selection');
+      const observed=buildRollingFnoLeaderboard({universe,ticks,now:Date.now(),slotCount:MAX_UNDERLYING_SLOTS,rotationIntervalMs:ROTATION_INTERVAL_MS,limit:5}).observations;
+      const nextPinned=observed.map(item=>item.symbol).filter(Boolean).slice(0,5);
+      // Pin the five highest recently observed F&O gainers across rotations.
+      // This keeps their WebSocket feed alive instead of dropping them when the
+      // 80-symbol market-wide slice advances; stale ticks remain non-actionable.
+      if(nextPinned.length) pinnedTopGainerSymbols=nextPinned;
+      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, true), advance ? 'fno-rotation-with-top-gainer-pins' : 'fno-slice-selection-with-top-gainer-pins');
     } catch (error) {
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
@@ -562,6 +569,13 @@ export function getMarketData(now = Date.now()) {
   const websocketCandleCoverage={activeSymbols:activeFnoSymbols.length,withObservations:activeCandleSnapshots.filter(item=>item.completedCandles.length||item.liveCandle).length,withCompletedBars:activeCandleSnapshots.filter(item=>item.completedCandles.length>0).length,contiguousBars:activeCandleSnapshots.reduce((sum,item)=>sum+item.contiguousCompletedCount,0),actionable:false,volumeVerified:false};
   const fnoTickCoverage = {
     activeSymbols: activeFnoSymbols.length,
+    pinnedTopGainerSymbols:[...pinnedTopGainerSymbols],
+    pinnedTopGainerCoverage:pinnedTopGainerSymbols.map(symbol=>{
+      const tick=ticks.get(symbol)||null;
+      return {symbol,status:!tick?'NO_TICK':isFresh(tick,now)?'FRESH':'STALE',
+        receiveAgeSeconds:tick?Math.max(0,Math.floor((now-tick.receivedAt)/1000)):null,
+        exchangeAgeSeconds:tick?Math.max(0,Math.floor(now/1000-tick.exchangeTime)):null};
+    }),
     withTick: activeFnoTicks.filter(item => item.tick).length,
     fresh: activeFnoTicks.filter(item => isFresh(item.tick, now)).length,
     stale: activeFnoTicks.filter(item => item.tick && !isFresh(item.tick, now)).length,

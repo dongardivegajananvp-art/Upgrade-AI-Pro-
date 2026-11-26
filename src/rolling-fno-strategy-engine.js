@@ -2,7 +2,7 @@ import { detectNineStrategySetup } from './strategy-engine.js';
 
 // Evaluate every official NSE F&O underlying independently from its own verified
 // FYERS tick and cached completed candles. Missing data is explicitly BLOCKED.
-export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), fiveMinute = new Map(), daily = new Map(), fifteenMinute = new Map(), now = Date.now(), topGainers = [] } = {}) {
+export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), fiveMinute = new Map(), fifteenMinute = new Map(), now = Date.now(), topGainers = [] } = {}) {
   const gainers = new Set(topGainers.map(item => item?.symbol).filter(Boolean));
   const evaluations = [];
   const candidates = [];
@@ -11,11 +11,10 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
     if (!symbol) continue;
     const tick = ticks.get(symbol) || null;
     const five = fiveMinute.get(symbol) || null;
-    const day = daily.get(symbol) || null;
     const fifteen = fifteenMinute.get(symbol) || null;
     const result = detectNineStrategySetup({
       underlyingCandles: five?.candles || [], underlyingTick: tick,
-      dailyCandles: day?.candles || [], fifteenMinuteCandles: fifteen?.candles || [],
+      dailyCandles: [], fifteenMinuteCandles: fifteen?.candles || [],
       isTopGainer: gainers.has(symbol), researchEnabled: false, now
     });
     const row = {

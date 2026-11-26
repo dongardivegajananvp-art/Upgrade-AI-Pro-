@@ -9,8 +9,8 @@ const candle = (time, index = 0) => ({
 });
 function fixtures() {
   const now = Date.parse('2026-11-20T05:25:05.000Z');
-  const fiveStart = epoch('2026-11-20T03:45:00Z');
-  const fiveMinute = Array.from({length:20},(_,i)=>candle(fiveStart+i*300,i));
+  const fiveStart = epoch('2026-11-20T01:15:00Z');
+  const fiveMinute = Array.from({length:50},(_,i)=>candle(fiveStart+i*300,i));
   const session = day => {
     const start = epoch(day+'T03:45:00Z');
     return Array.from({length:25},(_,i)=>candle(start+i*900,i));
@@ -36,13 +36,13 @@ function fixtures() {
 test('multi-timeframe research accepts contiguous verified session windows', () => {
   const f=fixtures();
   const result=analyzeSetupResearch({
-    candles:f.fiveMinute,dailyCandles:f.daily,fifteenMinuteCandles:f.fifteenMinute,
+    candles:f.fiveMinute,fifteenMinuteCandles:f.fifteenMinute,
     tick:f.tick,setup:f.setup,now:f.now
   });
   assert.equal(result.status,'COMPLETE');
 });
 
-test('multi-timeframe research blocks a gap in the latest 20 five-minute candles', () => {
+test('multi-timeframe research blocks a gap in the latest 50 five-minute candles', () => {
   const f=fixtures();
   f.fiveMinute[10].time += 300;
   const result=analyzeSetupResearch({
@@ -50,7 +50,7 @@ test('multi-timeframe research blocks a gap in the latest 20 five-minute candles
     tick:f.tick,setup:f.setup,now:f.now
   });
   assert.equal(result.status,'UNAVAILABLE');
-  assert.match(result.reason,/20 completed 5-minute.*contiguous/i);
+  assert.match(result.reason,/50 completed 5-minute.*contiguous/i);
 });
 
 test('multi-timeframe research blocks a gap in the latest 50 fifteen-minute candles', () => {
@@ -61,5 +61,5 @@ test('multi-timeframe research blocks a gap in the latest 50 fifteen-minute cand
     tick:f.tick,setup:f.setup,now:f.now
   });
   assert.equal(result.status,'UNAVAILABLE');
-  assert.match(result.reason,/50 completed 15-minute.*contiguous/i);
+  assert.match(result.reason,/50 fresh, contiguous completed 15-minute/i);
 });

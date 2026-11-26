@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
-import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
+import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getFifteenMinuteCacheValidUntil, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
@@ -52,6 +52,11 @@ test('15-minute index and equity history normalization excludes incomplete, malf
   assert.ok(candles.every(c=>c.completed&&c.source==='FYERS_HISTORY_15M'));
 });
 
+test('15-minute history cache expires just after the next completed 15m candle is due',()=>{
+  const start=Date.UTC(2027,0,4,3,45)/1000;
+  const candles=[{time:start,open:100,high:102,low:99,close:101,volume:1000}];
+  assert.equal(getFifteenMinuteCacheValidUntil(candles,Date.UTC(2027,0,4,4,1)),(start+1800)*1000+2000);
+});
 test('daily research excludes the current incomplete IST session candle', () => {
   const now = Date.UTC(2027, 0, 4, 5, 0); // 10:00 IST on 4 Jan 2027
   const yesterday = Date.UTC(2027, 0, 2, 18, 30) / 1000; // 00:00 IST on 3 Jan

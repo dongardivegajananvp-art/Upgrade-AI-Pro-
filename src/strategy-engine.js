@@ -1,4 +1,4 @@
-import { isValidOhlcvCandle, validateSessionCandleWindow, validateFreshDailyCandleWindow } from './candle-validation.js';
+import { isValidOhlcvCandle, validateSessionCandleWindow } from './candle-validation.js';
 import { buildRiskPlan } from './safety.js';
 // NSE-only nine-strategy engine ported from the previously approved strategy rules.
 // Research enrichment is deliberately unavailable until its separate data sources are implemented.
@@ -22,92 +22,38 @@ function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, co
   return { completed, lastClosed, ageSeconds, fresh, contiguous };
 }
 
-export function analyzeEarlyWatch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
-  const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&
-    Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&
-    now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&
-    now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
-  const validDaily=hasFreshCompletedDailyHistory(dailyCandles,now);
-  const validFifteen=Array.isArray(fifteenMinuteCandles)&&fifteenMinuteCandles.filter(validOhlcv).length>=50;
-  const latest15m=Number(fifteenMinuteCandles?.at(-1)?.time);
-  const fifteenFresh=Number.isFinite(latest15m)&&now/1000-latest15m>=-3&&now/1000-latest15m<=1800;
-  if(!fresh||!Array.isArray(candles)||candles.length<50||!contiguousWindow(candles,50)||
-     !validDaily||!validFifteen||!contiguousFifteenMinuteWindow(fifteenMinuteCandles,50)||!fifteenFresh)
-    return {status:'NO_WATCH',reason:'Fresh tick, contiguous 50-candle 5m/15m windows, and 50 verified daily candles are required'};
-  const trend=rows=>{
-    const closes=rows.map(row=>Number(row.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);
-    if(!Number.isFinite(e20)||!Number.isFinite(e50))return 'NEUTRAL';
-    return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';
-  };
-  const daily=trend(dailyCandles),fifteen=trend(fifteenMinuteCandles),last=candles.at(-1);
-  const price=Number(tick.price);
-  if(daily==='BULLISH'&&fifteen==='BULLISH'&&price>Number(last.high))
-    return {status:'WATCH',side:'LONG',trigger:'LIVE_PRICE_ABOVE_LAST_COMPLETED_5M_HIGH',level:Number(last.high),price,reason:'Early momentum watch only; completed-candle strategy confirmation and fresh option gates are still mandatory'};
-  if(daily==='BEARISH'&&fifteen==='BEARISH'&&price<Number(last.low))
-    return {status:'WATCH',side:'SHORT',trigger:'LIVE_PRICE_BELOW_LAST_COMPLETED_5M_LOW',level:Number(last.low),price,reason:'Early momentum watch only; completed-candle strategy confirmation and fresh option gates are still mandatory'};
-  return {status:'NO_WATCH',reason:'No live breakout watch aligned with daily and 15-minute trend'};
+export function analyzeEarlyWatch({candles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
+  const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
+  const validFive=Array.isArray(candles)&&candles.length>=50&&contiguousWindow(candles,50);
+  const validFifteen=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
+  if(!fresh||!validFive||!validFifteen)return{status:'NO_WATCH',reason:'Fresh FYERS tick plus contiguous, current 15-minute and 5-minute candle windows are required'};
+  const trend=rows=>{const closes=rows.map(row=>Number(row.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);if(!Number.isFinite(e20)||!Number.isFinite(e50))return'NEUTRAL';return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';};
+  const fifteen=trend(fifteenMinuteCandles),five=trend(candles),last=candles.at(-1),price=Number(tick.price);
+  if(fifteen==='BULLISH'&&five==='BULLISH'&&price>Number(last.high))return{status:'WATCH',side:'LONG',trigger:'LIVE_PRICE_ABOVE_LAST_COMPLETED_5M_HIGH',level:Number(last.high),price,reason:'15m trend and 5m structure aligned; completed-candle strategy confirmation and fresh option gates remain mandatory'};
+  if(fifteen==='BEARISH'&&five==='BEARISH'&&price<Number(last.low))return{status:'WATCH',side:'SHORT',trigger:'LIVE_PRICE_BELOW_LAST_COMPLETED_5M_LOW',level:Number(last.low),price,reason:'15m trend and 5m structure aligned; completed-candle strategy confirmation and fresh option gates remain mandatory'};
+  return{status:'NO_WATCH',reason:'No live breakout watch aligned with 15-minute and 5-minute trend'};
 }
 
 // Deterministic, explainable multi-timeframe research from verified FYERS OHLCV.
 // This is not a claim of an external generative-AI model or paid AI service.
-export function analyzeSetupResearch({candles=[],dailyCandles=[],fifteenMinuteCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
-  const valid = rows => Array.isArray(rows) && rows.length && rows.every(c =>
-    c && ['time','open','high','low','close'].every(k => Number.isFinite(Number(c[k]))) &&
-    Number(c.time)>0 && Number(c.open)>0 && Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low)) &&
-    Number(c.low)<=Math.min(Number(c.open),Number(c.close)));
-  if (!valid(candles) || candles.length < 20) return {status:'UNAVAILABLE',reason:'At least 20 verified completed 5-minute candles are required'};
-  if (!contiguousWindow(candles,20)) return {status:'UNAVAILABLE',reason:'The latest 20 completed 5-minute research candles must be contiguous across verified NSE sessions'};
-  if (!valid(dailyCandles) || dailyCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified daily candles are required for daily trend research'};
-  if (!hasFreshCompletedDailyHistory(dailyCandles,now)) return {status:'UNAVAILABLE',reason:'Latest completed FYERS daily candle is stale; daily context must be within five calendar days'};
-  if (!valid(fifteenMinuteCandles) || fifteenMinuteCandles.length < 50) return {status:'UNAVAILABLE',reason:'At least 50 verified 15-minute candles are required for multi-timeframe research'};
-  if (!contiguousFifteenMinuteWindow(fifteenMinuteCandles,50)) return {status:'UNAVAILABLE',reason:'The latest 50 completed 15-minute research candles must be contiguous across verified NSE sessions'};
-  const latest15m=Number(fifteenMinuteCandles.at(-1).time);
-  if(!Number.isFinite(latest15m)||Number(tick?.exchangeTime)-latest15m < -3||Number(tick?.exchangeTime)-latest15m > 1800)
-    return {status:'UNAVAILABLE',reason:'Latest completed FYERS 15-minute candle is stale or out of sequence'};
-  if (!tick || !Number.isFinite(Number(tick.exchangeTime)) || !Number.isFinite(Number(tick.receivedAt)) ||
-      now-Number(tick.receivedAt)<0 || now-Number(tick.receivedAt)>10000 ||
-      now/1000-Number(tick.exchangeTime)<-3 || now/1000-Number(tick.exchangeTime)>10)
-    return {status:'UNAVAILABLE',reason:'Fresh exchange-timestamped FYERS tick is required for research'};
-  const trend = rows => {
-    const closes=rows.map(c=>Number(c.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);
-    if(!Number.isFinite(e20)||!Number.isFinite(e50))return 'NEUTRAL';
-    return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';
-  };
-  const expected=setup?.side==='LONG'?'BULLISH':'BEARISH';
-  const dailyTrend=trend(dailyCandles),fifteenTrend=trend(fifteenMinuteCandles),fiveTrend=trend(candles);
-  const patternCandle=candles.find(c=>Number(c.time)===Number(setup?.confirmedAt));
+export function analyzeSetupResearch({candles=[],fifteenMinuteCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
+  const valid=rows=>Array.isArray(rows)&&rows.length&&rows.every(c=>c&&['time','open','high','low','close'].every(k=>Number.isFinite(Number(c[k])))&&Number(c.time)>0&&Number(c.open)>0&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close)));
+  if(!valid(candles)||candles.length<50)return{status:'UNAVAILABLE',reason:'At least 50 verified completed 5-minute candles are required'};
+  if(!contiguousWindow(candles,50))return{status:'UNAVAILABLE',reason:'The latest 50 completed 5-minute candles must be contiguous across verified NSE sessions'};
+  if(!valid(fifteenMinuteCandles)||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return{status:'UNAVAILABLE',reason:'At least 50 fresh, contiguous completed 15-minute candles are required'};
+  if(!tick||!Number.isFinite(Number(tick.exchangeTime))||!Number.isFinite(Number(tick.receivedAt))||now-Number(tick.receivedAt)<0||now-Number(tick.receivedAt)>10000||now/1000-Number(tick.exchangeTime)<-3||now/1000-Number(tick.exchangeTime)>10)return{status:'UNAVAILABLE',reason:'Fresh exchange-timestamped FYERS tick is required for research'};
+  const trend=rows=>{const closes=rows.map(c=>Number(c.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);if(!Number.isFinite(e20)||!Number.isFinite(e50))return'NEUTRAL';return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';};
+  const expected=setup?.side==='LONG'?'BULLISH':'BEARISH',fifteenTrend=trend(fifteenMinuteCandles),fiveTrend=trend(candles),patternCandle=candles.find(c=>Number(c.time)===Number(setup?.confirmedAt));
+  const derivedRegime=fifteenTrend===fiveTrend&&fifteenTrend!=='NEUTRAL'?'TRENDING_'+fifteenTrend:(fifteenTrend==='NEUTRAL'&&fiveTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
+  const regime=String(marketRegime||derivedRegime).toUpperCase(),regimePenalty=regime.includes('RANGE')?12:regime.includes('MIXED')?8:0;
   const aligned=t=>t===expected;
-  const derivedRegime=dailyTrend===fifteenTrend&&dailyTrend!=='NEUTRAL'?'TRENDING_'+dailyTrend:
-    (dailyTrend==='NEUTRAL'&&fifteenTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
-  const regime=String(marketRegime||derivedRegime).toUpperCase();
-  const regimePenalty=regime.includes('RANGE')?12:regime.includes('MIXED')?8:0;
-  const points={
-    dailyTrend:aligned(dailyTrend)?20:dailyTrend==='NEUTRAL'?8:0,
-    fifteenMinuteTrend:aligned(fifteenTrend)?20:fifteenTrend==='NEUTRAL'?8:0,
-    fiveMinuteTrend:aligned(fiveTrend)?15:fiveTrend==='NEUTRAL'?6:0,
-    strategyStructure:patternCandle&&validOhlcv(patternCandle)?20:0,
-    liveTickFresh:5,
-    strategyEvidence:setup?.strategy?20:0
-  };
-  const rawQualityScore=Object.values(points).reduce((a,b)=>a+b,0);
-  const qualityScore=Math.max(0,rawQualityScore-regimePenalty);
-  // Research grade plus regime determines the target multiple. In mixed/range
-  // regimes stay at 2R; never lower the hard minimum or bypass price validation.
-  const alignedFrames=[dailyTrend,fifteenTrend,fiveTrend].filter(value=>value===expected).length;
-  const directionalRegime=regime.startsWith('TRENDING_')&&regime.endsWith(expected);
-  const targetR=directionalRegime&&qualityScore>=85&&alignedFrames===3?2.5:
-    !regime.includes('RANGE')&&!regime.includes('MIXED')&&qualityScore>=70&&alignedFrames>=2?2.25:2;
-  const targetRationale=targetR===2.5?'A-grade research: all three timeframes align; 2.5R objective':
-    targetR===2.25?'B-grade research: at least two timeframes align; 2.25R objective':
-    'Conservative research objective: minimum 2R';
-  const evidence=['Daily trend: '+dailyTrend,'15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,
-    'Market regime: '+regime,'Completed-candle strategy structure: verified','FYERS tick: fresh'];
-  return {status:'COMPLETE',qualityScore,rawQualityScore,regimePenalty,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',
-    direction:setup.side,timeframes:{daily:dailyTrend,fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},
-    points,evidence,marketRegime:regime,targetR,targetRationale,targetMethod:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',
-    confidenceCalibration:{status:'PENDING_REALIZED_OUTCOME_SAMPLE',sampleCount:0,reason:'Do not label research quality as win probability until verified trade outcomes exist'},
-    invalidation:'A completed 5-minute close back through the confirmed breakout level invalidates this research setup',
-    source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',asOfExchangeTime:Number(tick.exchangeTime)};
+  const points={fifteenMinuteTrend:aligned(fifteenTrend)?35:fifteenTrend==='NEUTRAL'?12:0,fiveMinuteTrend:aligned(fiveTrend)?25:fiveTrend==='NEUTRAL'?8:0,strategyStructure:patternCandle&&validOhlcv(patternCandle)?20:0,liveTickFresh:5,strategyEvidence:setup?.strategy?15:0};
+  const rawQualityScore=Object.values(points).reduce((a,b)=>a+b,0),qualityScore=Math.max(0,rawQualityScore-regimePenalty);
+  const alignedFrames=[fifteenTrend,fiveTrend].filter(value=>value===expected).length,directionalRegime=regime.startsWith('TRENDING_')&&regime.endsWith(expected);
+  const targetR=directionalRegime&&qualityScore>=85&&alignedFrames===2?2.5:!regime.includes('RANGE')&&!regime.includes('MIXED')&&qualityScore>=70&&alignedFrames===2?2.25:2;
+  const targetRationale=targetR===2.5?'A-grade research: 15-minute and 5-minute trends align; 2.5R objective':targetR===2.25?'B-grade research: 15-minute and 5-minute trends align; 2.25R objective':'Conservative research objective: minimum 2R';
+  const evidence=['15-minute trend: '+fifteenTrend,'5-minute trend: '+fiveTrend,'Market regime: '+regime,'Completed-candle strategy structure: verified','FYERS tick: fresh'];
+  return{status:'COMPLETE',qualityScore,rawQualityScore,regimePenalty,grade:qualityScore>=85?'A':qualityScore>=70?'B':qualityScore>=55?'C':'D',direction:setup.side,timeframes:{fifteenMinute:fifteenTrend,fiveMinute:fiveTrend},points,evidence,marketRegime:regime,targetR,targetRationale,targetMethod:'15M_5M_RESEARCH_ADAPTIVE_RISK_MULTIPLE',confidenceCalibration:{status:'PENDING_REALIZED_OUTCOME_SAMPLE',sampleCount:0,reason:'Do not label research quality as win probability until verified trade outcomes exist'},invalidation:'A completed 5-minute close back through the confirmed breakout level invalidates this research setup',source:'FYERS_VERIFIED_15M_5M_OHLCV',asOfExchangeTime:Number(tick.exchangeTime)};
 }
 
 
@@ -116,7 +62,7 @@ const MAX_ACTIVE_TRADES = 2;
 const STRATEGIES = Object.freeze([
   'EMA20_EMA50_TREND',
   'TOP_GAINER_MOMENTUM_BREAKOUT',
-  'DAILY_TREND_5M_PULLBACK',
+  'FIFTEEN_MIN_TREND_5M_PULLBACK',
   'DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
   'BULLISH_CONTINUATION',
@@ -126,7 +72,7 @@ const STRATEGIES = Object.freeze([
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
-  'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
+  'TOP_GAINER_MOMENTUM_BREAKOUT','FIFTEEN_MIN_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
@@ -134,8 +80,13 @@ const STRATEGY_TIE_PRIORITY = Object.freeze([
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
 function number(value) { return Number(value); }
 function validOhlcv(c) { return isValidOhlcvCandle(c); }
-function hasFreshCompletedDailyHistory(rows, now = Date.now(), maxAgeSeconds = 5 * 86400) {
-  return validateFreshDailyCandleWindow(rows, now, 50, maxAgeSeconds);
+function hasFreshCompletedFifteenMinuteHistory(rows, now = Date.now(), requiredCount = 50, maxAgeSeconds = 1800) {
+  if (!Array.isArray(rows) || rows.length < requiredCount || rows.some(row => !validOhlcv(row))) return false;
+  const recent=rows.slice(-requiredCount);
+  if (!contiguousFifteenMinuteWindow(recent,requiredCount)) return false;
+  const latest=recent.at(-1);
+  const age=Number(now)/1000-(Number(latest.time)+900);
+  return Number.isFinite(age)&&age>=-3&&age<=maxAgeSeconds;
 }
 function ema(values, period) {
   if (values.length < period) return NaN;
@@ -403,17 +354,15 @@ export function detectTopGainerMomentum(rows, isTopGainer=false) {
     ? candidate(STRATEGIES[1],'LONG',number(prior.high),last)
     : null;
 }
-export function detectDailyTrendPullback(rows, dailyCandles=[], now=Date.now()) {
-  if (!Array.isArray(rows) || rows.length < 50 || !hasFreshCompletedDailyHistory(dailyCandles,now)) return null;
-  const dailyCloses=dailyCandles.filter(validOhlcv).map(c=>number(c.close));
-  if(dailyCloses.length<50)return null;
-  const d20=ema(dailyCloses,20),d50=ema(dailyCloses,50);
+export function detectFifteenMinuteTrendPullback(rows, fifteenMinuteCandles=[], now=Date.now()) {
+  if(!Array.isArray(rows)||rows.length<50||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return null;
+  const fifteenCloses=fifteenMinuteCandles.filter(validOhlcv).map(c=>number(c.close));
+  if(fifteenCloses.length<50)return null;
+  const m15_20=ema(fifteenCloses,20),m15_50=ema(fifteenCloses,50);
   const closes=rows.map(c=>number(c.close)),e20=ema(closes,20),e50=ema(closes,50);
   const last=rows.at(-1),p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
-  if(d20>d50&&e20>e50&&touch&&number(last.close)>number(p.high))
-    return candidate(STRATEGIES[2],'LONG',number(p.high),last);
-  if(d20<d50&&e20<e50&&touch&&number(last.close)<number(p.low))
-    return candidate(STRATEGIES[2],'SHORT',number(p.low),last);
+  if(m15_20>m15_50&&e20>e50&&touch&&number(last.close)>number(p.high))return candidate(STRATEGIES[2],'LONG',number(p.high),last);
+  if(m15_20<m15_50&&e20<e50&&touch&&number(last.close)<number(p.low))return candidate(STRATEGIES[2],'SHORT',number(p.low),last);
   return null;
 }
 
@@ -449,10 +398,10 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
-  const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now);
+  const fifteenValid=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
   consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
-  consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 valid completed FYERS daily candles with the latest completed session within five calendar days','Daily and 5-minute EMA20/EMA50 alignment, EMA20 pullback touch, and next-candle resume close did not all confirm');
+  consider('FIFTEEN_MIN_TREND_5M_PULLBACK',w50&&fifteenValid,()=>detectFifteenMinuteTrendPullback(rows,fifteenMinuteCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 fresh, contiguous completed FYERS 15-minute candles','15-minute and 5-minute EMA20/EMA50 alignment, 5-minute EMA20 pullback touch, and next-candle resume close did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No current-session day-high/day-low break followed by a retest and close reclaim/rejection was confirmed');
@@ -481,13 +430,13 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     if(triggerRejected.length)return{status:'NO_TRADE',reason:'Strategy price-level confirmation could not be verified',rejectedStrategies:triggerRejected,evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
     if(!evaluated.length)return {...fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', ')),strategyLedger};
     if(researchEnabled){
-      const watch=analyzeEarlyWatch({candles:rows,dailyCandles,fifteenMinuteCandles,tick:underlyingTick,now});
+      const watch=analyzeEarlyWatch({candles:rows,fifteenMinuteCandles,tick:underlyingTick,now});
       if(watch.status==='WATCH')return{status:'EARLY_WATCH',...watch,underlyingPrice:number(underlyingTick.price),evaluatedStrategies:evaluated,blockedStrategies:blocked};
     }
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked,strategyLedger};
   }
   if(researchEnabled){
-    for(const item of candidates)item.research=analyzeSetupResearch({candles:rows,dailyCandles,fifteenMinuteCandles,tick:underlyingTick,setup:item,marketRegime,now});
+    for(const item of candidates)item.research=analyzeSetupResearch({candles:rows,fifteenMinuteCandles,tick:underlyingTick,setup:item,marketRegime,now});
     const researchReady=candidates.filter(item=>item.research?.status==='COMPLETE'&&finite(item.research.qualityScore));
     if(!researchReady.length){
       const pending=candidates[0]?.research||null;

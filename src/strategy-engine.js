@@ -197,7 +197,7 @@ export function detectDayLowReversal(rows) {
   if (day.length < 4) return null;
   const anchor = day.slice(0, -2);
   if (anchor.length < 2) return null;
-  const dayLow = Math.min(...anchor.map(c => number(c.low)));
+  const dayLow = Math.min(...day.slice(0, -1).map(c => number(c.low)));
   const rejection = day.at(-2);
   const trigger = day.at(-1);
   if (![dayLow, number(rejection.open), number(rejection.high), number(rejection.low), number(rejection.close), number(trigger.open), number(trigger.high), number(trigger.low), number(trigger.close)].every(Number.isFinite)) return null;
@@ -205,7 +205,7 @@ export function detectDayLowReversal(rows) {
   const body = Math.abs(number(rejection.close) - number(rejection.open));
   const lowerWick = Math.min(number(rejection.open), number(rejection.close)) - number(rejection.low);
   const touchedSupport = number(rejection.low) <= dayLow + tolerance;
-  const heldSupport = number(rejection.close) > dayLow;
+  const heldSupport = number(rejection.close) > dayLow && number(trigger.low) >= dayLow;
   const bullishRejection = number(rejection.close) > number(rejection.open) && body > 0 && lowerWick >= body;
   const confirmedBreakout = number(trigger.close) > number(trigger.open) && number(trigger.close) > number(rejection.high);
   if (!touchedSupport || !heldSupport || !bullishRejection || !confirmedBreakout) return null;

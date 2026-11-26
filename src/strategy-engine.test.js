@@ -425,6 +425,11 @@ test('bullish and bearish flag detectors use price structure only, regardless of
   assert.equal(detectFlagPriceStructure(bearish)?.side,'SHORT');
 });
 
+test('15m trend pullback rejects stale 15m candles even when 5m candles are present',()=>{
+  const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
+  const stale=Array.from({length:50},(_,i)=>({time:1700000000+i*900,open:100+i,high:101+i,low:99+i,close:100.5+i,volume:1000}));
+  assert.equal(detectFifteenMinuteTrendPullback(rows,stale,1800000000000),null);
+});
 test('15m trend pullback detector blocks missing or stale 15m context', () => {
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
   assert.equal(detectFifteenMinuteTrendPullback(rows,[],1800000000000),null);

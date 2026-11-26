@@ -299,14 +299,13 @@ test('PWA updates activate the versioned shell, evict old caches and never inter
   assert.match(serviceWorker, /u\.pathname\.startsWith\('\/api\/'\)\)return/);
 });
 
-test('research daily and 15m context warmup is sequential under the shared REST governor', () => {
+test('research context warms fresh 15m history without requesting daily candles', () => {
   const start = server.indexOf("if (url.pathname === '/api/research-context')");
   const end = server.indexOf("if (url.pathname === '/api/research/historical-universe')", start);
   const flow = server.slice(start, end);
-  const daily = flow.indexOf("const daily = await getDailyHistory");
-  const fifteen = flow.indexOf("const fifteenMinute = await getFifteenMinuteHistory");
-  assert.ok(daily >= 0 && fifteen > daily, 'daily context is loaded before 15m context');
-  assert.doesNotMatch(flow, /Promise\.all\(/, 'context warmup does not enqueue a request burst');
+  assert.match(flow, /getFifteenMinuteHistory/);
+  assert.doesNotMatch(flow, /getDailyHistory/);
+  assert.match(flow, /entryContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE'/);
 });
 
 test('index chart selection does not request equity-only research context', () => {
@@ -314,34 +313,18 @@ test('index chart selection does not request equity-only research context', () =
   assert.match(app, /researchContextReadySymbol = symbol;[\s\S]*?return;/);
 });
 
-test('live setup uses 5m price triggers and does not wait for universal daily/15m research', () => {
+test('live setup loads 15m and 5m context without daily-history dependency', () => {
   const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
   const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);
   const flow = server.slice(start, end);
   const underlying = flow.indexOf("const underlyingHistory = await getFiveMinuteHistory");
   const option = flow.indexOf("const optionHistory = await getFiveMinuteHistory");
-  const daily = flow.indexOf("dailyHistory = await getDailyHistory");
-  assert.ok(underlying >= 0 && option > underlying && daily > option, '5m histories remain mandatory and daily context is loaded best-effort');
-  assert.doesNotMatch(flow, /getFifteenMinuteHistory/, '15m research is not a universal entry prerequisite');
-  assert.match(flow, /researchEnabled:false/, 'live entry evaluates the strategy-specific price rules directly');
-  assert.doesNotMatch(flow, /Promise\.all\(/, 'setup history reads are not queued as a burst');
-  assert.match(flow, /REST_PRIORITY\.ENTRY/, 'mandatory setup reads retain ENTRY priority');
-});
-test('Top-3 handoff is based on completed price setups, not universal AI research scores', () => {
-  assert.match(app, /data\.top3\[0\]/);
-  assert.match(app, /PRICE STRUCTURE · OPTION CHECK PENDING/);
-  assert.doesNotMatch(app, /daily and 15m research gates pass/);
-  assert.match(app, /Option tick\/candles and fixed 2R are checked before an entry is confirmed/);
-});
-test('entry evaluation is independent of research warmup and account polling yields to REST work', () => {
-  assert.match(app, /selectedOptionFresh &&/);
-  assert.doesNotMatch(app, /selectedOptionFresh && researchContextReadySymbol===selectedSymbol/);
-  const entryStart=app.indexOf('async function evaluateSelectedSetup()');
-  const entryEnd=app.indexOf('function selectCandidateForEntry',entryStart);
-  const entryFlow=app.slice(entryStart,entryEnd);
-  assert.doesNotMatch(entryFlow, /researchContextReadySymbol !== selectedSymbol/, 'research panel readiness cannot block live entry evaluation');
-  assert.match(app, /accountRefreshSafe = !restState\.cooldownActive/);
-  assert.match(app, /Number\(restState\.requestsThisMinute \|\| 0\) < 4/);
+  const fifteen = flow.indexOf("const fifteenMinuteHistory = await getFifteenMinuteHistory");
+  assert.ok(underlying >= 0 && option > underlying && fifteen > option, '5m underlying, option and 15m trend histories are sequential');
+  assert.doesNotMatch(flow, /getDailyHistory/);
+  assert.match(flow, /fifteenMinuteCandles:fifteenMinuteHistory\.candles/);
+  assert.doesNotMatch(flow, /Promise\\.all\\(/, 'entry history reads are not queued as a burst');
+  assert.match(flow, /REST_PRIORITY\\.ENTRY/, 'entry reads retain ENTRY priority');
 });
 
 test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {

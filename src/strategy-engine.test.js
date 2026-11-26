@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectFifteenMinuteTrendPullback } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
   assert.deepEqual(STRATEGIES, [
-    'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK',
+    'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','FIFTEEN_MIN_TREND_5M_PULLBACK',
     'DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION',
     'BEARISH_CONTINUATION','FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT'
   ]);
@@ -289,7 +289,7 @@ test('top-gainer breakout uses two contiguous candles and no fixed 20-candle vol
   const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
   assert.equal(topGainer.status,'DETECTED');
   assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='BLOCKED'));
-  assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='FIFTEEN_MIN_TREND_5M_PULLBACK'&&row.status==='BLOCKED'));
 });
 
 
@@ -429,7 +429,7 @@ test('bullish and bearish flag detectors use price structure only, regardless of
 
 test('daily-trend pullback detector blocks missing or stale daily context', () => {
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
-  assert.equal(detectDailyTrendPullback(rows,[],1800000000000),null);
+  assert.equal(detectFifteenMinuteTrendPullback(rows,[],1800000000000),null);
 });
 
 
@@ -459,23 +459,18 @@ test('double-top and double-bottom detectors require a neckline break followed b
 });
 
 
-test('daily-trend 5m pullback detector confirms bullish EMA alignment and resume after a pullback touch',()=>{
-  const now=Date.parse('2026-11-23T12:00:00Z');
+test('15m trend plus 5m pullback detector confirms bullish EMA alignment and resume after a pullback touch',()=>{
+  const now=Date.parse('2026-11-23T10:05:00Z');
   const start=Math.floor(now/1000)-60*300;
-  const rows=Array.from({length:60},(_,i)=>{
-    const close=100+i*.2;
-    return{time:start+i*300,open:close-.05,high:close+.1,low:close-.1,close,volume:100};
-  });
+  const rows=Array.from({length:60},(_,i)=>{const close=100+i*.2;return{time:start+i*300,open:close-.05,high:close+.1,low:close-.1,close,volume:100};});
   rows[58]={time:start+58*300,open:109.05,high:109.15,low:108.7,close:108.9,volume:120};
   rows[59]={time:start+59*300,open:109.1,high:109.7,low:109,close:109.6,volume:150};
-  const dailyStart=Math.floor(now/1000)-60*86400;
-  const daily=Array.from({length:60},(_,i)=>{
-    const close=100+i;
-    return{time:dailyStart+i*86400,open:close-.2,high:close+.5,low:close-.5,close,volume:1000};
-  });
-  const result=detectDailyTrendPullback(rows,daily,now);
+  const m15Start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const fifteen=Array.from({length:50},(_,i)=>{const session=i<25?0:1,slot=i%25,day=session===0?'2026-11-20':'2026-11-23',time=Date.parse(day+'T03:45:00Z')/1000+slot*900,close=100+i;return{time,open:close-.2,high:close+.5,low:close-.5,close,volume:1000};});
+  const result=detectFifteenMinuteTrendPullback(rows,fifteen,now);
   assert.equal(result?.side,'LONG');
-  assert.equal(result?.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(result?.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
+  assert.equal(detectFifteenMinuteTrendPullback(rows,[],now),null);
 });
 
 
@@ -748,14 +743,14 @@ test('end-to-end daily-trend pullback requires fresh daily context and completes
   const base={underlyingCandles:rows,underlyingTick:{symbol:'NSE:ABC-EQ',price:189.3,exchangeTime:evaluationNow/1000,receivedAt:evaluationNow},...option,dailyCandles:daily,now:evaluationNow,researchEnabled:false};
   const result=evaluateNineStrategies(base);
   assert.equal(result.status,'SETUP_CONFIRMED');
-  assert.equal(result.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(result.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
   assert.equal(result.underlyingSide,'SHORT');
   assert.equal(result.optionSide,'PE');
   assert.ok(result.rr>=2);
   const missingDaily=evaluateNineStrategies({...base,dailyCandles:[]});
-  assert.notEqual(missingDaily.strategy,'DAILY_TREND_5M_PULLBACK');
-  assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='DAILY_TREND_5M_PULLBACK').status,'BLOCKED');
-  assertStaleOptionQuoteBlocks(rows,'SHORT','DAILY_TREND_5M_PULLBACK',{dailyCandles:daily});
+  assert.notEqual(missingDaily.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
+  assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='FIFTEEN_MIN_TREND_5M_PULLBACK').status,'BLOCKED');
+  assertStaleOptionQuoteBlocks(rows,'SHORT','FIFTEEN_MIN_TREND_5M_PULLBACK',{dailyCandles:daily});
 });
 
 
@@ -842,7 +837,7 @@ test('targeted strategy detector invalidation matrix rejects each missing patter
   assert.equal(detectTopGainerMomentum(rows5,true),null,'Top Gainer membership without a breakout must reject');
 
   // Daily pullback: absent verified daily context cannot produce a setup.
-  assert.equal(detectDailyTrendPullback(rows50,[],Date.parse('2026-11-23T12:00:00Z')),null,
+  assert.equal(detectFifteenMinuteTrendPullback(rows50,[],Date.parse('2026-11-23T12:00:00Z')),null,
     'daily pullback must reject missing verified daily history');
 
   // Day high/low retest: no prior level break means no reclaim/rejection setup.

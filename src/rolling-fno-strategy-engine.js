@@ -15,7 +15,7 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
     const fifteen = fifteenMinute.get(symbol) || null;
     const result = detectNineStrategySetup({
       underlyingCandles: five?.candles || [], underlyingTick: tick,
-      dailyCandles: day?.candles || [], fifteenMinuteCandles: fifteen?.candles || [],
+      dailyCandles: [], fifteenMinuteCandles: fifteen?.candles || [],
       isTopGainer: gainers.has(symbol), researchEnabled: false, now
     });
     const row = {

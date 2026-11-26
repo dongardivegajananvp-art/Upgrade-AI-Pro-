@@ -458,19 +458,29 @@ export function normalizeFifteenMinuteCandles(rows, now = Date.now()) {
   }).filter(Boolean).sort((a,b)=>a.time-b.time);
 }
 const fifteenMinuteCache = new Map();
+export function getFifteenMinuteCacheValidUntil(candles, now = Date.now()) {
+  const last=Array.isArray(candles)?candles.at(-1):null;
+  const time=Number(last?.time);
+  if(!Number.isFinite(time)||time<=0)return 0;
+  return Math.min(time*1000+15*60_000+2_000,(Math.floor(now/900_000)+1)*900_000+2_000);
+}
 export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = REST_PRIORITY.WARMUP, source = 'fifteen-minute-research') {
-  if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute research');
+  if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute history');
   return runHistoryRequestOnce('15m:' + symbol, async () => {
     const cached=fifteenMinuteCache.get(symbol);
-    if(cached&&now-cached.savedAt<30*60*1000)return cached.value;
+    const cachedLast=Number(cached?.value?.candles?.at(-1)?.time);
+    const cachedAge=now/1000-(cachedLast+900);
+    if(cached&&now<=cached.validUntil&&Number.isFinite(cachedAge)&&cachedAge>=-3&&cachedAge<=1800)return cached.value;
     const to=istDate(now);
     const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
     const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority,source);
-    if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute research candles');
+    if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute history');
     const candles=normalizeFifteenMinuteCandles(body.candles,now);
-    if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles for research');
-    const value={symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M'};
-    fifteenMinuteCache.set(symbol,{savedAt:now,value});
+    if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles; 50 are required for EMA20/EMA50');
+    const last=candles.at(-1),age=now/1000-(Number(last.time)+900);
+    if(!Number.isFinite(age)||age< -3||age>1800)throw new Error('Latest completed FYERS 15-minute candle is stale or out of sequence');
+    const value={symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M',lastCompletedCandleTime:last.time,ageSeconds:Math.max(0,Math.floor(age))};
+    fifteenMinuteCache.set(symbol,{savedAt:now,validUntil:getFifteenMinuteCacheValidUntil(candles,now),value});
     return value;
   });
 }

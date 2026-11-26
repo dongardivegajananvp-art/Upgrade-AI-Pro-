@@ -67,7 +67,7 @@ async function refreshUniverseScan() {
   try {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
-    // Once a fully verified Top-3 candidate exists, automatically route the #1
+    // Once a fresh completed-candle price setup exists, route the #1
     // candidate into read-only CE/PE verification unless the user has chosen
     // a chart symbol manually. This never places an order.
     if(data.marketSession==='OPEN'&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
@@ -81,7 +81,7 @@ async function refreshUniverseScan() {
     container.replaceChildren();
     status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 appear only after fresh FYERS tick + completed 5m, daily and 15m research gates pass. Current verified candidates: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 show fresh FYERS ticks with completed 5m price setups; daily context is strategy-specific and AI research scoring is separate. Option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
@@ -93,10 +93,10 @@ async function refreshUniverseScan() {
       const card=document.createElement('button');card.type='button';card.className='research-card';
       const head=document.createElement('div');head.className='research-card-head';
       const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
-      const score=document.createElement('b');score.textContent=item.qualityScore+'/100 · '+item.grade;
+      const score=document.createElement('b');score.textContent=item.qualityScore===null?'PRICE STRUCTURE · OPTION CHECK PENDING':item.qualityScore+'/100 · '+item.grade;
       head.append(title,score);
       const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
-      const target=document.createElement('small');target.textContent='AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
+      const target=document.createElement('small');target.textContent=item.qualityScore===null?'Risk rule: Entry/SL/Target only after official option verification · RR ≥ 2':'AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');
       const reason=document.createElement('small');reason.textContent='Invalidation: '+(item.invalidation||'Not supplied');
       card.append(head,evidence,target,reason);
       card.addEventListener('click',()=>void selectCandidateForEntry(item));
@@ -104,7 +104,7 @@ async function refreshUniverseScan() {
     }
     if(!(data.top3||[]).length) {
       const blocked=document.createElement('small');
-      blocked.textContent='No verified Top 3 yet. Missing/stale data and unconfirmed patterns are not scored.';
+      blocked.textContent='No fresh completed-candle price setup yet. Missing/stale data and unconfirmed patterns are not promoted.';
       container.append(blocked);
     }
     // Keep the default DOM intentionally small on mobile. Detailed ledgers are

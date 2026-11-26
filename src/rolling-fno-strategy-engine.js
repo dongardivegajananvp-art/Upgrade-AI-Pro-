@@ -16,7 +16,7 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
     const result = detectNineStrategySetup({
       underlyingCandles: five?.candles || [], underlyingTick: tick,
       dailyCandles: day?.candles || [], fifteenMinuteCandles: fifteen?.candles || [],
-      isTopGainer: gainers.has(symbol), researchEnabled: true, now
+      isTopGainer: gainers.has(symbol), researchEnabled: false, now
     });
     const row = {
       symbol, name: item.name || item.underlying || symbol,
@@ -27,13 +27,17 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
       fresh: Boolean(tick && now - Number(tick.receivedAt) >= 0 && now - Number(tick.receivedAt) <= 10000 && now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10)
     };
     evaluations.push(row);
-    if (result.status === 'UNDERLYING_SETUP_CONFIRMED' && result.research?.status === 'COMPLETE') {
-      candidates.push({ ...row, side: result.side, strategy: result.strategy, qualityScore: result.research.qualityScore, grade: result.research.grade, targetR: result.research.targetR, targetRationale: result.research.targetRationale, evidence: result.research.evidence, invalidation: result.research.invalidation });
+    if (result.status === 'UNDERLYING_SETUP_CONFIRMED' && row.fresh) {
+      candidates.push({ ...row, side: result.side, strategy: result.strategy,
+        qualityScore: null, grade: 'PRICE_SETUP', targetR: 2,
+        targetRationale: 'Minimum 2R is calculated only after official option verification',
+        evidence: ['Fresh FYERS underlying tick', 'Completed 5-minute strategy price structure'],
+        invalidation: 'Re-evaluate the strategy structure on the next completed 5-minute candle' });
     }
   }
   candidates.sort((a,b) => b.qualityScore - a.qualityScore || String(a.symbol).localeCompare(String(b.symbol)));
   return {
-    status: candidates.length ? 'VERIFIED_CANDIDATES_AVAILABLE' : 'NO_VERIFIED_CANDIDATE',
+    status: candidates.length ? 'PRICE_SETUPS_AVAILABLE' : 'NO_PRICE_SETUP',
     universeCount: evaluations.length,
     evaluatedCount: evaluations.filter(row => row.strategyLedger.some(entry => entry.status !== 'BLOCKED')).length,
     blockedCount: evaluations.filter(row => row.status === 'DATA_UNAVAILABLE_NO_TRADE').length,

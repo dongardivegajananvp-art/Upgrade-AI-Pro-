@@ -533,7 +533,7 @@ function makeTopGainerEndToEndCase() {
     {time:start+600,open:101,high:104,low:100.8,close:103.8,volume:200}
   ];
   const optionCandles=[
-    {time:start+600,open:105,high:106,low:104,close:105.5,volume:520}
+    {time:start+1200,open:105,high:106,low:104,close:105.5,volume:520}
   ];
   const contract={
     symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
@@ -628,7 +628,7 @@ test('end-to-end opening-range first-candle breakout passes with one completed o
     {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:200}
   ];
   const option=makeOptionPipelineFields(start-300,'CE');
-  option.optionCandles=option.optionCandles.map((c,i)=>({...c,time:start-300+i*300}));
+  option.optionCandles=option.optionCandles.map(c=>({...c,time:start+300}));
   option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
   assert.equal(result.status,'SETUP_CONFIRMED');

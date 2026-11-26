@@ -314,22 +314,19 @@ test('index chart selection does not request equity-only research context', () =
   assert.match(app, /researchContextReadySymbol = symbol;[\s\S]*?return;/);
 });
 
-test('live setup history requests are sequenced and never weaken the shared REST governor', () => {
+test('live setup uses 5m price triggers and does not wait for universal daily/15m research', () => {
   const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
   const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);
   const flow = server.slice(start, end);
-  const reads = [
-    "const underlyingHistory = await getFiveMinuteHistory",
-    "const optionHistory = await getFiveMinuteHistory",
-    "const dailyHistory = await getDailyHistory",
-    "const fifteenMinuteHistory = await getFifteenMinuteHistory"
-  ].map(token => flow.indexOf(token));
-  assert.ok(reads.every(index => index >= 0), 'all four verified history inputs remain required');
-  assert.deepEqual(reads, [...reads].sort((a, b) => a - b), 'history requests are sequential');
-  assert.doesNotMatch(flow, /Promise\.all\(/, 'setup history reads are not queued as a burst');
-  assert.match(flow, /REST_PRIORITY\.ENTRY/, 'all setup reads retain ENTRY priority');
+  const underlying = flow.indexOf("const underlyingHistory = await getFiveMinuteHistory");
+  const option = flow.indexOf("const optionHistory = await getFiveMinuteHistory");
+  const daily = flow.indexOf("dailyHistory = await getDailyHistory");
+  assert.ok(underlying >= 0 && option > underlying && daily > option, '5m histories remain mandatory and daily context is loaded best-effort');
+  assert.doesNotMatch(flow, /getFifteenMinuteHistory/, '15m research is not a universal entry prerequisite');
+  assert.match(flow, /researchEnabled:false/, 'live entry evaluates the strategy-specific price rules directly');
+  assert.doesNotMatch(flow, /Promise\\.all\\(/, 'setup history reads are not queued as a burst');
+  assert.match(flow, /REST_PRIORITY\\.ENTRY/, 'mandatory setup reads retain ENTRY priority');
 });
-
 test('entry evaluation waits for verified daily and 15m context and account polling yields to REST work', () => {
   assert.match(app, /if \(researchContextReadySymbol !== selectedSymbol\) return/);
   assert.match(app, /researchContextLoadingPromise/);

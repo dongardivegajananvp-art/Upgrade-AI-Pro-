@@ -1,13 +1,12 @@
 // Rolling market-wide F&O observation ranking for FYERS Standard's shared 100-symbol cap.
 // This is deliberately NOT a simultaneous live scan and never creates actionable signals.
-// The global REST governor allows only three lower-priority requests per rolling minute.
-// One history-backed scanner slot per minute is the honest safe cadence until the
-// scanner is moved to verified WebSocket-built candles or a measured larger budget.
-export const FNO_SCAN_PER_SLICE = 1;
-// Keep each symbol subscribed for a full 20-minute window. This matches the
-// guarded one-history-scan/minute cadence: every active symbol gets a scan slot
-// before it leaves the 20-symbol socket slice.
-export const FNO_SOCKET_ROTATION_ADVANCE = 1;
+// The shared REST governor allows three lower-priority requests per rolling minute.
+// Match that measured allowance with three history-backed scans per 60s slice,
+// paced by FNO_SCAN_MIN_INTERVAL_MS (20s) in the server scheduler.
+export const FNO_SCAN_PER_SLICE = 3;
+// Advance the overlapping 80-symbol socket window by the same three symbols
+// per minute so every newly rotated symbol receives one independent scan slot.
+export const FNO_SOCKET_ROTATION_ADVANCE = 3;
 export const FNO_SYMBOL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);

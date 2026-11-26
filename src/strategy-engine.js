@@ -118,7 +118,7 @@ function currentSessionRows(rows) {
   const key = istDayKey(number(rows.at(-1).time));
   return rows.filter(candle => istDayKey(number(candle.time)) === key);
 }
-function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = null, minimumCount = 2) {
+function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = null) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
   }
@@ -141,8 +141,7 @@ function completed(candles, tick, label, maxAgeSeconds = 600, historicalAsOf = n
     };
     return { error: label + ' latest completed candle is stale; diagnostics=' + JSON.stringify(diagnostic) };
   }
-  const requiredCount = Math.max(1, Math.floor(Number(minimumCount) || 2));
-  if (window.completed.length < requiredCount) return { error: label + ' requires at least ' + requiredCount + ' completed 5-minute candle(s)' };
+  if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
   return { rows: window.completed, last: window.lastClosed };
 }
 function pivotHigh(rows, i, width=2) {
@@ -489,21 +488,30 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const chosen=setup;
   const contractGate=validateStrategyOptionContract({strategy:chosen.strategy,underlyingSide:chosen.side,underlyingSymbol:underlyingTick?.symbol,contract,now});
   if(!contractGate.ok)return blockDetected(contractGate.reason);
-  const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds,null,1);
+  const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds);
   if(o.error)return blockDetected(o.error);
-  if(!contiguousWindow(o.rows,1,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs one fresh completed 5-minute candle');
-  const confirmation=o.rows.at(-1),tickSize=number(contract.tickSize);
-  // One completed bullish option candle establishes the local premium range.
-  // The fresh exchange-timestamped live quote must cross its high by one tick.
-  if(number(confirmation.close)<=number(confirmation.open))
-    return blockDetected('The latest completed option 5-minute candle must close bullish');
+  if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
+  const premiumRows=o.rows,tickSize=number(contract.tickSize);
+  // Require an ordered, completed option structure: prior range, bullish breakout
+  // close above that range, then a bullish retest/hold. Live ticks cannot replace
+  // either completed-candle confirmation.
+  const prior=premiumRows.at(-3),breakout=premiumRows.at(-2),confirmation=premiumRows.at(-1);
+  const priorHigh=number(prior.high),breakoutHigh=number(breakout.high);
+  const validOptionBreakout=number(breakout.close)>priorHigh&&number(breakout.close)>number(breakout.open);
+  const validOptionRetest=number(confirmation.low)<=breakoutHigh&&number(confirmation.close)>priorHigh&&number(confirmation.close)>number(confirmation.open);
+  if(!validOptionBreakout||!validOptionRetest)
+    return blockDetected(!validOptionBreakout
+      ?'Option premium breakout candle must close bullish above the preceding completed 5-minute candle high'
+      :'Option premium confirmation candle must retest the breakout range and close bullish above the prior range high');
   const premiumLevel=number(confirmation.high);
   const entry=Number((Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize).toFixed(8));
-  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'One fresh completed bullish option 5-minute candle verified; waiting for live option premium to break its high + one official tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Option candle confirmed; waiting for live premium to cross its high'}:row)};
+  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Three completed option candles verified: prior range, bullish breakout close and bullish retest/hold; waiting for live option premium to break the confirmation candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Option structure confirmed; waiting for live premium to cross the confirmation candle high'}:row)};
+  // The completed retest candle defines structural risk; the fresh quote is only
+  // the trigger for the already verified three-candle pattern.
   const swingLow=number(confirmation.low);
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow,targetR:chosen.research?.targetR||2});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:plan.reason}:row)};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:confirmation.time,optionConfirmation:'ONE_COMPLETED_BULLISH_5M_CANDLE_PLUS_LIVE_BREAKOUT',entryTiming:'LIVE_PREMIUM_BREAK_AFTER_ONE_COMPLETED_BULLISH_CANDLE',entryBasis:'COMPLETED_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'COMPLETED_CANDLE_LOW_MINUS_ONE_OFFICIAL_TICK',targetBasis:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',targetR:plan.targetR,targetRationale:chosen.research?.targetRationale||'Minimum 2R research objective',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,entryTriggerPrice:plan.entry,stopLoss:plan.stopLoss,target:plan.target,risk:plan.risk,reward:Number((plan.target-plan.entry).toFixed(8)),rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:confirmation.time,optionConfirmation:'COMPLETED_BULLISH_BREAKOUT_RETEST',entryTiming:'LIVE_PREMIUM_BREAK_AFTER_COMPLETED_RETEST',entryBasis:'CONFIRMATION_CANDLE_HIGH_PLUS_ONE_OFFICIAL_TICK',stopLossBasis:'CONFIRMATION_CANDLE_LOW_MINUS_ONE_OFFICIAL_TICK',targetBasis:'AI_RESEARCH_ADAPTIVE_RISK_MULTIPLE',targetR:plan.targetR,targetRationale:chosen.research?.targetRationale||'Minimum 2R research objective',contract:contract.symbol,research:chosen.research||null,researchRanking:chosen.researchRanking||[],strategyLedger:setup.strategyLedger||[]};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};

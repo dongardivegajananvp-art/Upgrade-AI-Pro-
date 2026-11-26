@@ -533,7 +533,7 @@ function makeTopGainerEndToEndCase() {
     {time:start+600,open:101,high:104,low:100.8,close:103.8,volume:200}
   ];
   const optionCandles=[
-    {time:start+1200,open:105,high:106,low:104,close:105.5,volume:520}
+    {time:start+600,open:105,high:106,low:104,close:105.5,volume:520}
   ];
   const contract={
     symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,

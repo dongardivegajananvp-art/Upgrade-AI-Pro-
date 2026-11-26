@@ -14,6 +14,15 @@ export function canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAt
   return !Boolean(recoveryProbeRequired) || (!Boolean(recoveryProbeAttempted) && Number(priority) >= REST_PRIORITY.CHART);
 }
 
+// Retry only after a bounded delay when the single recovery probe fails transiently.
+// Permanent 4xx/auth failures remain locked until the session/configuration is corrected.
+export function getRestRecoveryProbeRetryDelayMs(attempt = 1, baseMs = 30_000, maxMs = 5 * 60_000) {
+  const n = Math.max(1, Math.floor(Number(attempt) || 1));
+  const base = Math.max(1, Number(baseMs) || 30_000);
+  const cap = Math.max(base, Number(maxMs) || 5 * 60_000);
+  return Math.min(cap, base * (2 ** Math.min(n - 1, 20)));
+}
+
 export function isRestCooldownActive(now, cooldownUntil) {
   return Number(now) < Number(cooldownUntil);
 }

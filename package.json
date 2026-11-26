@@ -16,6 +16,6 @@
     "backtest:option-queue": "node src/backtest-option-export-queue.js"
   },
   "dependencies": {
-    "fyers-api-v3": "2.4.1"
+    "fyers-api-v3": "2.5.0"
   }
 }

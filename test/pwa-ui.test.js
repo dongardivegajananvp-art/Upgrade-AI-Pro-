@@ -344,7 +344,7 @@ test('entry gate mirrors the actual option-breakout result and stale ticks revok
   assert.match(app, /setupEvaluationStatus==='SETUP_CONFIRMED'/);
   assert.match(app, /SIGNAL VERIFIED · OPTION BREAKOUT CONFIRMED/);
   assert.match(app, /WAITING FOR OPTION BREAKOUT · TRIGGER/);
-  assert.match(app, /\['OPTION BREAKOUT',optionBreakoutConfirmed\]/);
+  assert.match(app, /checks\.push\(\['OPTION BREAKOUT',optionBreakoutConfirmed\]\)/);
   assert.match(app, /Previously verified setup invalidated: selected option tick is no longer fresh/);
   assert.match(app, /for\(const id of \['setup-entry','setup-sl','setup-target','setup-rr'\]\).*textContent='—'/);
   assert.match(app, /15M RESEARCH CONTEXT:/);

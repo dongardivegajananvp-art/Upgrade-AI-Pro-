@@ -424,7 +424,7 @@ const server = http.createServer(async (req,res) => {
           const historicalAsOf=Number(last?.time)+300;
           const result=detectNineStrategySetup({
             underlyingCandles:history.candles,underlyingTick:null,
-            dailyCandles:histories.daily.get(item.symbol)?.candles||[],
+            dailyCandles:[],
             fifteenMinuteCandles:histories.fifteenMinute.get(item.symbol)?.candles||[],
             isTopGainer:false,researchEnabled:false,now:Date.now(),historicalAsOf
           });
@@ -442,7 +442,7 @@ const server = http.createServer(async (req,res) => {
         const market=getMarketData();
         const result=evaluateRollingFnoUniverse({
           universe:snapshot.universe,ticks:snapshot.ticks,
-          fiveMinute:histories.fiveMinute,daily:histories.daily,fifteenMinute:histories.fifteenMinute,
+          fiveMinute:histories.fiveMinute,fifteenMinute:histories.fifteenMinute,
           topGainers:market.fno?.topGainers||[],now:Date.now()
         });
         const now=Date.now();

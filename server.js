@@ -156,7 +156,7 @@ function startFnoStrategyScanner() {
     if (fnoStrategyScanCursor>=scanLimit) return;
     if (Date.now()<fnoStrategyScanNextAllowedAt) {
       fnoStrategyScanStats.status='WAITING_FOR_SCAN_INTERVAL';
-      fnoStrategyScanStats.lastReason='Global scanner cadence: one new underlying history scan per 60 seconds';
+      fnoStrategyScanStats.lastReason='Global scanner cadence: one new underlying history scan every '+Math.round(FNO_SCAN_MIN_INTERVAL_MS/1000)+' seconds';
       return;
     }
     const normalSymbol=getNextFreshFnoScanSymbol(active,snapshot.ticks,fnoSymbolScanLedger,Date.now());
@@ -470,8 +470,8 @@ const server = http.createServer(async (req,res) => {
           simultaneous:false
         };
         return send(res,200,{...result,marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
-          rotationIntervalMs:snapshot.rotationIntervalMs,scanPerSlice:snapshot.scanPerSlice,symbolCap:snapshot.symbolCap,
-          scanner:fnoStrategyScanStats,coverageSummary,symbolCoverage,
+          rotationIntervalMs:snapshot.rotationIntervalMs,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:snapshot.scanPerSlice,symbolCap:snapshot.symbolCap,
+          scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS},coverageSummary,symbolCoverage,
           note:'Per-symbol scan/tick coverage is observational only. Rotating ticks are not simultaneous. Missing/stale inputs are BLOCKED; this endpoint does not fetch synthetic data or place orders.'});
       }
       if (url.pathname === '/api/research') {
@@ -529,7 +529,7 @@ const server = http.createServer(async (req,res) => {
     return send(res,200,buildHealthStatus({
       market, masterCurrent:isFnoMasterCurrent(), marketSessionOpen:isNseRegularSession(Date.now()), sessionDate:getNseSessionDate(),
       loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(), authStatus:getAuthStatus(),
-      scanner:fnoStrategyScanStats, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
+      scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS}, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
       rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
       rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
     }));
@@ -562,7 +562,7 @@ const server = http.createServer(async (req,res) => {
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
     },
-    fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:60000,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {

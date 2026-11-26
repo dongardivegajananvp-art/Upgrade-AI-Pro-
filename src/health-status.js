@@ -62,6 +62,7 @@ export function buildHealthStatus({
       scannedCount: Number(scanner.scannedCount || 0),
       sliceScannedCount: Number(scanner.sliceScannedCount || 0),
       scanPerSlice,
+      scanIntervalMs: Number.isFinite(Number(scanner.scanIntervalMs)) ? Number(scanner.scanIntervalMs) : null,
       rotationIntervalMs,
       lastSymbol: scanner.lastSymbol || null,
       lastStatus: scanner.lastStatus || null,

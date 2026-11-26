@@ -323,8 +323,8 @@ test('live setup loads 15m and 5m context without daily-history dependency', () 
   assert.ok(underlying >= 0 && option > underlying && fifteen > option, '5m underlying, option and 15m trend histories are sequential');
   assert.doesNotMatch(flow, /getDailyHistory/);
   assert.match(flow, /fifteenMinuteCandles:fifteenMinuteHistory\.candles/);
-  assert.doesNotMatch(flow, /Promise\\.all\\(/, 'entry history reads are not queued as a burst');
-  assert.match(flow, /REST_PRIORITY\\.ENTRY/, 'entry reads retain ENTRY priority');
+  assert.doesNotMatch(flow, /Promise\.all\(/, 'entry history reads are not queued as a burst');
+  assert.match(flow, /REST_PRIORITY\.ENTRY/, 'entry reads retain ENTRY priority');
 });
 
 test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {

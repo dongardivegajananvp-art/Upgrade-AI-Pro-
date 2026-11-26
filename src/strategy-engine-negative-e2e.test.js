@@ -2,41 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STRATEGIES, evaluateNineStrategies } from './strategy-engine.js';
 
-function neutralPipeline({ daily = true, isTopGainer = false } = {}) {
-  const start = Date.parse('2026-11-20T03:45:00Z') / 1000; // 09:15 IST
-  const underlyingCandles = Array.from({ length: 60 }, (_, i) => ({
-    time: start + i * 300,
-    open: 100,
-    high: 101,
-    low: 99,
-    close: 100,
-    volume: 100
-  }));
-  const lastTime = underlyingCandles.at(-1).time;
-  const now = (lastTime + 360) * 1000;
-  const dailyCandles = daily
-    ? Array.from({ length: 60 }, (_, i) => ({
-        time: start - (60 - i) * 86400,
-        open: 100,
-        high: 101,
-        low: 99,
-        close: 100,
-        volume: 1000
-      }))
-    : [];
+function neutralPipeline({ fifteen = true, isTopGainer = false } = {}) {
+  const fiveStart=Date.parse('2026-11-23T05:05:00Z')/1000;
+  const underlyingCandles=Array.from({length:60},(_,i)=>({time:fiveStart+i*300,open:100,high:101,low:99,close:100,volume:100}));
+  const now=Date.parse('2026-11-23T10:06:00Z');
+  const fifteenStart=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const fifteenMinuteCandles=fifteen?Array.from({length:50},(_,i)=>{
+    const day=i<25?'2026-11-20':'2026-11-23',slot=i%25;
+    return{time:Date.parse(day+'T03:45:00Z')/1000+slot*900,open:100,high:101,low:99,close:100,volume:1000};
+  }):[];
   return {
     underlyingCandles,
-    underlyingTick: {
-      symbol: 'NSE:ABC-EQ',
-      price: 100,
-      exchangeTime: now / 1000,
-      receivedAt: now
-    },
-    dailyCandles,
-    fifteenMinuteCandles: [],
-    isTopGainer,
-    researchEnabled: false,
-    now
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:100,exchangeTime:now/1000,receivedAt:now},
+    dailyCandles:[],fifteenMinuteCandles,isTopGainer,researchEnabled:false,now
   };
 }
 
@@ -119,7 +97,7 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
 });
 
 test('full evaluator blocks 15m trend pullback when fresh 15m history is absent', () => {
-  const input = neutralPipeline({ daily: false });
+  const input = neutralPipeline({ fifteen: false });
   const result = evaluateNineStrategies(input);
   assertNoActionablePlan(result, 'FIFTEEN_MIN_TREND_5M_PULLBACK');
   assert.equal(result.status, 'NO_TRADE');

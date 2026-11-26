@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, getFnoScanBatchSize, getNextFnoRotationIndex, getFnoSliceScanSymbols } from '../src/rolling-fno-scanner.js';
+import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex, getFnoScanSliceSymbols } from '../src/rolling-fno-scanner.js';
 const now = Date.parse('2026-11-19T06:00:00Z');
 const sec = Date.parse('2026-11-19T05:59:55Z') / 1000;
 test('ranks rolling observations across all symbols and exposes partial coverage', () => {
@@ -55,13 +55,13 @@ test('Top Gainers includes rolling observations but preserves each tick freshnes
 
 test('overlapping socket slices cover new F&O symbols without skipping the overlap', () => {
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
-  const first=buildFnoRotationSlice(universe,0,20);
-  const second=buildFnoRotationSlice(universe,1,20);
-  assert.equal(first.length,20);
-  assert.equal(second.length,20);
-  assert.equal(first.filter(symbol=>second.includes(symbol)).length,19);
-  assert.equal(second[0],'NSE:STOCK1-EQ');
-  assert.equal(second[19],'NSE:STOCK20-EQ');
+  const first=buildFnoRotationSlice(universe,0,80);
+  const second=buildFnoRotationSlice(universe,FNO_SOCKET_ROTATION_ADVANCE,80);
+  assert.equal(first.length,80);
+  assert.equal(second.length,80);
+  assert.equal(first.filter(symbol=>second.includes(symbol)).length,77);
+  assert.equal(second[0],'NSE:STOCK3-EQ');
+  assert.equal(second[79],'NSE:STOCK82-EQ');
 });
 
 test('selected underlying is separate from the deterministic rolling slice', () => {
@@ -73,26 +73,27 @@ test('selected underlying is separate from the deterministic rolling slice', () 
   assert.ok(!selected.includes('NSE:STOCK29-EQ'));
 });
 
-test('one-symbol-per-minute F&O scan rotation covers all 218 symbols exactly once', () => {
-  assert.equal(FNO_SCAN_PER_SLICE,1);
+test('three-symbol-per-minute F&O scan rotation covers all 218 symbols exactly once', () => {
+  assert.equal(FNO_SCAN_PER_SLICE,3);
+  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,FNO_SCAN_PER_SLICE);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const batches=[];
   let start=0;
   do {
     const batchSize=getFnoScanBatchSize(universe.length,start,FNO_SCAN_PER_SLICE);
-    const active=buildFnoRotationSlice(universe,start,20);
+    const active=buildFnoRotationSlice(universe,start,80);
     batches.push(...getFnoSliceScanSymbols(active,batchSize));
     start=getNextFnoRotationIndex(universe.length,start,FNO_SCAN_PER_SLICE);
   } while(start!==0);
   assert.equal(batches.length,218);
   assert.equal(new Set(batches).size,218);
   assert.deepEqual([...batches].sort(),universe.map(item=>item.symbol).sort());
-  assert.equal(getFnoScanBatchSize(218,217,1),1);
-  assert.equal(getFnoScanBatchSize(218,0,1),1);
-  assert.equal(getNextFnoRotationIndex(218,216,1),217);
-  assert.equal(getNextFnoRotationIndex(218,217,1),0);
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,20),1)[0],'NSE:STOCK0-EQ');
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,1,20),1)[0],'NSE:STOCK1-EQ');
-  const rollingWindow=buildRollingFnoLeaderboard({universe,ticks:new Map(),now,slotCount:FNO_SCAN_PER_SLICE,rotationIntervalMs:60000});
-  assert.equal(rollingWindow.maxObservationAgeSeconds,13140);
+  assert.equal(getFnoScanBatchSize(218,216,3),2);
+  assert.equal(getFnoScanBatchSize(218,0,3),3);
+  assert.equal(getNextFnoRotationIndex(218,213,3),216);
+  assert.equal(getNextFnoRotationIndex(218,216,3),0);
+  assert.equal(getFnoScanSliceSymbols(buildFnoRotationSlice(universe,0,80),3)[0],'NSE:STOCK0-EQ');
+  assert.equal(getFnoScanSliceSymbols(buildFnoRotationSlice(universe,3,80),3)[0],'NSE:STOCK3-EQ');
+  const rollingWindow=buildRollingFnoLeaderboard({universe,ticks:new Map(),now,slotCount:80,rotationIntervalMs:60000});
+  assert.equal(rollingWindow.maxObservationAgeSeconds,240);
 });

@@ -1347,11 +1347,13 @@ async function autoSelectDirectionalOption(optionSide) {
   optionSelectionRetryAt=0; optionSelectionRetrySymbol=null; optionSelectionRetryMode='AUTO'; optionSelectionRetrySide=null; optionSelectionRetryExpiry=null;
   status.textContent='AUTO-SELECTING '+optionSide+' · VERIFYING FYERS MASTER';
   let retryStatus=0;
+  let retryReason='';
   try {
     const response=await fetch('/api/auto-select-option',{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({underlying:requestedUnderlying,side:requestedSide==='CE'?'LONG':'SHORT',timestamp:expiry})});
     retryStatus=response.status;
     const result=await response.json();
+    retryReason=String(result.reason||'');
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     if(!response.ok||result.status!=='AUTO_CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason||'Automatic option selection failed');
     selectedContractSymbol=result.contract.symbol;
@@ -1367,7 +1369,7 @@ async function autoSelectDirectionalOption(optionSide) {
   } catch(error) {
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||selectedOptionSide!==requestedSide||document.querySelector('#expiry-select').value!==expiry)return;
     selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
-    const retryDelayMs=getOptionRetryDelayMs(retryStatus);
+    const retryDelayMs=getOptionRetryDelayMs(retryStatus,retryReason);
     if(retryDelayMs!==null) {
       optionSelectionRetryAt=Date.now()+retryDelayMs;
       optionSelectionRetrySymbol=requestedUnderlying;

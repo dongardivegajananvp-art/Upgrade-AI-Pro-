@@ -632,6 +632,7 @@ async function selectSymbol(symbol, livePrice = null) {
   chartRestoredFromCache = false;
   resetChartViewport();
   setupOptionTrigger = null; setupRetryAfter = 0;
+  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
   chartSetupLevels = null;
   setupEvaluationDone = false;
   setupEvaluationRunning = false;
@@ -1336,15 +1337,21 @@ async function selectOptionContract(symbol) {
   const requestedUnderlying=selectedSymbol,requestedSymbol=symbol;
   const status = document.querySelector('#option-status');
   selectedContractSymbol=null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
+  optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
   status.textContent = 'VERIFYING EXACT CONTRACT IN FYERS MASTER';
+  let retryableFailure=true;
+  let retryDelayMs=10_000;
   try {
     const response = await fetch('/api/select-option', {
       method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({symbol:requestedSymbol})
     });
+    retryableFailure=response.status===429 || response.status>=500;
+    retryDelayMs=response.status===429?30_000:10_000;
     const result = await response.json();
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     if (!response.ok || result.status !== 'CONTRACT_VERIFIED_SUBSCRIPTION_REQUESTED') throw new Error(result.reason || 'Contract master verification failed');
     selectedContractSymbol = result.contract.symbol;
+    optionSelectionRetryAt=0; optionSelectionRetrySymbol=null;
     setupOptionTrigger = null; setupRetryAfter = 0;
     chartSetupLevels = null; renderChartViewport();
     setupEvaluationDone = false;
@@ -1356,6 +1363,7 @@ async function selectOptionContract(symbol) {
   } catch (error) {
     if(requestGeneration!==optionSelectionGeneration||selectedSymbol!==requestedUnderlying||document.querySelector('#strike-select').value!==requestedSymbol)return;
     selectedContractSymbol = null; setupOptionTrigger=null; setupRetryAfter=0; setupEvaluationDone=true;
+    if(retryableFailure) { optionSelectionRetryAt=Date.now()+retryDelayMs; optionSelectionRetrySymbol=requestedSymbol; }
     document.querySelector('#option-quantity').textContent = '—';
     status.textContent = 'CONTRACT NOT VERIFIED · ' + String(error.message || 'No action');
   }

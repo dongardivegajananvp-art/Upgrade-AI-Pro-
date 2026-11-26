@@ -12,8 +12,8 @@ const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
 const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
-// Three indices + twenty rotating equities + five pinned Top Gainers + one selected option = at most 30.
-const MAX_UNDERLYING_SLOTS = 20;
+// Three indices + eighty rotating equities + five pinned Top Gainers + one selected underlying + one selected option = at most 90.
+const MAX_UNDERLYING_SLOTS = 80;
 // The shared REST governor permits only a small background budget. Keep the
 // history-backed scanner to one new symbol per minute until WebSocket-built
 // candles replace per-symbol history reads; socket observation still rotates 20 slots.

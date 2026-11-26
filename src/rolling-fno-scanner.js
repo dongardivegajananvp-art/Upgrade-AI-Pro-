@@ -51,8 +51,10 @@ export function buildFnoRotationSlice(universe = [], startIndex = 0, slotCount =
   const start=((Math.floor(Number(startIndex)||0)%symbols.length)+symbols.length)%symbols.length;
   const slice=[];
   for(let i=0;i<count;i++)slice.push(symbols[(start+i)%symbols.length]);
-  if(selectedSymbol&&symbols.includes(selectedSymbol)&&!slice.includes(selectedSymbol))slice[slice.length-1]=selectedSymbol;
-  return [...new Set(slice)];
+  // Keep the market-wide rotation deterministic. The selected underlying is
+  // subscribed separately by the socket manager and must not replace a rotating
+  // symbol, otherwise each UI selection churns up to 20 subscriptions.
+  return slice;
 }
 
 export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scanLedger = new Map(), now = Date.now(), minRescanIntervalMs = FNO_SYMBOL_RESCAN_COOLDOWN_MS) {

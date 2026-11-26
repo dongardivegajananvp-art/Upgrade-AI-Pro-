@@ -327,14 +327,16 @@ test('live setup uses 5m price triggers and does not wait for universal daily/15
   assert.doesNotMatch(flow, /Promise\\.all\\(/, 'setup history reads are not queued as a burst');
   assert.match(flow, /REST_PRIORITY\\.ENTRY/, 'mandatory setup reads retain ENTRY priority');
 });
-test('entry evaluation waits for verified daily and 15m context and account polling yields to REST work', () => {
-  assert.match(app, /if \(researchContextReadySymbol !== selectedSymbol\) return/);
-  assert.match(app, /researchContextLoadingPromise/);
-  assert.match(app, /researchContextRetryAt = Date\.now\(\) \+ 15_000/);
-  assert.match(app, /accountRefreshSafe = !restState\.cooldownActive/);
-  assert.match(app, /Number\(restState\.requestsThisMinute \|\| 0\) < 4/);
+test('entry evaluation is independent of research warmup and account polling yields to REST work', () => {
+  assert.match(app, /selectedOptionFresh &&/);
+  assert.doesNotMatch(app, /selectedOptionFresh && researchContextReadySymbol===selectedSymbol/);
+  const entryStart=app.indexOf('async function evaluateSelectedSetup()');
+  const entryEnd=app.indexOf('function selectCandidateForEntry',entryStart);
+  const entryFlow=app.slice(entryStart,entryEnd);
+  assert.doesNotMatch(entryFlow, /researchContextReadySymbol !== selectedSymbol/, 'research panel readiness cannot block live entry evaluation');
+  assert.match(app, /accountRefreshSafe = !restState\\.cooldownActive/);
+  assert.match(app, /Number\\(restState\\.requestsThisMinute \\|\\| 0\\) < 4/);
 });
-
 
 test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {
   const start = app.indexOf('function renderChartViewport()');

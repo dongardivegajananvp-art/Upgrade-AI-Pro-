@@ -25,7 +25,7 @@ function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, co
 export function analyzeEarlyWatch({candles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
   const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
   const validFive=Array.isArray(candles)&&candles.length>=50&&contiguousWindow(candles,50);
-  const validFifteen=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,20,1800);
+  const validFifteen=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
   if(!fresh||!validFive||!validFifteen)return{status:'NO_WATCH',reason:'Fresh FYERS tick plus contiguous, current 15-minute and 5-minute candle windows are required'};
   const trend=rows=>{const closes=rows.map(row=>Number(row.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);if(!Number.isFinite(e20)||!Number.isFinite(e50))return'NEUTRAL';return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';};
   const fifteen=trend(fifteenMinuteCandles),five=trend(candles),last=candles.at(-1),price=Number(tick.price);
@@ -40,7 +40,7 @@ export function analyzeSetupResearch({candles=[],fifteenMinuteCandles=[],tick,se
   const valid=rows=>Array.isArray(rows)&&rows.length&&rows.every(c=>c&&['time','open','high','low','close'].every(k=>Number.isFinite(Number(c[k])))&&Number(c.time)>0&&Number(c.open)>0&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close)));
   if(!valid(candles)||candles.length<50)return{status:'UNAVAILABLE',reason:'At least 50 verified completed 5-minute candles are required'};
   if(!contiguousWindow(candles,50))return{status:'UNAVAILABLE',reason:'The latest 50 completed 5-minute candles must be contiguous across verified NSE sessions'};
-  if(!valid(fifteenMinuteCandles)||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,20,1800))return{status:'UNAVAILABLE',reason:'At least 20 fresh, contiguous completed 15-minute candles are required'};
+  if(!valid(fifteenMinuteCandles)||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return{status:'UNAVAILABLE',reason:'At least 20 fresh, contiguous completed 15-minute candles are required'};
   if(!tick||!Number.isFinite(Number(tick.exchangeTime))||!Number.isFinite(Number(tick.receivedAt))||now-Number(tick.receivedAt)<0||now-Number(tick.receivedAt)>10000||now/1000-Number(tick.exchangeTime)<-3||now/1000-Number(tick.exchangeTime)>10)return{status:'UNAVAILABLE',reason:'Fresh exchange-timestamped FYERS tick is required for research'};
   const trend=rows=>{const closes=rows.map(c=>Number(c.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);if(!Number.isFinite(e20)||!Number.isFinite(e50))return'NEUTRAL';return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';};
   const expected=setup?.side==='LONG'?'BULLISH':'BEARISH',fifteenTrend=trend(fifteenMinuteCandles),fiveTrend=trend(candles),patternCandle=candles.find(c=>Number(c.time)===Number(setup?.confirmedAt));
@@ -355,9 +355,9 @@ export function detectTopGainerMomentum(rows, isTopGainer=false) {
     : null;
 }
 export function detectFifteenMinuteTrendPullback(rows, fifteenMinuteCandles=[], now=Date.now()) {
-  if(!Array.isArray(rows)||rows.length<50||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,20,1800))return null;
+  if(!Array.isArray(rows)||rows.length<50||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return null;
   const fifteenCloses=fifteenMinuteCandles.filter(validOhlcv).map(c=>number(c.close));
-  if(fifteenCloses.length<20)return null;
+  if(fifteenCloses.length<50)return null;
   const m15_20=ema(fifteenCloses,20),m15_50=ema(fifteenCloses,50);
   const closes=rows.map(c=>number(c.close)),e20=ema(closes,20),e50=ema(closes,50);
   const last=rows.at(-1),p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
@@ -398,7 +398,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
-  const fifteenValid=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,20,1800);
+  const fifteenValid=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
   consider('EMA20_EMA50_TREND',w50,()=>detectEmaTrend(rows),'Requires 50 contiguous completed 5-minute candles; EMA20/EMA50 window unavailable or discontinuous','Close is not above EMA20 > EMA50 for LONG or below EMA20 < EMA50 for SHORT');
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
   consider('FIFTEEN_MIN_TREND_5M_PULLBACK',w50&&fifteenValid,()=>detectFifteenMinuteTrendPullback(rows,fifteenMinuteCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 20 fresh, contiguous completed FYERS 15-minute candles','15-minute and 5-minute EMA20/EMA50 alignment, 5-minute EMA20 pullback touch, and next-candle resume close did not all confirm');

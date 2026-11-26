@@ -576,8 +576,10 @@ export function getRestDispatchReadiness(priority = REST_PRIORITY.SCANNER, path 
     priority,
     queueDepth: restQueue.length + (drainingRestQueue ? 1 : 0),
     minGapWaitMs: getRestWaitMs(now, nextRequestAt),
-    totalWindowWaitMs: getRestRequestWindowWaitMs(recentUpstreamRequests, now, getRestTotalWindowLimit(priority)),
-    accountWindowWaitMs: Number(priority) === REST_PRIORITY.ACCOUNT ? getRestAccountWindowWaitMs(recentUpstreamRequests, now) : 0,
+    totalWindowWaitMs: Math.max(
+      getRestRequestWindowWaitMs(recentUpstreamRequests, now, getRestTotalWindowLimit(priority)),
+      Number(priority) === REST_PRIORITY.ACCOUNT ? getRestAccountWindowWaitMs(recentUpstreamRequests, now) : 0
+    ),
     backgroundWindowWaitMs: background
       ? getRestRequestWindowWaitMs(recentUpstreamRequests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
       : 0,

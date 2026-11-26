@@ -80,7 +80,7 @@ export function runHistoricalSignalReplay({
   const fiveMinuteError = validateSeries(fiveMinuteCandles, '5-minute', FIVE_MINUTES);
   if (fiveMinuteError) return fail(fiveMinuteError);
   if (!Array.isArray(dailyCandles) || dailyCandles.length < 50) {
-    return fail('At least 50 FYERS daily candles are required for the nine-strategy warm-up and daily trend gate');
+    return fail('At least 50 FYERS daily candles are required for the ten-strategy warm-up and daily trend gate');
   }
   const dailyError = validateSeries(dailyCandles, 'Daily', 86400);
   if (dailyError) return fail(dailyError);

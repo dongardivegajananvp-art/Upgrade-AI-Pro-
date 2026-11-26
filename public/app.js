@@ -237,7 +237,7 @@ async function refresh() {
     const md = s.marketData || {};
     if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
     renderMovers(md.fno || {});
-    if (selectedSymbol && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
+    if (selectedSymbol && setupEvaluationDone && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
       void ensureResearchContext(selectedSymbol).catch(() => {});
     }
     const optionTick = md.selectedOption;
@@ -292,7 +292,7 @@ async function refresh() {
     const selectedUnderlyingFresh=Boolean(underlyingTick?.fresh && underlyingTick.symbol===selectedSymbol);
     const selectedOptionFresh=Boolean(optionTick?.fresh && optionTick.symbol===selectedContractSymbol);
     if(!setupEvaluationDone && !setupEvaluationRunning && selectedUnderlyingFresh &&
-       selectedOptionFresh && researchContextReadySymbol===selectedSymbol &&
+       selectedOptionFresh &&
        selectedContractSymbol && Date.now()>=setupRetryAfter) {
       void evaluateSelectedSetup();
     }
@@ -634,7 +634,7 @@ async function selectSymbol(symbol, livePrice = null) {
   document.querySelector('#setup-state').dataset.state = 'blocked';
   document.querySelector('#chart-candle-status').textContent = 'COMPLETED STOCK CANDLES · LIVE CANDLE VERIFYING';
   document.querySelector('#research-status').textContent = 'STOCK RESEARCH · LOADING VERIFIED CONTEXT';
-  document.querySelector('#research-results').textContent = 'Waiting for verified daily and 15-minute context. No setup is inferred.';
+  document.querySelector('#research-results').textContent = 'Research ranking warms separately. Live setup checks use each strategy’s own verified price rules.';
   document.querySelector('#option-status').textContent = 'LOADING VERIFIED FYERS OPTION CHAIN';
   document.querySelector('#option-ltp').textContent = 'WAITING FOR LIVE OPTION TICK';
   document.querySelector('#option-quantity').textContent = '—';
@@ -1195,21 +1195,19 @@ function renderEntryEvaluationGate(md) {
     ['UNDERLYING',Boolean(selectedSymbol && underlying?.symbol===selectedSymbol && underlying?.fresh)],
     ['OFFICIAL CONTRACT',Boolean(selectedContractSymbol)],
     ['OPTION TICK',Boolean(selectedContractSymbol && option?.symbol===selectedContractSymbol && option?.fresh)],
-    ['DAILY/15M CONTEXT',researchContextReadySymbol===selectedSymbol],
   ];
+  const dailyContextReady=researchContextReadySymbol===selectedSymbol;
   const blockers=checks.filter(([,ok])=>!ok).map(([name])=>name);
   let state='READY · WAITING FOR EVALUATION';
   if(setupEvaluationRunning) state='ENTRY EVALUATION RUNNING';
   else if(setupEvaluationDone) state='EVALUATION COMPLETE · WAIT NEXT VALID TRIGGER';
   else if(setupRetryAfter>Date.now()) state='RETRY COOLDOWN · '+Math.ceil((setupRetryAfter-Date.now())/1000)+'s';
   else if(blockers.length) state='BLOCKED · '+blockers.join(' + ');
-  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ');
+  panel.textContent='ENTRY EVAL GATE · '+state+' · '+checks.map(([name,ok])=>name+': '+(ok?'PASS':'WAIT')).join(' · ')+' · DAILY STRATEGY CONTEXT: '+(dailyContextReady?'READY':'OPTIONAL FOR OTHER 8 STRATEGIES');
 }
 async function evaluateSelectedSetup() {
-  // Do not race the option-triggered entry evaluation against the lower-priority
-  // daily/15m context warmup. Once context is ready, these histories are cached
-  // and the setup can fetch only genuinely missing inputs.
-  if (researchContextReadySymbol !== selectedSymbol) return;
+  // Live entry is driven by the selected underlying/option freshness and each
+  // strategy's own price rules. Research warmup is a separate ranking panel.
   if (setupEvaluationRunning || setupEvaluationDone || !selectedSymbol || !selectedContractSymbol) return;
   setupEvaluationRunning = true;
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;

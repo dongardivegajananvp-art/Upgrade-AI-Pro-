@@ -1,4 +1,10 @@
-export const SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS = 2500;
+export const SOCKET_SUBSCRIPTION_BATCH_SIZE = 5;
+// Keep subscription control messages to six per minute while allowing five symbols per request.
+export const SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS = 10_000;
+
+export function shouldAdvanceFnoRotation({ pendingCount = 0, cooldownActive = false } = {}) {
+  return Number(pendingCount) === 0 && cooldownActive !== true;
+}
 
 export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols = []) {
   const current = [...new Set((Array.isArray(currentSymbols) ? currentSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];

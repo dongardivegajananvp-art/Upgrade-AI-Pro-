@@ -76,7 +76,7 @@ function sessionFeedReady(now = Date.now()) {
 }
 
 function desiredSocketSubscriptions() {
-  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionFeedReady());
+  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, isNseRegularSession(now));
 }
 function pruneSocketSymbolState() {
   const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol].filter(Boolean);
@@ -294,7 +294,7 @@ function nextSlice(startIndex = rotationIndex) {
   return buildFnoRotationSlice(universe,startIndex,MAX_UNDERLYING_SLOTS,selectedUnderlyingSymbol);
 }
 function applyFnoRotation(advance = false) {
-  const ready = sessionFeedReady();
+  const ready = isNseRegularSession();
   if (!ready) {
     activeFnoSymbols = [];
     if (socket && socketStatus === 'CONNECTED') {
@@ -412,7 +412,7 @@ export function setSelectedOptionSymbol(symbol) {
   optionSubscriptionRequestedAt = next ? Date.now() : null;
   optionLastTickAt = null;
   optionSubscriptionError = null;
-  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : !sessionFeedReady() ? 'QUEUED_UNTIL_FRESH_NSE_SESSION' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_QUEUED' : 'QUEUED_UNTIL_SOCKET_CONNECT';
+  optionSubscriptionStatus = !next ? 'NOT_SELECTED' : !isNseRegularSession() ? 'QUEUED_UNTIL_FRESH_NSE_SESSION' : socketStatus === 'CONNECTED' ? 'SUBSCRIPTION_QUEUED' : 'QUEUED_UNTIL_SOCKET_CONNECT';
   console.info('[FYERS_DATA] option subscription state:', optionSubscriptionStatus, next || 'cleared');
   return { status: optionSubscriptionStatus, symbol: next };
 }

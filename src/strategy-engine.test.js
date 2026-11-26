@@ -317,7 +317,7 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
     contract,isTopGainer:true,researchEnabled:false,now
   });
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
-  assert.match(result.reason,/one fresh completed 5-minute candle/i);
+  assert.match(result.reason,/latest completed candle is stale/i);
 });
 
 test('opening-range setup confirms first breakout after the opening candle without a 20-candle warm-up', () => {

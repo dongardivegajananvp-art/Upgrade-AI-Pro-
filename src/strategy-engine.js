@@ -491,7 +491,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(!contractGate.ok)return blockDetected(contractGate.reason);
   const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds,null,1);
   if(o.error)return blockDetected(o.error);
-  if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
+  if(!contiguousWindow(o.rows,1,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs one fresh completed 5-minute candle');
   const premiumRows=o.rows,tickSize=number(contract.tickSize);
   // Require an ordered, completed option structure: prior range, bullish breakout
   // close above that range, then a bullish retest/hold. Live ticks cannot replace
@@ -508,7 +508,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const entry=Number((Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize).toFixed(8));
   if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Three completed option candles verified: prior range, bullish breakout close and bullish retest/hold; waiting for live option premium to break the confirmation candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Option structure confirmed; waiting for live premium to cross the confirmation candle high'}:row)};
   // The completed retest candle defines structural risk; the fresh quote is only
-  // the trigger for the already verified three-candle pattern.
+  // the trigger for the verified single-candle pattern.
   const swingLow=number(confirmation.low);
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow,targetR:chosen.research?.targetR||2});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy,optionBreakoutLevel:premiumLevel,entryTriggerPrice:entry,optionTickSize:tickSize,contract:contract.symbol,optionSide:contract.side,strategyLedger:(setup.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:plan.reason}:row)};

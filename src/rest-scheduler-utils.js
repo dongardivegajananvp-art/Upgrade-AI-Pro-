@@ -235,9 +235,16 @@ export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Dat
 // Queue age limits prevent requests whose UI/market context has expired from
 // being submitted upstream after a long rate-governor wait.
 export function getRestTotalWindowLimit(priority = 0) {
-  // Four of six global requests/minute are available to non-Entry work.
-  // Two slots remain reserved for the live Entry verification path.
-  return Number(priority) >= REST_PRIORITY.ENTRY ? 6 : 4;
+  // Preserve two account-read slots and two Entry slots inside the same
+  // conservative six-request/minute origin budget. Other work shares four.
+  return Number(priority) >= REST_PRIORITY.ENTRY || Number(priority) === REST_PRIORITY.ACCOUNT ? 6 : 4;
+}
+
+// Positions and orderbook are two independent read-only endpoints. Reserve
+// capacity for both so scanner/research traffic cannot consume their window.
+export function getRestAccountWindowWaitMs(requests = [], now = Date.now(), maxRequests = 2, windowMs = 60_000) {
+  return getRestRequestWindowWaitMs(requests, now, maxRequests, windowMs,
+    REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT);
 }
 
 export function getRestQueueMaxAgeMs(priority = 0) {

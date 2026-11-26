@@ -1,6 +1,6 @@
 import { runHistoryRequestOnce } from './history-request-flight.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
-import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, getRestQueueExpiryWaitMs, getRestTotalWindowLimit, isRestBackgroundPriority, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, getRestRecoveryProbeRetryDelayMs } from './rest-scheduler-utils.js';
+import { getRestWaitMs, isRestCooldownActive, getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil, getUnknownRateLimitCooldownUntil, classifyRestRateLimit, buildRestRateLimitContext, buildRestEndpointHealth, buildRestCoalesceKey, buildRestDispatchGate, findRestQueueDuplicate, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, getRestAccountWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, isRestQueueExpired, getRestQueueExpiryWaitMs, getRestTotalWindowLimit, isRestBackgroundPriority, sortRestQueue, admitRestJob, createRestQueueWakeSignal, REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, getRestRecoveryProbeRetryDelayMs } from './rest-scheduler-utils.js';
 
 const DATA_BASE = 'https://api-t1.fyers.in/data';
 const API_BASE = 'https://api-t1.fyers.in/api/v3';
@@ -187,7 +187,10 @@ async function drainRestQueue() {
         const backgroundWindowWait = isRestBackgroundPriority(job.priority)
           ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
           : 0;
-        if (totalWindowWait > 0 || backgroundWindowWait > 0) return false;
+        const accountWindowWait = Number(job.priority) === REST_PRIORITY.ACCOUNT
+          ? getRestAccountWindowWaitMs(recentUpstreamRequests, Date.now())
+          : 0;
+        if (totalWindowWait > 0 || backgroundWindowWait > 0 || accountWindowWait > 0) return false;
         // Keep the stricter existing /history-specific background protection as
         // a second guard; global request pacing applies to every REST path.
         if (job.url.pathname === '/history') {
@@ -211,7 +214,10 @@ async function drainRestQueue() {
           const historyBackgroundWait = job.url.pathname === '/history' && isRestBackgroundPriority(job.priority)
             ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
             : 0;
-          return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait);
+          const accountWait = Number(job.priority) === REST_PRIORITY.ACCOUNT
+            ? getRestAccountWindowWaitMs(recentUpstreamRequests, Date.now())
+            : 0;
+          return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait, accountWait);
         }).filter(value => value > 0);
         const budgetWait = waits.length ? Math.min(...waits) : 1;
         const expiryWait = getRestQueueExpiryWaitMs(restQueue, Date.now());
@@ -571,6 +577,7 @@ export function getRestDispatchReadiness(priority = REST_PRIORITY.SCANNER, path 
     queueDepth: restQueue.length + (drainingRestQueue ? 1 : 0),
     minGapWaitMs: getRestWaitMs(now, nextRequestAt),
     totalWindowWaitMs: getRestRequestWindowWaitMs(recentUpstreamRequests, now, getRestTotalWindowLimit(priority)),
+    accountWindowWaitMs: Number(priority) === REST_PRIORITY.ACCOUNT ? getRestAccountWindowWaitMs(recentUpstreamRequests, now) : 0,
     backgroundWindowWaitMs: background
       ? getRestRequestWindowWaitMs(recentUpstreamRequests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1)
       : 0,
@@ -637,6 +644,8 @@ export function getRestDiagnostics(now = Date.now()) {
     rollingWindowLimitPerMinute: 6,
     nonEntryRollingWindowLimitPerMinute: 4,
     entryReservedSlotsPerMinute: 2,
+    accountReservedSlotsPerMinute: 2,
+    accountRollingWindowLimitPerMinute: 2,
     backgroundRollingWindowLimitPerMinute: 3,
     rollingWindowScope: 'ALL_FYERS_REST_ENDPOINTS_PROCESS_LOCAL',
     queueDepth: restQueue.length,

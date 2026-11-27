@@ -467,10 +467,12 @@ function updateActiveSetupLifecycle(market) {
     activeSetupLedger.set(id,updated);
     if(updated.status!=='ACTIVE') {
       const cached=getCachedResearchHistories().fiveMinute.get(setup.underlying);
-      const lastCompletedCandleTime=Number(setup.setupCandleTime||cached?.candles?.at(-1)?.time||0);
+      const closedAt=updated.closedAt||new Date().toISOString();
+      const closedAtMs=Date.parse(closedAt);
+      const closedCandleTime=Number.isFinite(closedAtMs)?Math.floor(closedAtMs/300_000)*300:
+        Number(setup.setupCandleTime||cached?.candles?.at(-1)?.time||0);
       recentlyClosedSetupByUnderlying.set(setup.underlying,{
-        setupCandleTime:lastCompletedCandleTime,closedAt:updated.closedAt||new Date().toISOString(),
-        status:updated.status,contract:setup.contract
+        closedCandleTime,closedAt,status:updated.status,contract:setup.contract
       });
       console.info('[OPPORTUNITY_CYCLE] setup closed; slot released and next scan remains enabled:',JSON.stringify({
         id,underlying:setup.underlying,contract:setup.contract,status:updated.status,

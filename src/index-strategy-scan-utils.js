@@ -51,7 +51,7 @@ export function buildIndexStrategyScanRecord({ symbol, tick, history, result, no
     reason: result?.reason || (setupConfirmed ? 'Underlying setup confirmed; CE/PE live tick and completed option candle are not verified by this index scan' : null),
     strategy: result?.strategy || null,
     side: result?.side || null,
-    breakoutLevel: Number.isFinite(Number(result?.breakoutLevel)) ? Number(result.breakoutLevel) : null,
+    breakoutLevel: result?.breakoutLevel !== null && result?.breakoutLevel !== undefined && Number.isFinite(Number(result.breakoutLevel)) ? Number(result.breakoutLevel) : null,
     underlyingPrice: Number.isFinite(Number(result?.underlyingPrice)) ? Number(result.underlyingPrice) : Number.isFinite(Number(tick?.price)) ? Number(tick.price) : null,
     tickFresh: isFreshIndexTick(tick, now),
     tickExchangeTime: tick?.exchangeTime || null,

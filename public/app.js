@@ -1,9 +1,9 @@
 import { isNseRegularSession, normalizeTopGainersSnapshot, resolveTopGainersView, normalizeChartSnapshot } from './session-snapshot.js';
 import { getOptionRetryDelayMs } from './option-retry-policy.js';
 const labels = [
-  ['NSE:NIFTY50-INDEX','nifty','nifty-change'],
-  ['NSE:NIFTYBANK-INDEX','bank','bank-change'],
-  ['BSE:SENSEX-INDEX','sensex','sensex-change']
+  ['NSE:NIFTY50-INDEX','nifty','nifty-change','nifty-feed-age'],
+  ['NSE:NIFTYBANK-INDEX','bank','bank-change','bank-feed-age'],
+  ['NSE:FINNIFTY-INDEX','finnifty','finnifty-change','finnifty-feed-age']
 ];
 let selectedSymbol = null;
 let userSelectedSymbol = false;
@@ -347,10 +347,17 @@ async function refresh() {
     }
     const nseSessionOpen = isNseRegularSession(Date.now());
     let freshCount = 0;
-    for (const [symbol, priceId, changeId] of labels) {
+    for (const [symbol, priceId, changeId, ageId] of labels) {
       const tick = indices[symbol];
       const price = document.getElementById(priceId);
       const change = document.getElementById(changeId);
+      const age = document.getElementById(ageId);
+      if (age) {
+        const receiptAge = tick ? Math.max(0, Math.floor((Date.now() - Number(tick.receivedAt)) / 1000)) : null;
+        const exchangeDelay = tick && Number.isFinite(Number(tick.exchangeReceiptDelayMs)) ? Math.round(Number(tick.exchangeReceiptDelayMs)) : null;
+        age.textContent = !nseSessionOpen ? 'MARKET CLOSED' : tick?.fresh ? `FRESH ${receiptAge}s ago · EXCH→RX ${exchangeDelay}ms` : tick ? `STALE ${receiptAge}s ago` : 'NO TICK';
+        age.dataset.state = tick?.fresh && nseSessionOpen ? 'fresh' : tick ? 'stale' : 'unknown';
+      }
       if (nseSessionOpen && tick?.fresh) {
         freshCount++;
         price.textContent = showNumber(tick.price);
@@ -564,7 +571,7 @@ function renderMovers(fno) {
 }
 async function selectIndexSymbol(symbol) {
   userSelectedSymbol=true;
-  if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
+  if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','NSE:FINNIFTY-INDEX'].includes(symbol)) return;
   selectedSymbol = symbol; researchContextReadySymbol = null; researchContextRetryAt = 0; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');

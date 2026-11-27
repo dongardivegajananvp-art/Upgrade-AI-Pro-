@@ -74,6 +74,7 @@ let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
 let activeSetupMonitorTimer = null;
 let fyersRefreshRetryAt = 0;
+let fyersRefreshMonitorTimer = null;
 let lastPinnedActiveSetupContractsKey = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
@@ -376,7 +377,29 @@ function getSessionMarketData() {
   }
   return updateActiveSetupLifecycle(market);
 }
+function startFyersRefreshMonitor() {
+  if(fyersRefreshMonitorTimer || !process.env.FYERS_PIN?.trim()) return;
+  fyersRefreshMonitorTimer=setInterval(async()=>{
+    if(Date.now()<fyersRefreshRetryAt) return;
+    const auth=getAuthStatus();
+    if(!auth.refreshTokenStored) return;
+    try {
+      const result=await refreshAccessToken({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY,pin:process.env.FYERS_PIN});
+      if(result.refreshed) {
+        fyersRefreshRetryAt=0;
+        console.info('[FYERS_OAUTH] background access-token refresh succeeded; token value withheld');
+      }
+    } catch(error) {
+      const message=String(error?.message||error);
+      if(!/already in progress/.test(message)) fyersRefreshRetryAt=Date.now()+5*60*1000;
+      console.warn('[FYERS_OAUTH] background refresh unavailable; OAuth reconnect may be required:',message.slice(0,180));
+    }
+  },60_000);
+  fyersRefreshMonitorTimer.unref?.();
+}
+
 function ensureFyersMarketStarted() {
+  startFyersRefreshMonitor();
   const market = startMarketSocket();
   startActiveSetupMonitor();
   const sessionDate = getNseSessionDate();

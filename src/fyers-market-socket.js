@@ -394,7 +394,7 @@ function applyFnoRotation(advance = false) {
       // This keeps their WebSocket feed alive instead of dropping them when the
       // 20-symbol market-wide slice advances; stale ticks remain non-actionable.
       if(nextPinned.length) pinnedTopGainerSymbols=nextPinned;
-      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, true), advance ? 'fno-rotation-with-top-gainer-pins' : 'fno-slice-selection-with-top-gainer-pins');
+      syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol, ...buildSetupEvaluationSubscriptionSymbols(setupEvaluationPins)], selectedOptionSymbol, true), advance ? 'fno-rotation-with-top-gainer-pins' : 'fno-slice-selection-with-top-gainer-pins');
     } catch (error) {
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';

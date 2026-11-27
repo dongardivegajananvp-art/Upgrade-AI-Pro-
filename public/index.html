@@ -18,7 +18,7 @@
     <article data-symbol="NSE:FINNIFTY-INDEX" tabindex="0" role="button" aria-label="Open FIN NIFTY five-minute chart"><small>FIN NIFTY · <span id="finnifty-feed-age">WAITING</span></small><strong id="finnifty">—</strong><span id="finnifty-change">—</span></article>
   </section>
 
-  <section class="panel research">
+  <section class="panel research" hidden data-background-runner="index-nine-strategy-scan">
     <div class="section-heading"><h2>INDEX · NINE-STRATEGY SCAN</h2><small id="index-strategy-status">WAITING FOR 3/3 FRESH FYERS INDEX TICKS</small></div>
     <div id="index-strategy-results" class="research-results"><div class="empty-inline">NIFTY 50, BANK NIFTY and FIN NIFTY are evaluated independently on verified completed FYERS 5-minute candles. Underlying setup only; option confirmation is still required. No orders.</div></div>
   </section>
@@ -48,13 +48,13 @@
     <div class="levels" id="setup-ledger"><span>ENTRY <b id="setup-entry">—</b></span><span>STOP LOSS <b id="setup-sl">—</b></span><span>TARGET <b id="setup-target">—</b></span><span>RR <b id="setup-rr">—</b></span><span id="setup-state">NO SETUP VERIFIED</span></div>
   </section>
 
-  <section class="panel research">
+  <section class="panel research" hidden data-background-runner="ai-multi-timeframe-research">
     <div class="section-heading"><h2>AI RESEARCH · MULTI-TIMEFRAME</h2><small id="research-status">WAITING FOR VERIFIED SETUP</small></div>
     <div id="research-results" class="research-results"><div class="empty-inline">Research runs only after fresh underlying and option verification.</div></div>
   </section>
 
-  <section class="panel research">
-    <div class="section-heading"><h2>FULL NSE F&O · NINE-STRATEGY SCAN</h2><small id="universe-scan-status">WAITING FOR ROLLING FYERS DATA</small></div>
+  <section class="panel research" hidden data-background-runner="full-nse-fno-nine-strategy-scan">
+    <div class="section-heading"><h2>FULL NSE F&amp;O · NINE-STRATEGY SCAN</h2><small id="universe-scan-status">WAITING FOR ROLLING FYERS DATA</small></div>
     <div id="universe-scan-results" class="research-results"><div class="empty-inline">Each official F&O underlying is evaluated independently only when its own fresh FYERS tick and verified candles are available. Missing inputs remain BLOCKED.</div></div>
   </section>
 

@@ -134,8 +134,7 @@ async function viewActiveOptionChart(row) {
     drawHistoryChart(data.candles);
     title.textContent=contract+' · OPTION STRIKE CHART · '+(data.count??data.candles.length)+' COMPLETED FYERS 5-MIN CANDLES';
     document.querySelector('#chart-candle-status').textContent='EXACT OPTION CONTRACT · COMPLETED FYERS HISTORY · ENTRY / SL / TARGET LEVELS';
-    const chart=document.querySelector('#chart');
-    chart?.scrollIntoView?.({behavior:'smooth',block:'start'});
+    document.querySelector('#chart-area')?.scrollIntoView?.({behavior:'smooth',block:'start'});
     const market=await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     if(generation===chartViewGeneration&&chartViewMode==='OPTION') updateOptionChartLiveStatus(market,contract);
   } catch(error) {
@@ -152,11 +151,14 @@ function updateOptionChartLiveStatus(market,contract) {
   const row=(market?.activeOptionTicks||[]).find(item=>item.symbol===contract);
   const tick=row?.tick||null;
   const status=document.querySelector('#chart-candle-status');
+  const panel=document.querySelector('#live-candle-summary');
   if(tick?.fresh) {
     const clock=new Date(Number(tick.exchangeTime)*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
     status.textContent='OPTION CHART · LIVE FYERS TICK FRESH ₹'+showNumber(tick.price)+' · '+clock+' IST · HISTORICAL COMPLETED 5M CANDLES';
+    if(panel) panel.textContent='LIVE OPTION TICK · ₹'+showNumber(tick.price)+' · '+clock+' IST · EXCHANGE-TIMESTAMP VERIFIED';
   } else {
     status.textContent='OPTION CHART · LIVE TICK '+(tick?'STALE':'NOT AVAILABLE')+' · VERIFIED HISTORICAL 5M CANDLES ONLY';
+    if(panel) panel.textContent='OPTION CHART · LIVE TICK '+(tick?'STALE':'NOT PINNED')+' · NO LIVE CANDLE IS SYNTHESIZED';
   }
 }
 function renderActiveSetups() {
@@ -463,11 +465,12 @@ async function refresh() {
     }
     // Update the chart candle from this exact status snapshot before rendering
     // its summary. This keeps OHLCV and live price aligned to one FYERS tick.
-    if (selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh) {
+    if (chartViewMode==='UNDERLYING' && selectedSymbol && underlyingTick?.symbol === selectedSymbol && underlyingTick.fresh) {
       chartLiveCandle = underlyingTick.liveCandle || null;
       if (!chartGestureActive) renderChartViewport();
     }
-    renderLiveCandleSummary(underlyingTick);
+    if(chartViewMode==='OPTION'&&chartViewSymbol) updateOptionChartLiveStatus(md,chartViewSymbol);
+    else renderLiveCandleSummary(underlyingTick);
     const optionLtp = document.querySelector('#option-ltp');
     const optionStatus = document.querySelector('#option-status');
     if (optionTick?.fresh && optionTick.symbol === selectedContractSymbol) {

@@ -908,7 +908,7 @@ test('Day-Low reversal uses established support and rejects invalid reversal str
     ['fresh lower low defines no new support', rows.map((c,i)=>i===2?{...c,open:99.2,high:100.5,low:98.5,close:99.7}:c)],
     ['rejection does not hold support on close', rows.map((c,i)=>i===2?{...c,low:99.05,close:98.9}:c)],
     ['bearish rejection candle', rows.map((c,i)=>i===2?{...c,open:100.4,high:100.5,low:99.05,close:100.1}:c)],
-    ['lower wick is smaller than candle body', rows.map((c,i)=>i===2?{...c,open:100,high:100.5,low:99.7,close:100.4}:c)],
+    ['lower wick is smaller than candle body', rows.map((c,i)=>i===2?{...c,open:101,high:103,low:99.05,close:103}:i===3?{...c,open:103,high:104,low:103,close:103.5}:c)],
     ['trigger candle breaks established support', rows.map((c,i)=>i===3?{...c,low:98.9}:c)],
     ['trigger candle is bearish', rows.map((c,i)=>i===3?{...c,open:101,high:101.1,low:100.2,close:100.6}:c)],
     ['trigger does not close above rejection high', rows.map((c,i)=>i===3?{...c,close:100.4}:c)]

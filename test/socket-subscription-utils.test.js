@@ -98,10 +98,11 @@ test('socket close diagnostics preserve provider detail while bounding log size'
 });
 
 
-test('FYERS subscription pacing uses bounded batches and six control messages per minute', () => {
-  assert.equal(SOCKET_SUBSCRIPTION_BATCH_SIZE, 5);
-  assert.equal(SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, 10_000);
-  assert.deepEqual(splitSubscriptionBatches(['A','B','C','D','E','F'], SOCKET_SUBSCRIPTION_BATCH_SIZE), [['A','B','C','D','E'],['F']]);
+test('FYERS subscription pacing uses two larger batches per 20-symbol rotation', () => {
+  assert.equal(SOCKET_SUBSCRIPTION_BATCH_SIZE, 10);
+  assert.equal(SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, 30_000);
+  const symbols=Array.from({length:11},(_,i)=>String.fromCharCode(65+i));
+  assert.deepEqual(splitSubscriptionBatches(symbols, SOCKET_SUBSCRIPTION_BATCH_SIZE), [symbols.slice(0,10),symbols.slice(10)]);
 });
 
 test('F&O rotation waits until paced subscriptions drain and rate-limit cooldown ends', () => {

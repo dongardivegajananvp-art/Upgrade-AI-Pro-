@@ -35,6 +35,9 @@ let selectedContractSymbol = null;
 let accountRefreshRunning = false;
 let chartCandles = [];
 let chartLiveCandle = null;
+let chartViewMode = 'UNDERLYING';
+let chartViewSymbol = null;
+let chartViewGeneration = 0;
 let chartSetupLevels = null;
 let chartZoom = 1;
 let chartPan = 0;
@@ -71,9 +74,18 @@ function tickStatusText(md, freshCount) {
 function saveActiveSetups() { try { localStorage.setItem(ACTIVE_SETUP_KEY,JSON.stringify(activeSetups.slice(-10))); } catch {} }
 function mergeActiveSetups(rows=[]) {
   if(!Array.isArray(rows)||!rows.length)return;
+  const activeBefore=activeSetups.filter(row=>row.status==='ACTIVE').length;
   const byId=new Map(activeSetups.map(row=>[row.id,row]));
   for(const row of rows) { if(!row?.id)continue; const prior=byId.get(row.id); byId.set(row.id,prior?.status&&prior.status!=='ACTIVE'?prior:{...prior,...row}); }
-  activeSetups=[...byId.values()].slice(-10);saveActiveSetups();renderActiveSetups();
+  activeSetups=[...byId.values()].slice(-10);
+  const activeAfter=activeSetups.filter(row=>row.status==='ACTIVE').length;
+  if(activeAfter<activeBefore) {
+    // A closed setup releases a slot. Re-arm automatic candidate handoff;
+    // the server excludes the exited underlying until a newer 5m candle closes.
+    userSelectedSymbol=false;
+    lastAutoTop3CandidateKey=null;
+  }
+  saveActiveSetups();renderActiveSetups();
 }
 async function syncActiveSetups(force=false) {
   const active=activeSetups.filter(row=>row.status==='ACTIVE');
@@ -90,15 +102,30 @@ function registerTriggeredSetup(setup,underlying,contract) {
   if(activeSetups.filter(row=>row.status==='ACTIVE').length>=2)return {ok:false,reason:'Two verified setups are already active; existing Entry/SL/Target levels are being retained'};
   const entry=Number(setup.entry),stopLoss=Number(setup.stopLoss),target=Number(setup.target),risk=entry-stopLoss,reward=target-entry;
   if(!(entry>0&&stopLoss>0&&stopLoss<entry&&target>entry&&risk>0&&reward/risk>=2))return {ok:false,reason:'Fixed Entry/SL/Target failed minimum 1:2 risk validation'};
-  const row={id,underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.optionSide||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
-  activeSetups.push(row);saveActiveSetups();renderActiveSetups();void syncActiveSetups(true);return {ok:true,existing:false,row};
+  const row={id,underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.optionSide||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,setupCandleTime:Number(setup.underlyingCandleTime)||null,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
+  activeSetups.push(row);
+  // After an entry is retained, let the independent scanner hand off the next
+  // eligible underlying instead of remaining pinned to the just-triggered one.
+  userSelectedSymbol=false;lastAutoTop3CandidateKey=null;
+  saveActiveSetups();renderActiveSetups();void syncActiveSetups(true);return {ok:true,existing:false,row};
 }
 function renderActiveSetups() {
   let panel=document.getElementById('active-setups-panel');
   if(!panel) { panel=document.createElement('section');panel.id='active-setups-panel';panel.style.cssText='margin:10px 0;padding:10px;border:1px solid #31445f;border-radius:10px;background:#0c1828;color:#dceaff;';const state=document.getElementById('setup-state');if(state?.parentNode)state.parentNode.insertBefore(panel,state.nextSibling); }
   panel.replaceChildren();const heading=document.createElement('strong');heading.textContent='TRIGGERED SETUPS · RETAINED UNTIL SL / TARGET';heading.style.cssText='display:block;font-size:12px;margin-bottom:8px;letter-spacing:.3px;';panel.append(heading);
   if(!activeSetups.length) { const empty=document.createElement('div');empty.textContent='No triggered setup is currently retained.';empty.style.fontSize='11px';panel.append(empty);return; }
-  for(const row of [...activeSetups].reverse()) { const card=document.createElement('div');card.style.cssText='padding:8px 0;border-top:1px solid #263951;font-size:11px;line-height:1.6;';const title=document.createElement('strong');title.textContent=(row.underlying||'NSE STOCK')+' · '+(row.contract||'OPTION');const status=document.createElement('span');status.textContent='  ·  '+(row.status==='ACTIVE'?'ACTIVE · '+(row.feedStatus||'WAITING FOR TICK'):row.status.replaceAll('_',' '));status.style.color=row.status==='ACTIVE'?'#72e5c0':row.status==='TARGET_HIT'?'#72e5c0':'#ff9a9a';const levels=document.createElement('div');levels.textContent='ENTRY ₹'+showNumber(row.entry)+'  ·  SL ₹'+showNumber(row.stopLoss)+'  ·  TARGET ₹'+showNumber(row.target)+'  ·  RR 1:'+showNumber(row.rr,2);const observed=document.createElement('div');observed.textContent=row.lastObservedPrice!=null?'LAST VERIFIED OPTION ₹'+showNumber(row.lastObservedPrice)+(row.exitPrice!=null?' · EXIT ₹'+showNumber(row.exitPrice):''):'Waiting for fresh option tick to monitor exit';observed.style.color='#9fb1c9';card.append(title,status,levels,observed);panel.append(card); }
+  for(const row of [...activeSetups].reverse()) {
+    const card=document.createElement('div');card.style.cssText='padding:8px 0;border-top:1px solid #263951;font-size:11px;line-height:1.6;';
+    const title=document.createElement('strong');title.textContent=(row.underlying||'NSE STOCK')+' · '+(row.contract||'OPTION');
+    const status=document.createElement('span');status.textContent='  ·  '+(row.status==='ACTIVE'?'ACTIVE · '+(row.feedStatus||'WAITING FOR TICK'):row.status.replaceAll('_',' '));
+    status.style.color=row.status==='ACTIVE'?'#72e5c0':row.status==='TARGET_HIT'?'#72e5c0':'#ff9a9a';
+    const levels=document.createElement('div');levels.textContent='ENTRY ₹'+showNumber(row.entry)+'  ·  SL ₹'+showNumber(row.stopLoss)+'  ·  TARGET ₹'+showNumber(row.target)+'  ·  RR 1:'+showNumber(row.rr,2);
+    const observed=document.createElement('div');observed.textContent=row.lastObservedPrice!=null?'LAST VERIFIED OPTION ₹'+showNumber(row.lastObservedPrice)+(row.exitPrice!=null?' · EXIT ₹'+showNumber(row.exitPrice):''):'Waiting for fresh option tick to monitor exit';
+    observed.style.color='#9fb1c9';
+    const view=document.createElement('button');view.type='button';view.textContent='VIEW CHART';view.style.cssText='margin-top:6px;padding:7px 12px;border:1px solid #3b82f6;border-radius:7px;background:#12213a;color:#bfdbfe;font-weight:700;font-size:10px;cursor:pointer;';
+    view.addEventListener('click',()=>void viewActiveOptionChart(row));
+    card.append(title,status,levels,observed,view);panel.append(card);
+  }
 }
 function showNumber(value, digits=2) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
@@ -190,16 +217,20 @@ async function refreshUniverseScan() {
     // Once a fresh completed-candle price setup exists, route the #1
     // candidate into read-only CE/PE verification unless the user has chosen
     // a chart symbol manually. This never places an order.
-    if(data.marketSession==='OPEN'&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
-      const best=data.top3[0];
-      // Never auto-promote an unscored underlying price setup as the "best"
-      // candidate. Automatic selection requires a completed finite research score;
-      // unscored price candidates remain visible for deliberate manual inspection.
-      const scored=best.qualityScore!==null&&best.qualityScore!==undefined&&Number.isFinite(Number(best.qualityScore));
-      const candidateKey=[best.symbol,best.strategy,best.side,best.qualityScore].join('|');
-      if(scored&&best.symbol&&['LONG','SHORT'].includes(best.side)&&candidateKey!==lastAutoTop3CandidateKey) {
-        lastAutoTop3CandidateKey=candidateKey;
-        selectCandidateForEntry(best,{automatic:true});
+    const activeCount=activeSetups.filter(row=>row.status==='ACTIVE').length;
+    const availableSlots=Math.max(0,2-activeCount);
+    if(data.marketSession==='OPEN'&&availableSlots>0&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
+      const activeUnderlyings=new Set(activeSetups.filter(row=>row.status==='ACTIVE').map(row=>row.underlying));
+      const nextCandidate=data.top3.find(item=>item?.symbol&&!activeUnderlyings.has(item.symbol));
+      if(nextCandidate&&['LONG','SHORT'].includes(nextCandidate.side)) {
+        // PRICE_SETUP is intentionally unscored. It may be handed to the option
+        // verifier, but cannot become a trade until fresh option confirmation,
+        // completed option candles and fixed RR >= 1:2 all pass.
+        const candidateKey=[nextCandidate.symbol,nextCandidate.strategy,nextCandidate.side,nextCandidate.lastCompletedCandleTime].join('|');
+        if(candidateKey!==lastAutoTop3CandidateKey) {
+          lastAutoTop3CandidateKey=candidateKey;
+          selectCandidateForEntry(nextCandidate,{automatic:true});
+        }
       }
     }
     container.replaceChildren();
@@ -208,6 +239,9 @@ async function refreshUniverseScan() {
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+(Number(data.strategyChecksThisSlice||0)===0?'NO TRADE - DATA NAHI · Waiting for this slice’s verified history checks; Top 3 stays suppressed until a completed check is available. ':'')+'Twenty F&O symbols rotate into the live socket each minute; the REST governor currently permits '+(data.scanPerSlice||2)+' history scans per slice. Fresh Top-5 gainers are prioritized when their own FYERS ticks are fresh. The estimated full pass is '+(data.fullCycleMinutes??'—')+' minutes. Coverage is rolling, not simultaneous. Underlying candidates remain non-actionable until the selected option has its own fresh tick, completed 5m candle and premium breakout. Current candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
+    const cycle=document.createElement('small');cycle.className='empty-inline';
+    cycle.textContent='OPPORTUNITY CYCLE · '+(data.opportunityCycleStatus||'SCANNING')+' · ACTIVE '+(data.activeSetupCount??activeSetups.filter(row=>row.status==='ACTIVE').length)+'/2 · FREE SLOTS '+(data.availableSetupSlots??Math.max(0,2-activeSetups.filter(row=>row.status==='ACTIVE').length))+' · '+(data.excludedUntilNextFiveMinuteCandle?.length||0)+' RECENT EXIT COOLDOWNS UNTIL NEW 5M BAR';
+    container.append(cycle);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
     warmup.textContent='RESEARCH · '+(data.marketSession==='CLOSED'?'PAUSED':(scanner.warmupStatus||'IDLE'))+

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, buildNextSocketSubscriptionOperation, requeueRejectedSocketSubscriptionOperation } from '../src/socket-subscription-utils.js';
 
 test('subscription delta avoids duplicate additions and removes obsolete symbols', () => {
   assert.deepEqual(getSocketSubscriptionDelta(['A', 'B', 'A'], ['B', 'C', 'C']), {
@@ -125,4 +125,21 @@ test('F&O candle observation snapshots include active slice, pinned Top Gainers,
 test('F&O candle observation symbol selection rejects invalid symbols and remains unique', async () => {
   const { buildFnoCandleObservationSymbols } = await import('../src/socket-subscription-utils.js');
   assert.deepEqual(buildFnoCandleObservationSymbols(['MCX:CRUDEOIL26NOVFUT', 'NSE:ABC-EQ', 'NSE:ABC-EQ'], ['bad-symbol']), ['NSE:ABC-EQ']);
+});
+
+
+test('WebSocket control queue serializes unsubscribe before subscribe in bounded batches', () => {
+  assert.deepEqual(buildNextSocketSubscriptionOperation(['OLD-A','OLD-B','OLD-C'], ['NEW-A'], 2), {type:'unsubscribe',symbols:['OLD-A','OLD-B']});
+  assert.deepEqual(buildNextSocketSubscriptionOperation(['OLD-C'], ['NEW-A'], 2), {type:'unsubscribe',symbols:['OLD-C']});
+  assert.deepEqual(buildNextSocketSubscriptionOperation([], ['NEW-A','NEW-B'], 2), {type:'subscribe',symbols:['NEW-A','NEW-B']});
+  assert.equal(buildNextSocketSubscriptionOperation([], []), null);
+});
+
+test('1015 requeues the exact rejected WebSocket operation without confusing subscribe and unsubscribe', () => {
+  assert.deepEqual(requeueRejectedSocketSubscriptionOperation({type:'unsubscribe',symbols:['OLD-A']}, [], ['NEW-A']), {
+    pendingUnsubscribeSymbols:['OLD-A'], pendingSubscribeSymbols:['NEW-A']
+  });
+  assert.deepEqual(requeueRejectedSocketSubscriptionOperation({type:'subscribe',symbols:['NEW-B']}, ['OLD-B'], []), {
+    pendingUnsubscribeSymbols:['OLD-B'], pendingSubscribeSymbols:['NEW-B']
+  });
 });

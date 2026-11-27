@@ -523,7 +523,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
     strategyLedger:(setup?.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Underlying strategy detected; '+reason}:row)
   });
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
-  const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3 );
+  const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&number(t.receivedAt)-number(t.exchangeTime)*1000>=0&&number(t.receivedAt)-number(t.exchangeTime)*1000<=5000);
   setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
   if(!tickFresh(optionTick))return blockDetected('Fresh FYERS option premium tick is required');

@@ -74,7 +74,7 @@ test('selected underlying is separate from the deterministic rolling slice', () 
 });
 
 test('three REST history checks operate inside each twenty-symbol minute slice', () => {
-  assert.equal(FNO_SCAN_PER_SLICE,3);
+  assert.equal(FNO_SCAN_PER_SLICE,2);
   assert.equal(FNO_SOCKET_ROTATION_ADVANCE,20);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const active=buildFnoRotationSlice(universe,0,20);

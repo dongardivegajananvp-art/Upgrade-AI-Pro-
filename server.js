@@ -487,7 +487,7 @@ function updateActiveSetupLifecycle(market) {
       console.info('[OPPORTUNITY_CYCLE] setup closed; slot released and next scan remains enabled:',JSON.stringify({
         id,underlying:setup.underlying,contract:setup.contract,status:updated.status,
         activeCount:[...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').length,
-        setupCandleTime:lastCompletedCandleTime,closedAt:updated.closedAt||null
+        setupCandleTime:closedCandleTime,closedAt:updated.closedAt||null
       }));
     }
   }

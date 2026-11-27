@@ -773,6 +773,7 @@ function selectUserSymbol(symbol, livePrice=null) {
 
 function drawHistoryChart(candles) {
   chartCandles = Array.isArray(candles) ? candles.slice() : [];
+  // Keep the default viewport focused on current-session price action; users can zoom out for history.
   // Open on the latest 75 five-minute bars (about one NSE session), not all ten sessions compressed into one view.
   chartZoom = Math.max(1, chartCandles.length / 75);
   chartPan = 0;

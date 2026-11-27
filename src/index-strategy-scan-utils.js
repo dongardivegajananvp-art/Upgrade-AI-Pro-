@@ -52,7 +52,7 @@ export function buildIndexStrategyScanRecord({ symbol, tick, history, result, no
     strategy: result?.strategy || null,
     side: result?.side || null,
     breakoutLevel: result?.breakoutLevel !== null && result?.breakoutLevel !== undefined && Number.isFinite(Number(result.breakoutLevel)) ? Number(result.breakoutLevel) : null,
-    underlyingPrice: Number.isFinite(Number(result?.underlyingPrice)) ? Number(result.underlyingPrice) : Number.isFinite(Number(tick?.price)) ? Number(tick.price) : null,
+    underlyingPrice: result?.underlyingPrice !== null && result?.underlyingPrice !== undefined && Number.isFinite(Number(result.underlyingPrice)) ? Number(result.underlyingPrice) : Number.isFinite(Number(tick?.price)) ? Number(tick.price) : null,
     tickFresh: isFreshIndexTick(tick, now),
     tickExchangeTime: tick?.exchangeTime || null,
     tickReceivedAt: tick?.receivedAt || null,

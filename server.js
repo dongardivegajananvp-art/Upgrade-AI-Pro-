@@ -164,7 +164,10 @@ function startIndexStrategyScanner() {
       let fifteenMinuteHistory={candles:[]};
       let fifteenMinuteHistoryError=null;
       try {
-        fifteenMinuteHistory=await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'index-nine-strategy-15m');
+        // 15m EMA context is slower-changing research data, not a time-critical 5m scan.
+        // Give it the CONTEXT queue class/TTL so it can wait safely behind the
+        // strict shared FYERS budget instead of expiring as a 10s SCANNER job.
+        fifteenMinuteHistory=await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'index-nine-strategy-15m');
       } catch(error) {
         fifteenMinuteHistoryError=String(error?.message||'15-minute index context unavailable').slice(0,160);
       }

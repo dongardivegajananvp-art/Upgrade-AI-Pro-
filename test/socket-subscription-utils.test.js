@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, buildNextSocketSubscriptionOperation, requeueRejectedSocketSubscriptionOperation } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildDesiredSocketSubscriptions, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, buildNextSocketSubscriptionOperation, requeueRejectedSocketSubscriptionOperation, prioritizeSubscriptionQueue } from '../src/socket-subscription-utils.js';
 
 test('subscription delta avoids duplicate additions and removes obsolete symbols', () => {
   assert.deepEqual(getSocketSubscriptionDelta(['A', 'B', 'A'], ['B', 'C', 'C']), {
@@ -142,4 +142,13 @@ test('1015 requeues the exact rejected WebSocket operation without confusing sub
   assert.deepEqual(requeueRejectedSocketSubscriptionOperation({type:'subscribe',symbols:['NEW-B']}, ['OLD-B'], []), {
     pendingUnsubscribeSymbols:['OLD-B'], pendingSubscribeSymbols:['NEW-B']
   });
+});
+
+
+test('active trade option and selected chart subscriptions jump ahead of background F&O queue', () => {
+  assert.deepEqual(
+    prioritizeSubscriptionQueue(['NSE:A-EQ','NSE:B-EQ','NSE:ACTIVECE','NSE:SELECTED-EQ'], ['NSE:ACTIVECE','NSE:SELECTED-EQ']),
+    ['NSE:ACTIVECE','NSE:SELECTED-EQ','NSE:A-EQ','NSE:B-EQ']
+  );
+  assert.deepEqual(prioritizeSubscriptionQueue(['A','B','C'], 'C'), ['C','A','B']);
 });

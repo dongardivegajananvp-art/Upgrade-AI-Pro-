@@ -718,6 +718,14 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
+      if (url.pathname === '/api/option-history') {
+        const symbol=url.searchParams.get('symbol');
+        const contract=getVerifiedOptionContract(symbol);
+        if(!contract||contract.symbol!==symbol||!['CE','PE'].includes(contract.side))
+          return send(res,400,{status:'OPTION_CONTRACT_NOT_VERIFIED',reason:'The requested strike is not an exact current-session FYERS option-master contract'});
+        const history=await getFiveMinuteSessionHistory(symbol,Date.now(),REST_PRIORITY.CHART,'retained-option-chart-history');
+        return send(res,200,{...history,contract:{symbol:contract.symbol,underlying:contract.underlying,side:contract.side,strike:contract.strike,expiry:contract.expiry},chartSource:'FYERS_VERIFIED_OPTION_HISTORY'});
+      }
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),REST_PRIORITY.CHART,'chart-history'));
       if (url.pathname === '/api/backtest/historical-fno') return send(res,410,{status:'BACKTEST_ISOLATED',reason:'Historical backtests are not available inside the live trading process'});
       if (url.pathname === '/api/research-context') {

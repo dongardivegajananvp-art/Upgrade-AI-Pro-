@@ -18,7 +18,7 @@ const freshTick = {
 
 test('NSE index symbols are permitted for verified 15-minute history requests', () => {
   for (const symbol of INDEX_STRATEGY_SYMBOLS) assert.equal(validateHistorySymbol(symbol), true);
-  assert.equal(validateHistorySymbol('NSE:NOT-A-REAL-INDEX'), false);
+  assert.equal(validateHistorySymbol('BSE:NOT-A-REAL-INDEX'), false);
 });
 
 test('index scanner recognizes only ticks with fresh receipt and exchange clocks', () => {

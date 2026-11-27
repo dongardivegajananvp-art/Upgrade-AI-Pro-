@@ -267,11 +267,12 @@ async function refreshUniverseScan() {
   try {
     const response=await fetch('/api/research/universe',{cache:'no-store'});
     const data=await response.json();
-    // Once a fresh completed-candle price setup exists, route the #1
-    // candidate into read-only CE/PE verification unless the user has chosen
-    // a chart symbol manually. This never places an order.
+    // A fresh underlying price setup is only a verification candidate. Route
+    // the next candidate into read-only CE/PE checks when the server reports a
+    // free retained-setup slot; no quality score or order is fabricated.
     const activeCount=activeSetups.filter(row=>row.status==='ACTIVE').length;
-    const availableSlots=Math.max(0,2-activeCount);
+    const availableSlots=Number.isFinite(Number(data.availableSetupSlots))
+      ?Math.max(0,Number(data.availableSetupSlots)):Math.max(0,2-activeCount);
     if(data.marketSession==='OPEN'&&availableSlots>0&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
       const activeUnderlyings=new Set(activeSetups.filter(row=>row.status==='ACTIVE').map(row=>row.underlying));
       const nextCandidate=data.top3.find(item=>item?.symbol&&!activeUnderlyings.has(item.symbol));
@@ -291,6 +292,7 @@ async function refreshUniverseScan() {
     status.textContent=(data.universeCount||0)+' F&O · HISTORY SCANS '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice||2)+' BUDGET · SOCKET SLICE '+(data.sliceSize||20)+' · UNIVERSE CHECKED '+(data.coverageSummary?.scannedCount||0)+'/'+(data.universeCount||0)+' · CANDLES '+(data.candleReceivedThisSlice||0)+' · STRATEGY CHECKS '+(data.strategyChecksThisSlice||0)+' · EST. FULL PASS '+(data.fullCycleMinutes??'—')+' MIN · LAST '+lastScanAt+' · REST-GOVERNED'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
     note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+(Number(data.strategyChecksThisSlice||0)===0?'NO TRADE - DATA NAHI · Waiting for this slice’s verified history checks; Top 3 stays suppressed until a completed check is available. ':'')+'Twenty F&O symbols rotate into the live socket each minute; the REST governor currently permits '+(data.scanPerSlice||2)+' history scans per slice. Fresh Top-5 gainers are prioritized when their own FYERS ticks are fresh. The estimated full pass is '+(data.fullCycleMinutes??'—')+' minutes. Coverage is rolling, not simultaneous. Underlying candidates remain non-actionable until the selected option has its own fresh tick, completed 5m candle and premium breakout. Current candidates: '+(data.candidateCount||0)+'.';
+    if(Number(data.availableSetupSlots??Math.max(0,2-activeCount))===0) note.textContent+=' TWO SETUPS ARE ACTIVE · NEXT CANDIDATES REMAIN IN THE SCANNER QUEUE UNTIL A SLOT RELEASES.';
     container.append(note);
     const cycle=document.createElement('small');cycle.className='empty-inline';
     cycle.textContent='OPPORTUNITY CYCLE · '+(data.opportunityCycleStatus||'SCANNING')+' · ACTIVE '+(data.activeSetupCount??activeSetups.filter(row=>row.status==='ACTIVE').length)+'/2 · FREE SLOTS '+(data.availableSetupSlots??Math.max(0,2-activeSetups.filter(row=>row.status==='ACTIVE').length))+' · '+(data.excludedUntilNextFiveMinuteCandle?.length||0)+' RECENT EXIT COOLDOWNS UNTIL NEW 5M BAR';

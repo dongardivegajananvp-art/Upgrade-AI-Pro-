@@ -518,21 +518,6 @@ export function startMarketSocket() {
         return;
       }
       socketStatus = 'CONNECTED';
-            resetRateLimitAfterSubscriptionFlush = true;
-            syncSocketSubscriptions(currentSubscriptions, 'rate-limit-backoff-recovery');
-            socketHasConnected = true;
-            console.info('[FYERS_DATA] rate-limit backoff elapsed; paced subscription reconciliation resumed');
-          } catch (error) {
-            lastError = safeError(error);
-            socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
-            console.error('[FYERS_DATA] rate-limit recovery reconciliation failed:', lastError);
-          }
-        }, waitMs);
-        socketRateLimitRecoveryTimer.unref?.();
-        console.warn('[FYERS_DATA] socket connected during rate-limit backoff; subscription reconciliation deferred:', waitMs);
-        return;
-      }
-      socketStatus = 'CONNECTED';
       if (subscriptions.length > 100) {
         socketStatus = 'SUBSCRIPTION_LIMIT_BLOCKED';
         lastError = 'Subscription count exceeded the Standard plan 100-symbol limit';

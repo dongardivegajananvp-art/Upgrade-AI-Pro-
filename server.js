@@ -17,6 +17,7 @@ import { SCANNER_POLL_INTERVAL_MS, FNO_SCAN_MIN_INTERVAL_MS } from './src/scanne
 import { buildHealthStatus } from './src/health-status.js';
 import { getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor } from './src/rolling-fno-scanner.js';
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
+import { validateFixedRiskPlan, updateActiveSetupFromTick } from './src/active-setup-lifecycle.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
@@ -313,23 +314,7 @@ function updateActiveSetupLifecycle(market) {
   for (const [id, setup] of activeSetupLedger) {
     if (setup.status !== 'ACTIVE') continue;
     const tick = ticksBySymbol.get(setup.contract);
-    const exchangeReceiptDelayMs = tick ? Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 : null;
-    const tickFresh = Boolean(tick?.fresh && Date.now() - Number(tick.receivedAt) <= 10000 &&
-      exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000);
-    setup.feedStatus = tickFresh ? 'FRESH' : tick ? 'STALE' : 'WAITING_FOR_TICK';
-    if (!tickFresh) continue;
-    setup.lastObservedPrice = Number(tick.price);
-    setup.lastObservedExchangeTime = Number(tick.exchangeTime);
-    setup.lastObservedAt = new Date(Number(tick.receivedAt)).toISOString();
-    if (Number(tick.price) <= setup.stopLoss) {
-      setup.status = 'STOP_LOSS_HIT';
-      setup.exitPrice = Number(tick.price);
-      setup.closedAt = new Date(Number(tick.receivedAt)).toISOString();
-    } else if (Number(tick.price) >= setup.target) {
-      setup.status = 'TARGET_HIT';
-      setup.exitPrice = Number(tick.price);
-      setup.closedAt = new Date(Number(tick.receivedAt)).toISOString();
-    }
+    activeSetupLedger.set(id,updateActiveSetupFromTick(setup,tick,Date.now()));
   }
   const activeContracts = [...new Set([...activeSetupLedger.values()].filter(row => row.status === 'ACTIVE').map(row => row.contract))];
   setActiveTradeOptionSymbols(activeContracts);
@@ -342,15 +327,14 @@ function normalizeActiveSetup(input) {
   const contractSymbol = String(input.contract || '');
   const contract = getVerifiedOptionContract(contractSymbol);
   const entry = Number(input.entry), stopLoss = Number(input.stopLoss), target = Number(input.target);
-  const risk = entry - stopLoss, reward = target - entry;
+  const riskPlan = validateFixedRiskPlan({entry,stopLoss,target,minRR:2});
   const expectedUnderlying = underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
   if (!validateNseSymbol(underlying) || !contract || contract.symbol !== contractSymbol ||
-      contract.underlying !== expectedUnderlying || ![entry,stopLoss,target].every(Number.isFinite) ||
-      !(stopLoss > 0 && stopLoss < entry && target > entry && risk > 0 && reward / risk >= 2)) return null;
+      contract.underlying !== expectedUnderlying || !riskPlan.ok) return null;
   const entryAt = Number.isFinite(Date.parse(input.entryAt)) ? new Date(input.entryAt).toISOString() : new Date().toISOString();
   const id = String(input.id || (contractSymbol + '|' + entryAt));
   return {id,underlying,contract:contractSymbol,strategy:String(input.strategy || 'VERIFIED_STRATEGY'),
-    optionSide:contract.side,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,
+    optionSide:contract.side,entry,stopLoss,target,rr:riskPlan.rr,entryAt,
     status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,lastObservedExchangeTime:null,lastObservedAt:null,
     exitPrice:null,closedAt:null};
 }

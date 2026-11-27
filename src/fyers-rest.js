@@ -681,6 +681,7 @@ export function getRestDiagnostics(now = Date.now()) {
     entryReservedSlotsPerMinute: 2,
     backgroundRollingWindowLimitPerMinute: 2,
     accountRollingWindowLimitPerMinute: 2,
+    accountTrafficUsesNonEntryGlobalBudget: true,
     rollingWindowScope: 'ALL_FYERS_REST_ENDPOINTS_PROCESS_LOCAL',
     queueDepth: restQueue.length,
     queueCapacity: MAX_REST_QUEUE_SIZE,

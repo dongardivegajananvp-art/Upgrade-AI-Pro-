@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, canResumeSocketSubscriptionRecovery } from '../src/socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, canResumeSocketSubscriptionRecovery, requeueRejectedSocketSubscriptionOperation } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -85,7 +85,11 @@ test('1015 recovery is timer-driven on a still-connected socket and requeues the
   assert.ok(errorStart >= 0 && closeStart > errorStart);
   const handler = socketSource.slice(errorStart, closeStart);
   assert.match(handler, /scheduleSocketRateLimitRecovery\(backoffMs\)/);
-  assert.match(handler, /pendingSubscriptionSymbols = \[\.\.\.retryBatch, \.\.\.pendingSubscriptionSymbols\]/);
+  assert.match(handler, /requeueRejectedSocketSubscriptionOperation\(/);
+  assert.match(handler, /lastSentSubscriptionOperation/);
+  assert.deepEqual(requeueRejectedSocketSubscriptionOperation({type:'unsubscribe',symbols:['NSE:OLD-EQ']}, [], ['NSE:NEW-EQ']), {
+    pendingUnsubscriptionSymbols:['NSE:OLD-EQ'], pendingSubscriptionSymbols:['NSE:NEW-EQ']
+  });
   assert.doesNotMatch(handler, /socketTransportConnected = false/);
   assert.match(socketSource, /function scheduleSocketRateLimitRecovery/);
   assert.equal(canResumeSocketSubscriptionRecovery({transportConnected:true,socketStatus:'RATE_LIMITED_WAIT',now:120_000,cooldownUntil:120_000}),true);

@@ -7,7 +7,7 @@ import {
 
 const universe=Array.from({length:218},(_,i)=>({symbol:`NSE:STOCK${String(i).padStart(3,'0')}-EQ`}));
 
-test('218-symbol F&O rotation covers the full universe with bounded overlapping slices',()=>{
+test('218-symbol F&O rotation covers the full universe in twenty-symbol slices',()=>{
   const visited=new Set();
   let start=0,iterations=0;
   do{
@@ -71,7 +71,7 @@ test('WebSocket rotates twenty new symbols per minute while REST scans remain bu
     assert.ok(rotations<=Math.ceil(universe.length/FNO_SOCKET_ROTATION_ADVANCE));
   }while(start!==0);
   assert.equal(visited.size,218);
-  assert.equal(rotations,73);
+  assert.equal(rotations,11);
 });
 
 test('scanner picks the oldest fresh symbol and skips stale active ticks without losing the slot',()=>{

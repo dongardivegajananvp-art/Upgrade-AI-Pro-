@@ -642,7 +642,7 @@ export function getMarketData(now = Date.now()) {
     },
     selectedUnderlying: selectedUnderlyingSymbol && ticks.get(selectedUnderlyingSymbol) ? { ...ticks.get(selectedUnderlyingSymbol), fresh: isFresh(ticks.get(selectedUnderlyingSymbol), now), liveCandle: selectedLiveCandle ? { ...selectedLiveCandle } : null } : null,
     selectedOptionSymbol,
-    subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
+    subscriptionCount: desiredSocketSubscriptions(now).length,
     symbolLimit: 100, indices,
     fno: {
       status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','RATE_LIMITED_WAIT','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',

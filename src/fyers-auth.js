@@ -296,4 +296,8 @@ export function getAuthStatus(now = Date.now()) {
   return { status: accessToken ? 'AUTHENTICATED_FEED_NOT_CONNECTED' : 'NOT_AUTHENTICATED', tokenStored: Boolean(accessToken), tokenReceivedAt, authInFlight, refreshTokenStored:Boolean(refreshToken), refreshInFlight, refreshTokenExpiresAt:refreshTokenIssuedAt ? new Date(refreshTokenIssuedAt+REFRESH_TOKEN_MAX_AGE_MS).toISOString() : null, lastError: lastAuthError };
 }
 
+export function shouldReuseAuthenticatedSession({ auth, hasSession } = {}) {
+  return Boolean(hasSession && auth?.tokenStored && auth?.refreshTokenStored);
+}
+
 export function getAccessTokenForServer() { return accessToken; }

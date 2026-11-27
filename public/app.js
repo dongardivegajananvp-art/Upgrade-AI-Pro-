@@ -1121,6 +1121,7 @@ function renderChartViewport() {
   };
   svg.addEventListener('pointerdown',event=>{
     if(event.pointerType==='mouse'&&event.button!==0)return;
+    event.preventDefault();
     if(event.pointerType==='touch'&&pointers.size===0){
       const now=Date.now();
       if(now-chartLastTouchTap<320){
@@ -1144,6 +1145,7 @@ function renderChartViewport() {
   });
   svg.addEventListener('pointermove',event=>{
     if(!pointers.has(event.pointerId))return;
+    event.preventDefault();
     pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
     if(pointers.size>=2&&pinchState){
       const points=[...pointers.values()];
@@ -1153,11 +1155,13 @@ function renderChartViewport() {
       svg.style.transformOrigin='center center';
     }else if(dragState){
       const dx=event.clientX-dragState.startX,dy=event.clientY-dragState.startY;
+      if(Math.abs(dx)>6 && !dragState.axis) chartFollowLive=false;
       svg.style.transform=dragState.axis?'scaleY('+clamp(Math.exp(-dy*.008),.7,1.4)+')':'translateX('+dx+'px)';
     }
   });
   svg.addEventListener('pointerup',finishGesture);
   svg.addEventListener('pointercancel',finishGesture);
+  svg.addEventListener('lostpointercapture',finishGesture);
   svg.addEventListener('dblclick',()=>{resetChartViewport();chartGestureActive=false;renderChartViewport();});
   // Draw the watermark after candles/zones so it remains visible on dark charts.
   // Pointer events stay disabled so chart crosshair and OHLCV inspection keep working.

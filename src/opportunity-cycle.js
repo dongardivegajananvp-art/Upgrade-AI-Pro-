@@ -10,7 +10,7 @@ export function getOpportunityCycleState({
   const expiredClosedUnderlyings = [];
   for (const [symbol, closed] of recentlyClosed instanceof Map ? recentlyClosed : []) {
     const latest = Number(latestCandleTimes.get(symbol) || 0);
-    const closedCandle = Number(closed?.setupCandleTime || 0);
+    const closedCandle = Number(closed?.closedCandleTime || closed?.setupCandleTime || 0);
     if (closedCandle > 0 && latest <= closedCandle) coolingUnderlyings.push(symbol);
     else expiredClosedUnderlyings.push(symbol);
   }

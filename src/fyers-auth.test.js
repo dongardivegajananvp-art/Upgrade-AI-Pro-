@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLoginUrl, verifyLoginState, consumeLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
+import { createLoginUrl, verifyLoginState, consumeLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRefreshSessionCookie, restoreRefreshSessionCookie, refreshAccessToken, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
 
 test('FYERS login URL includes configured redirect and cryptographic state',()=>{
  const login=createLoginUrl({appId:'TEST-100',redirectUri:'https://example.test/api/fyers/auth/callback'});
@@ -24,10 +24,11 @@ test('auth status never claims market data is connected before authentication',(
 test('FYERS session survives process-memory loss through an encrypted HttpOnly cookie payload',async()=>{
  const originalFetch=globalThis.fetch;
  let requestCount=0;
- globalThis.fetch=async()=>({
+ let refreshPayload=null;
+ globalThis.fetch=async(url,options={})=>({
    ok:true,status:200,
    headers:{get:()=>null},
-   text:async()=>{requestCount++;return JSON.stringify({s:'ok',access_token:'sensitive-test-token'});}
+   text:async()=>{requestCount++; if(String(url).includes('validate-refresh-token')) { refreshPayload=JSON.parse(options.body); return JSON.stringify({s:'ok',access_token:'refreshed-test-token'}); } return JSON.stringify({s:'ok',access_token:'sensitive-test-token',refresh_token:'sensitive-refresh-token'}); }
  });
  try {
    await exchangeAuthCode({appId:'TEST-100',appSecret:'test-secret',authCode:'one-time-test-code'});
@@ -37,6 +38,18 @@ test('FYERS session survives process-memory loss through an encrypted HttpOnly c
    assert.ok(cookie.maxAge>0);
    assert.equal(restoreSessionCookie(cookie.value,{appId:'TEST-100',appSecret:'test-secret'}),true);
    assert.equal(getAuthStatus().tokenStored,true);
+   const refreshCookie=createRefreshSessionCookie({appId:'TEST-100',appSecret:'test-secret'});
+   assert.ok(refreshCookie && refreshCookie.maxAge>0);
+   assert.equal(refreshCookie.value.includes('sensitive-refresh-token'),false);
+   assert.equal(restoreRefreshSessionCookie(refreshCookie.value,{appId:'TEST-100',appSecret:'test-secret'}),true);
+   assert.equal(restoreRefreshSessionCookie(refreshCookie.value,{appId:'OTHER-100',appSecret:'test-secret'}),false);
+   const refreshed=await refreshAccessToken({appId:'TEST-100',appSecret:'test-secret',pin:'1234',now:Date.now()+24*60*60*1000});
+   assert.equal(refreshed.refreshed,true);
+   assert.equal(getAuthStatus().tokenStored,true);
+   assert.equal(refreshPayload.grant_type,'refresh_token');
+   assert.equal(refreshPayload.refresh_token,'sensitive-refresh-token');
+   assert.equal(refreshPayload.pin,'1234');
+   assert.equal(refreshPayload.appIdHash.length,64);
    // A live process token must not make an arbitrary or tampered cookie valid.
    assert.equal(restoreSessionCookie('forged-cookie-value'.repeat(4),{appId:'TEST-100',appSecret:'test-secret'}),false);
    const tamperedCookie = cookie.value.slice(0, -1) + (cookie.value.endsWith('x') ? 'y' : 'x');
@@ -45,7 +58,7 @@ test('FYERS session survives process-memory loss through an encrypted HttpOnly c
      exchangeAuthCode({appId:'TEST-100',appSecret:'test-secret',authCode:'one-time-test-code'}),
      /already been processed/
    );
-   assert.equal(requestCount,1);
+   assert.equal(requestCount,2);
  } finally {
    globalThis.fetch=originalFetch;
  }

@@ -2,6 +2,12 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEq
 
 const AUTH_URL = 'https://api-t1.fyers.in/api/v3/generate-authcode';
 const TOKEN_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode';
+const REFRESH_TOKEN_URL = 'https://api-t1.fyers.in/api/v3/validate-refresh-token';
+const REFRESH_COOKIE_VERSION = 1;
+const REFRESH_TOKEN_MAX_AGE_MS = 15 * 24 * 60 * 60 * 1000;
+let refreshToken = null;
+let refreshTokenIssuedAt = null;
+let refreshInFlight = false;
 const SESSION_COOKIE_VERSION = 1;
 let accessToken = null;
 let tokenReceivedAt = null;
@@ -15,6 +21,11 @@ function tokenExpiryAt(receivedAt) {
   let expiry = Date.UTC(receivedIst.getUTCFullYear(), receivedIst.getUTCMonth(), receivedIst.getUTCDate(), 6, 30) - istOffsetMs;
   if (receivedIst.getUTCHours() > 6 || (receivedIst.getUTCHours() === 6 && receivedIst.getUTCMinutes() >= 30)) expiry += 24 * 60 * 60 * 1000;
   return expiry;
+}
+
+function refreshSessionKey(appId, appSecret) {
+  if (!appId || !appSecret) throw new Error('FYERS refresh-session encryption configuration is missing');
+  return createHash('sha256').update(`upgrade-ai-pro:fyers-refresh-session:v${REFRESH_COOKIE_VERSION}:${appId}:${appSecret}`).digest();
 }
 
 function sessionKey(appId, appSecret) {
@@ -63,6 +74,73 @@ export function createSessionCookie({ appId, appSecret, now = Date.now() } = {})
   const encrypted = Buffer.concat([cipher.update(payload), cipher.final()]);
   const packed = Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url');
   return { value: packed, maxAge: Math.max(0, Math.floor((expiresAt - now) / 1000)), expiresAt };
+}
+
+export function createRefreshSessionCookie({ appId, appSecret, now = Date.now() } = {}) {
+  if (!refreshToken || !refreshTokenIssuedAt) return null;
+  const expiresAt = refreshTokenIssuedAt + REFRESH_TOKEN_MAX_AGE_MS;
+  if (now >= expiresAt) return null;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', refreshSessionKey(appId, appSecret), iv);
+  const payload = Buffer.from(JSON.stringify({ v:REFRESH_COOKIE_VERSION, token:refreshToken, issuedAt:refreshTokenIssuedAt, expiresAt }));
+  const encrypted = Buffer.concat([cipher.update(payload), cipher.final()]);
+  const packed = Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64url');
+  return { value:packed, maxAge:Math.max(0,Math.floor((expiresAt-now)/1000)), expiresAt };
+}
+
+export function restoreRefreshSessionCookie(value, { appId, appSecret, now = Date.now() } = {}) {
+  if (typeof value !== 'string' || value.length < 40 || value.length > 3800) return false;
+  try {
+    const packed=Buffer.from(value,'base64url');
+    if(packed.toString('base64url')!==value || packed.length<29) return false;
+    const decipher=createDecipheriv('aes-256-gcm',refreshSessionKey(appId,appSecret),packed.subarray(0,12));
+    decipher.setAuthTag(packed.subarray(12,28));
+    const payload=JSON.parse(Buffer.concat([decipher.update(packed.subarray(28)),decipher.final()]).toString('utf8'));
+    if(payload.v!==REFRESH_COOKIE_VERSION || typeof payload.token!=='string' || !payload.token ||
+       !Number.isFinite(payload.issuedAt) || !Number.isFinite(payload.expiresAt) ||
+       payload.expiresAt!==payload.issuedAt+REFRESH_TOKEN_MAX_AGE_MS || now>=payload.expiresAt || payload.issuedAt>now+60000) return false;
+    if(refreshToken && refreshTokenIssuedAt) return payload.token===refreshToken && payload.issuedAt===refreshTokenIssuedAt;
+    refreshToken=payload.token; refreshTokenIssuedAt=payload.issuedAt;
+    return true;
+  } catch { return false; }
+}
+
+export async function refreshAccessToken({ appId, appSecret, pin, now = Date.now() } = {}) {
+  if(!appId || !appSecret || !pin) throw new Error('FYERS_APP_ID, FYERS_SECRET_KEY and FYERS_PIN are required for refresh');
+  if(!refreshToken || !refreshTokenIssuedAt || now>=refreshTokenIssuedAt+REFRESH_TOKEN_MAX_AGE_MS) {
+    refreshToken=null; refreshTokenIssuedAt=null;
+    throw new Error('FYERS refresh token is missing or expired; fresh OAuth login required');
+  }
+  if(refreshInFlight) throw new Error('FYERS token refresh already in progress; duplicate request suppressed');
+  if(accessToken && tokenReceivedAt && now < tokenExpiryAt(tokenReceivedAt)-5*60*1000) {
+    return { refreshed:false, receivedAt:tokenReceivedAt, reason:'ACCESS_TOKEN_STILL_VALID' };
+  }
+  refreshInFlight=true;
+  const appIdHash=createHash('sha256').update(`${appId}:${appSecret}`).digest('hex');
+  const startedAt=Date.now();
+  try {
+    const response=await fetch(REFRESH_TOKEN_URL,{
+      method:'POST',headers:{'content-type':'application/json',accept:'application/json'},
+      body:JSON.stringify({grant_type:'refresh_token',appIdHash,refresh_token:refreshToken,pin:String(pin)}),
+      signal:AbortSignal.timeout(15000)
+    });
+    const rawBody=await response.text().catch(()=>'');
+    let body={}; try { body=rawBody?JSON.parse(rawBody):{}; } catch {}
+    if(!response.ok || body.s!=='ok' || typeof body.access_token!=='string' || !body.access_token) {
+      const message=String(body.message||body.error||`FYERS refresh failed (HTTP ${response.status})`).slice(0,240);
+      lastAuthError=message;
+      const error=new Error(message);
+      error.fyersDiagnostics={status:response.status,elapsedMs:Date.now()-startedAt};
+      throw error;
+    }
+    accessToken=body.access_token;
+    tokenReceivedAt=Date.now();
+    lastAuthError=null;
+    return {refreshed:true,receivedAt:tokenReceivedAt};
+  } catch(error) {
+    lastAuthError=String(error?.message||error).slice(0,480);
+    throw error;
+  } finally { refreshInFlight=false; }
 }
 
 export function restoreSessionCookie(value, { appId, appSecret, now = Date.now() } = {}) {
@@ -196,8 +274,12 @@ export async function exchangeAuthCode({ appId, appSecret, authCode, now = Date.
     }
     accessToken = body.access_token;
     tokenReceivedAt = Date.now();
+    if (typeof body.refresh_token === 'string' && body.refresh_token) {
+      refreshToken = body.refresh_token;
+      refreshTokenIssuedAt = tokenReceivedAt;
+    }
     lastAuthError = null;
-    return { connected: true, receivedAt: tokenReceivedAt };
+    return { connected: true, receivedAt: tokenReceivedAt, refreshTokenStored:Boolean(refreshToken) };
   } catch (error) {
     lastAuthError = String(error?.message || error).slice(0, 480);
     throw error;
@@ -211,7 +293,7 @@ export function getAuthStatus(now = Date.now()) {
     accessToken = null;
     tokenReceivedAt = null;
   }
-  return { status: accessToken ? 'AUTHENTICATED_FEED_NOT_CONNECTED' : 'NOT_AUTHENTICATED', tokenStored: Boolean(accessToken), tokenReceivedAt, authInFlight, lastError: lastAuthError };
+  return { status: accessToken ? 'AUTHENTICATED_FEED_NOT_CONNECTED' : 'NOT_AUTHENTICATED', tokenStored: Boolean(accessToken), tokenReceivedAt, authInFlight, refreshTokenStored:Boolean(refreshToken), refreshInFlight, refreshTokenExpiresAt:refreshTokenIssuedAt ? new Date(refreshTokenIssuedAt+REFRESH_TOKEN_MAX_AGE_MS).toISOString() : null, lastError: lastAuthError };
 }
 
 export function getAccessTokenForServer() { return accessToken; }

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
+import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRefreshSessionCookie, restoreRefreshSessionCookie, refreshAccessToken, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol, setActiveTradeOptionSymbols } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
@@ -38,6 +38,12 @@ async function readJson(req) {
 }
 function send(res, status, body, type='application/json; charset=utf-8') {
   try {
+    const sessionCookie = res.__fyersSessionCookieFactory?.();
+    if(sessionCookie) {
+      const existing=res.getHeader('set-cookie');
+      const cookies=Array.isArray(existing)?existing:existing?[existing]:[];
+      res.setHeader('set-cookie',[...cookies,sessionCookie]);
+    }
     const safetyCookie = res.__fyersRestSafetyCookieFactory?.();
     if (safetyCookie) {
       const existing = res.getHeader('set-cookie');
@@ -67,6 +73,8 @@ let fnoUniverseRetryDate = null;
 let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
 let activeSetupMonitorTimer = null;
+let fyersRefreshRetryAt = 0;
+let fyersRefreshMonitorTimer = null;
 let lastPinnedActiveSetupContractsKey = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
@@ -369,7 +377,29 @@ function getSessionMarketData() {
   }
   return updateActiveSetupLifecycle(market);
 }
+function startFyersRefreshMonitor() {
+  if(fyersRefreshMonitorTimer || !process.env.FYERS_PIN?.trim()) return;
+  fyersRefreshMonitorTimer=setInterval(async()=>{
+    if(Date.now()<fyersRefreshRetryAt) return;
+    const auth=getAuthStatus();
+    if(!auth.refreshTokenStored) return;
+    try {
+      const result=await refreshAccessToken({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY,pin:process.env.FYERS_PIN});
+      if(result.refreshed) {
+        fyersRefreshRetryAt=0;
+        console.info('[FYERS_OAUTH] background access-token refresh succeeded; token value withheld');
+      }
+    } catch(error) {
+      const message=String(error?.message||error);
+      if(!/already in progress/.test(message)) fyersRefreshRetryAt=Date.now()+5*60*1000;
+      console.warn('[FYERS_OAUTH] background refresh unavailable; OAuth reconnect may be required:',message.slice(0,180));
+    }
+  },60_000);
+  fyersRefreshMonitorTimer.unref?.();
+}
+
 function ensureFyersMarketStarted() {
+  startFyersRefreshMonitor();
   const market = startMarketSocket();
   startActiveSetupMonitor();
   const sessionDate = getNseSessionDate();
@@ -416,11 +446,33 @@ function ensureFyersMarketStarted() {
 const server = http.createServer(async (req,res) => {
   const url = new URL(req.url || '/', 'http://localhost');
   const requestCookies = parseCookies(req.headers.cookie || '');
-  const hasFyersSession = Boolean(requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session, {
-    appId:process.env.FYERS_APP_ID, appSecret:process.env.FYERS_SECRET_KEY
-  }));
+  const appId=process.env.FYERS_APP_ID, appSecret=process.env.FYERS_SECRET_KEY;
+  let hasFyersSession=Boolean(requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session,{appId,appSecret}));
+  const hasRefreshSession=Boolean(requestCookies.fyers_refresh && restoreRefreshSessionCookie(requestCookies.fyers_refresh,{appId,appSecret}));
+  let refreshedThisRequest=false;
+  if(hasRefreshSession && process.env.FYERS_PIN?.trim() && Date.now()>=fyersRefreshRetryAt) {
+    // refreshAccessToken enforces the five-minute expiry safety window and single-flight guard.
+    try {
+      const result=await refreshAccessToken({appId,appSecret,pin:process.env.FYERS_PIN});
+      refreshedThisRequest=Boolean(result.refreshed);
+      if(refreshedThisRequest) {
+        fyersRefreshRetryAt=0;
+        hasFyersSession=true;
+        console.info('[FYERS_OAUTH] access token refreshed from encrypted browser refresh session; token value withheld');
+      }
+    } catch(error) {
+      const message=String(error?.message||error);
+      if(!/already in progress/.test(message)) fyersRefreshRetryAt=Date.now()+5*60*1000;
+      console.warn('[FYERS_OAUTH] automatic refresh unavailable; OAuth reconnect required:',message.slice(0,180));
+    }
+  }
   if (hasFyersSession) {
-    const appId=process.env.FYERS_APP_ID, appSecret=process.env.FYERS_SECRET_KEY;
+    if(refreshedThisRequest) {
+      res.__fyersSessionCookieFactory=()=>{
+        const session=createSessionCookie({appId,appSecret});
+        return `fyers_session=${session.value}; Max-Age=${session.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`;
+      };
+    }
     const restoredSafety=restoreRestSafetyCookie(requestCookies.fyers_rest_safety,{appId,appSecret});
     if (restoredSafety) restoreRestSafetyState(restoredSafety);
     // Attach a cookie only when this process has a newer active cooldown than
@@ -646,7 +698,8 @@ const server = http.createServer(async (req,res) => {
       appIdHasNewFormat: Boolean(process.env.FYERS_APP_ID?.trim().endsWith('-200')),
       redirectUriConfigured:Boolean(process.env.FYERS_REDIRECT_URI?.trim()),
       redirectUriMatchesExpected:process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI,
-      secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim())
+      secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim()),
+      refreshPinConfigured:Boolean(process.env.FYERS_PIN?.trim())
     },
     fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
@@ -691,9 +744,12 @@ const server = http.createServer(async (req,res) => {
       console.info('[FYERS_OAUTH] token exchange succeeded; token value withheld');
       const session = createSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
       const sessionCookie = `fyers_session=${session.value}; Max-Age=${session.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`;
+      const refresh=createRefreshSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
+      const cookies=[clearStateCookie,sessionCookie];
+      if(refresh) cookies.push(`fyers_refresh=${refresh.value}; Max-Age=${refresh.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`);
       const market = ensureFyersMarketStarted();
-      console.info('[FYERS_DATA] socket start requested; status:', market.status, 'encrypted session cookie issued');
-      res.writeHead(302,{location:'/?fyers=connected','set-cookie':[clearStateCookie,sessionCookie],'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+      console.info('[FYERS_DATA] socket start requested; status:', market.status, 'encrypted access/refresh session cookies issued:',Boolean(refresh));
+      res.writeHead(302,{location:'/?fyers=connected','set-cookie':cookies,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
     } catch (error) {
       const d = error.fyersDiagnostics || {};
       console.error('[FYERS_OAUTH] token exchange failed:', error.message,

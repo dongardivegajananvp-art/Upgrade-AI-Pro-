@@ -1069,7 +1069,7 @@ const server = http.createServer(async (req,res) => {
           strategyLedger:Array.isArray(result.strategyLedger)?result.strategyLedger.map(({strategy,status,reason,side,confirmedAt})=>({strategy,status,reason,side:side||null,confirmedAt:confirmedAt||null})):[],
           durationMs:Date.now()-startedAt
         }));
-        return {...result,underlying:body.underlying,contract:body.contract,underlyingCandleTime:underlyingHistory.candles.at(-1)?.time||null,source:'FYERS_VERIFIED_DATA'};
+        return {...result,underlying:body.underlying,contract:body.contract,contractDetails:{side:contract.side,strike:contract.strike,expiry:contract.expiry},underlyingCandleTime:underlyingHistory.candles.at(-1)?.time||null,source:'FYERS_VERIFIED_DATA'};
       });
       return send(res,200,setup);
     } catch (error) {

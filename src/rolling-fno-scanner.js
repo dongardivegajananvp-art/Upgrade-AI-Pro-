@@ -1,12 +1,12 @@
 // Rolling market-wide F&O observation ranking for FYERS Standard's shared 100-symbol cap.
 // This is deliberately NOT a simultaneous live scan and never creates actionable signals.
-// The shared REST governor allows three lower-priority requests per rolling minute.
-// Match that measured allowance with three history-backed scans per 60s slice,
-// paced by FNO_SCAN_MIN_INTERVAL_MS (20s) in the server scheduler.
+// Keep history-backed strategy evaluation within the measured FYERS REST budget.
+// The 20-symbol socket slice is an observation/rotation window, NOT a promise that
+// all 20 symbols receive REST history in one minute. Only actual successful checks
+// are counted by the scanner ledger and UI.
 export const FNO_SCAN_PER_SLICE = 3;
-// Advance the overlapping 80-symbol socket window by the same three symbols
-// per minute so every newly rotated symbol receives one independent scan slot.
-export const FNO_SOCKET_ROTATION_ADVANCE = 3;
+// Rotate exactly 20 F&O symbols into the live socket window each minute.
+export const FNO_SOCKET_ROTATION_ADVANCE = 20;
 export const FNO_SYMBOL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;
 function istDayKey(epochSeconds) {
   return new Date((Number(epochSeconds) + 19800) * 1000).toISOString().slice(0, 10);
@@ -23,7 +23,8 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
         !Number.isFinite(Number(tick.exchangeTime)) || istDayKey(tick.exchangeTime) !== today) continue;
     const ageSeconds = Math.max(0, Math.floor((now - Number(tick.receivedAt)) / 1000));
     if (ageSeconds > maxObservationAgeSeconds) continue;
-    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3;
+    const exchangeReceiptDelayMs=Number(tick.receivedAt)-Number(tick.exchangeTime)*1000;
+    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3 && exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000;
     const row = { ...tick, fresh, ageSeconds };
     observed.push(row);
     if (fresh) freshObserved.push(row);
@@ -63,7 +64,8 @@ export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scan
     return Boolean(tick && Number.isFinite(Number(tick.price)) && Number(tick.price) > 0 &&
       Number.isFinite(Number(tick.receivedAt)) && now - Number(tick.receivedAt) >= 0 &&
       now - Number(tick.receivedAt) <= 10000 && Number.isFinite(Number(tick.exchangeTime)) &&
-      now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10);
+      now / 1000 - Number(tick.exchangeTime) >= -3 && true &&
+      Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 >= 0 && Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 <= 5000);
   });
   if (!eligible.length) return null;
   const lastAttempt = symbol => {

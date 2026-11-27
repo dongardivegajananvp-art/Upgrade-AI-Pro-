@@ -75,7 +75,7 @@ const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
 // Per-underlying audit ledger: records actual scan attempts and explicit skips/failures.
 // It is diagnostic only and never upgrades stale/missing data to an actionable setup.
 const fnoSymbolScanLedger = new Map();
-const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0, warmupLastCompletedSymbol:null, warmupLastFailure:null, warmupLastRetryAt:null };
+const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, candleReceivedCount:0, strategyCheckCount:0, sliceStrategyCheckCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0, warmupLastCompletedSymbol:null, warmupLastFailure:null, warmupLastRetryAt:null };
 function startFnoStrategyScanner() {
   if (fnoStrategyScanTimer) return;
   fnoStrategyScanStats.status='RUNNING';
@@ -88,7 +88,7 @@ function startFnoStrategyScanner() {
     }
     const sessionMarket=getMarketData();
     const freshIndexCount=Object.values(sessionMarket.indices||{}).filter(tick=>tick?.fresh).length;
-    if (freshIndexCount===0) {
+    if (freshIndexCount!==3) {
       fnoStrategyScanStats.status='WAITING_FOR_FRESH_INDEX_FEED';
       return;
     }
@@ -108,6 +108,8 @@ function startFnoStrategyScanner() {
       fnoStrategyScanActiveKey=activeSliceKey;
       fnoStrategyScanCursor=0;
       fnoStrategyScanStats.sliceScannedCount=0;
+      fnoStrategyScanStats.candleReceivedCount=0;
+      fnoStrategyScanStats.sliceStrategyCheckCount=0;
       console.info('[FYERS_SCANNER] scan cursor reset:',JSON.stringify({
         reason:resetReason,rotationIndex:snapshot.rotationIndex,activeCount:active.length,
         firstActiveSymbol:active[0]||null,lastActiveSymbol:active.at(-1)||null
@@ -181,7 +183,6 @@ function startFnoStrategyScanner() {
     fnoStrategyScanStats.status='RUNNING';
     const scanStartedAt=Date.now();
     fnoStrategyScanNextAllowedAt=scanStartedAt+FNO_SCAN_MIN_INTERVAL_MS;
-    fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
     try {
@@ -192,6 +193,8 @@ function startFnoStrategyScanner() {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
       }
       const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'fno-scanner-5m');
+      fnoStrategyScanStats.sliceScannedCount++;
+      if(Array.isArray(history.candles)&&history.candles.length>0) fnoStrategyScanStats.candleReceivedCount++;
       const websocketObservation=latest.websocketCandles?.get(symbol)||null;
       const tick=scanTick;
       const market=getMarketData();
@@ -201,6 +204,8 @@ function startFnoStrategyScanner() {
         researchEnabled:false,now:Date.now()
       });
       fnoStrategyScanStats.scannedCount++;
+      const successfulStrategyChecks=(research.strategyLedger||[]).filter(row=>row.status!=='BLOCKED').length;
+      if(successfulStrategyChecks>0){fnoStrategyScanStats.strategyCheckCount++;fnoStrategyScanStats.sliceStrategyCheckCount++;}
       if(retryCandidate) { fnoStrategyScanRetrySymbol=null; fnoStrategyScanRetryAt=0; }
       fnoStrategyScanStats.lastSymbol=symbol;
       fnoStrategyScanStats.lastStatus=research.status;
@@ -211,7 +216,7 @@ function startFnoStrategyScanner() {
         symbol,status:research.status,reason:research.reason||null,
         attemptedAt:new Date(scanStartedAt).toISOString(),scannedAt:fnoStrategyScanStats.lastScanAt,
         attemptCount:fnoSymbolScanLedger.get(symbol)?.attemptCount||1,
-        tickFresh:Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&Date.now()/1000-Number(tick.exchangeTime)>=-3&&Date.now()/1000-Number(tick.exchangeTime)<=10),
+        tickFresh:Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&Date.now()/1000-Number(tick.exchangeTime)>=-3&&Number(tick.receivedAt)-Number(tick.exchangeTime)*1000>=0&&Number(tick.receivedAt)-Number(tick.exchangeTime)*1000<=5000),
         tickExchangeTime:tick?.exchangeTime||null,tickReceivedAt:tick?.receivedAt||null,
         candleCount:history.candles.length,lastCompletedCandleTime:history.candles.at(-1)?.time||null,
         source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[],
@@ -450,7 +455,8 @@ const server = http.createServer(async (req,res) => {
           const prior=fnoSymbolScanLedger.get(item.symbol)||null;
           const tick=snapshot.ticks.get(item.symbol)||null;
           const tickAgeMs=tick?now-Number(tick.receivedAt):null;
-          const tickFresh=Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
+          const exchangeReceiptDelayMs=tick?Number(tick.receivedAt)-Number(tick.exchangeTime)*1000:null;
+          const tickFresh=Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&exchangeReceiptDelayMs>=0&&exchangeReceiptDelayMs<=5000);
           return {symbol:item.symbol,name:item.name||item.underlying||item.symbol,
             scanStatus:prior?.status||'NOT_SCANNED',lastScanAt:prior?.scannedAt||null,
             scanAttempts:prior?.attemptCount||0,scanReason:prior?.reason||'Awaiting its rotation slot',
@@ -469,10 +475,13 @@ const server = http.createServer(async (req,res) => {
           lastUpdatedAt:new Date(now).toISOString(),
           simultaneous:false
         };
-        return send(res,200,{...result,marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
-          rotationIntervalMs:snapshot.rotationIntervalMs,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:snapshot.scanPerSlice,symbolCap:snapshot.symbolCap,
+        const strategyChecksThisSlice=Number(fnoStrategyScanStats.sliceStrategyCheckCount||0);
+        const fullCycleMinutes=snapshot.activeSymbols?.length&&snapshot.scanPerSlice?Math.ceil((snapshot.universe?.length||0)/snapshot.activeSymbols.length)*Math.ceil(snapshot.activeSymbols.length/snapshot.scanPerSlice):null;
+        const safeTop3=strategyChecksThisSlice>0&&Number(result.evaluatedCount||0)>0?result.top3:[];
+        return send(res,200,{...result,status:safeTop3.length?result.status:strategyChecksThisSlice>0?result.status:'NO_TRADE_DATA',top3:safeTop3,candidateCount:safeTop3.length,marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
+          rotationIntervalMs:snapshot.rotationIntervalMs,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:snapshot.scanPerSlice,sliceSize:snapshot.activeSymbols?.length||0,fullCycleMinutes,strategyChecksThisSlice,candleReceivedThisSlice:Number(fnoStrategyScanStats.candleReceivedCount||0),symbolCap:snapshot.symbolCap,
           scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS},coverageSummary,symbolCoverage,
-          note:'Per-symbol scan/tick coverage is observational only. Rotating ticks are not simultaneous. Missing/stale inputs are BLOCKED; this endpoint does not fetch synthetic data or place orders.'});
+          note:'Twenty-symbol live socket slices rotate each minute. History-backed strategy checks remain within the FYERS REST governor; counters report actual completed checks only. Per-symbol scan/tick coverage is observational only. Missing/stale inputs are BLOCKED; no synthetic data or orders.'});
       }
       if (url.pathname === '/api/research') {
         if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Current IST session official FYERS NSE F&O master is not verified'});
@@ -633,6 +642,8 @@ const server = http.createServer(async (req,res) => {
       if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
       const market = getMarketData();
+      const freshIndexCount=Object.values(market.indices||{}).filter(tick=>tick?.fresh).length;
+      if(freshIndexCount!==3) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'All three FYERS indices (NIFTY 50, BANK NIFTY and FIN NIFTY) must be fresh; one stale index blocks the setup'});
       const underlying = market.selectedUnderlying;
       const option = market.selectedOption;
       if (!underlying?.fresh || underlying.symbol !== body.underlying) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected underlying tick is not fresh'});

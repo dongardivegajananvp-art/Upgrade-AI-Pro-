@@ -23,7 +23,7 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
       strategyLedger: result.strategyLedger || [],
       researchRanking: result.researchRanking || [],
       exchangeTime: tick?.exchangeTime || null,
-      fresh: Boolean(tick && now - Number(tick.receivedAt) >= 0 && now - Number(tick.receivedAt) <= 10000 && now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10)
+      fresh: Boolean(tick && now - Number(tick.receivedAt) >= 0 && now - Number(tick.receivedAt) <= 10000 && now / 1000 - Number(tick.exchangeTime) >= -3 && Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 >= 0 && Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 <= 5000)
     };
     evaluations.push(row);
     if (result.status === 'UNDERLYING_SETUP_CONFIRMED' && row.fresh) {

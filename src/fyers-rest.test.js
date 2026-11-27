@@ -7,8 +7,9 @@ test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
   assert.equal(validateNseSymbol('NSE:NIFTY50-INDEX'), true);
   assert.equal(validateNseSymbol('BSE:SENSEX-INDEX'), false);
-  assert.equal(validateHistorySymbol('BSE:SENSEX-INDEX'), true);
+  assert.equal(validateHistorySymbol('BSE:SENSEX-INDEX'), false);
   assert.equal(validateHistorySymbol('NSE:NIFTY50-INDEX'), true);
+  assert.equal(validateHistorySymbol('NSE:FINNIFTY-INDEX'), true);
   assert.equal(validateHistorySymbol('BSE:INVALID-EQ'), false);
   assert.equal(validateNseSymbol('NSE:SBIN-EQ,NSE:TCS-EQ'), false);
   assert.equal(validateNseSymbol('../orders'), false);

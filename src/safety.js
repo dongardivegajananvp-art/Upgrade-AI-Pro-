@@ -1,11 +1,13 @@
 export const NSE_SESSION = Object.freeze({ open: '09:15', close: '15:30', timezone: 'Asia/Kolkata' });
 export const MIN_REWARD_RISK = 2;
 export const FRESH_TICK_MAX_AGE_MS = 10_000;
+export const MAX_EXCHANGE_RECEIPT_DELAY_MS = 5_000;
 export function assessFeed(tick, now = Date.now()) {
   if (!tick || !Number.isFinite(Number(tick.exchangeTime)) || !Number.isFinite(Number(tick.receivedAt)) || !Number.isFinite(Number(tick.price)) || Number(tick.price) <= 0) return { status:'MISSING', fresh:false, actionable:false, reason:'Verified FYERS exchange tick is missing' };
   const receivedAge=now-Number(tick.receivedAt), exchangeAge=now/1000-Number(tick.exchangeTime);
-  if(receivedAge<0||receivedAge>FRESH_TICK_MAX_AGE_MS||exchangeAge< -3||exchangeAge>10)return{status:'STALE',fresh:false,actionable:false,reason:'Tick timestamp is outside the freshness window'};
-  return{status:'FRESH',fresh:true,actionable:true,price:Number(tick.price),exchangeTime:Number(tick.exchangeTime),receivedAt:Number(tick.receivedAt)};
+  const exchangeReceiptDelayMs=Number(tick.receivedAt)-Number(tick.exchangeTime)*1000;
+  if(receivedAge<0||receivedAge>FRESH_TICK_MAX_AGE_MS||exchangeAge< -3||exchangeReceiptDelayMs<0||exchangeReceiptDelayMs>MAX_EXCHANGE_RECEIPT_DELAY_MS)return{status:'STALE',fresh:false,actionable:false,reason:'Tick stale: receipt age, exchange age, or exchange-to-receipt delay exceeded its limit'};
+  return{status:'FRESH',fresh:true,actionable:true,price:Number(tick.price),exchangeTime:Number(tick.exchangeTime),receivedAt:Number(tick.receivedAt),exchangeReceiptDelayMs};
 }
 export function buildRiskPlan({entry,stopLoss,target,tickSize=0.05}) {
   const values=[entry,stopLoss,target,tickSize].map(Number);

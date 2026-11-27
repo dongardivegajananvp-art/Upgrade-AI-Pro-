@@ -1,9 +1,9 @@
 import { isNseRegularSession, normalizeTopGainersSnapshot, resolveTopGainersView, normalizeChartSnapshot } from './session-snapshot.js';
 import { getOptionRetryDelayMs } from './option-retry-policy.js';
 const labels = [
-  ['NSE:NIFTY50-INDEX','nifty','nifty-change'],
-  ['NSE:NIFTYBANK-INDEX','bank','bank-change'],
-  ['BSE:SENSEX-INDEX','sensex','sensex-change']
+  ['NSE:NIFTY50-INDEX','nifty','nifty-change','nifty-feed-age'],
+  ['NSE:NIFTYBANK-INDEX','bank','bank-change','bank-feed-age'],
+  ['NSE:FINNIFTY-INDEX','finnifty','finnifty-change','finnifty-feed-age']
 ];
 let selectedSymbol = null;
 let userSelectedSymbol = false;
@@ -94,9 +94,9 @@ async function refreshUniverseScan() {
     }
     container.replaceChildren();
     const lastScanAt=data.scanner?.lastScanAt?new Date(data.scanner.lastScanAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'WAITING';
-    status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · SCAN '+Math.round(Number(data.scanIntervalMs||20000)/1000)+'s · LAST '+lastScanAt+' · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
+    status.textContent=(data.universeCount||0)+' F&O · SCANNED '+(data.scanner?.sliceScannedCount||0)+'/'+(data.sliceSize||20)+' SLICE · CANDLES '+(data.candleReceivedThisSlice||0)+' · STRATEGY CHECKS '+(data.strategyChecksThisSlice||0)+' · FULL CYCLE '+(data.fullCycleMinutes??'—')+' MIN · LAST '+lastScanAt+' · REST-GOVERNED'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Candidate list shows fresh FYERS ticks with completed 5m price setups; unscored candidates are not ranked or auto-selected. 15m trend + 5m price structure drive strategy discovery; option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+(Number(data.strategyChecksThisSlice||0)===0?'NO TRADE - DATA NAHI · No completed history-backed strategy check in this slice; Top 3 is suppressed. ':'')+'Twenty F&O symbols rotate into the live socket each minute. FYERS REST history checks stay inside the provider-safe budget and are counted only after completed history + strategy evaluation. Coverage is rolling, not simultaneous. Underlying candidates remain non-actionable until the selected option has its own fresh tick, completed 5m candle and premium breakout. Current candidates: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
@@ -347,10 +347,17 @@ async function refresh() {
     }
     const nseSessionOpen = isNseRegularSession(Date.now());
     let freshCount = 0;
-    for (const [symbol, priceId, changeId] of labels) {
+    for (const [symbol, priceId, changeId, ageId] of labels) {
       const tick = indices[symbol];
       const price = document.getElementById(priceId);
       const change = document.getElementById(changeId);
+      const age = document.getElementById(ageId);
+      if (age) {
+        const receiptAge = tick ? Math.max(0, Math.floor((Date.now() - Number(tick.receivedAt)) / 1000)) : null;
+        const exchangeDelay = tick && Number.isFinite(Number(tick.exchangeReceiptDelayMs)) ? Math.round(Number(tick.exchangeReceiptDelayMs)) : null;
+        age.textContent = !nseSessionOpen ? 'MARKET CLOSED' : tick?.fresh ? `FRESH ${receiptAge}s ago · EXCH→RX ${exchangeDelay}ms` : tick ? `STALE ${receiptAge}s ago · EXCH→RX ${exchangeDelay===null?'UNKNOWN':exchangeDelay+'ms'}` : 'NO TICK';
+        age.dataset.state = tick?.fresh && nseSessionOpen ? 'fresh' : tick ? 'stale' : 'unknown';
+      }
       if (nseSessionOpen && tick?.fresh) {
         freshCount++;
         price.textContent = showNumber(tick.price);
@@ -564,7 +571,7 @@ function renderMovers(fno) {
 }
 async function selectIndexSymbol(symbol) {
   userSelectedSymbol=true;
-  if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(symbol)) return;
+  if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','NSE:FINNIFTY-INDEX'].includes(symbol)) return;
   selectedSymbol = symbol; researchContextReadySymbol = null; researchContextRetryAt = 0; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');

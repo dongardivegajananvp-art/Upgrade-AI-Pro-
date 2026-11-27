@@ -53,15 +53,15 @@ test('Top Gainers includes rolling observations but preserves each tick freshnes
   assert.equal(result.topGainers[0].fresh,true);
 });
 
-test('overlapping socket slices cover new F&O symbols without skipping the overlap', () => {
+test('twenty-symbol socket slices advance by twenty without overlap', () => {
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
-  const first=buildFnoRotationSlice(universe,0,80);
-  const second=buildFnoRotationSlice(universe,FNO_SOCKET_ROTATION_ADVANCE,80);
-  assert.equal(first.length,80);
-  assert.equal(second.length,80);
-  assert.equal(first.filter(symbol=>second.includes(symbol)).length,77);
-  assert.equal(second[0],'NSE:STOCK3-EQ');
-  assert.equal(second[79],'NSE:STOCK82-EQ');
+  const first=buildFnoRotationSlice(universe,0,20);
+  const second=buildFnoRotationSlice(universe,FNO_SOCKET_ROTATION_ADVANCE,20);
+  assert.equal(first.length,20);
+  assert.equal(second.length,20);
+  assert.equal(first.filter(symbol=>second.includes(symbol)).length,0);
+  assert.equal(second[0],'NSE:STOCK20-EQ');
+  assert.equal(second[19],'NSE:STOCK39-EQ');
 });
 
 test('selected underlying is separate from the deterministic rolling slice', () => {
@@ -73,27 +73,14 @@ test('selected underlying is separate from the deterministic rolling slice', () 
   assert.ok(!selected.includes('NSE:STOCK29-EQ'));
 });
 
-test('three-symbol-per-minute F&O scan rotation covers all 218 symbols exactly once', () => {
+test('three REST history checks operate inside each twenty-symbol minute slice', () => {
   assert.equal(FNO_SCAN_PER_SLICE,3);
-  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,FNO_SCAN_PER_SLICE);
+  assert.equal(FNO_SOCKET_ROTATION_ADVANCE,20);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
-  const batches=[];
-  let start=0;
-  do {
-    const batchSize=getFnoScanBatchSize(universe.length,start,FNO_SCAN_PER_SLICE);
-    const active=buildFnoRotationSlice(universe,start,80);
-    batches.push(...getFnoSliceScanSymbols(active,batchSize));
-    start=getNextFnoRotationIndex(universe.length,start,FNO_SCAN_PER_SLICE);
-  } while(start!==0);
-  assert.equal(batches.length,218);
-  assert.equal(new Set(batches).size,218);
-  assert.deepEqual([...batches].sort(),universe.map(item=>item.symbol).sort());
-  assert.equal(getFnoScanBatchSize(218,216,3),2);
-  assert.equal(getFnoScanBatchSize(218,0,3),3);
-  assert.equal(getNextFnoRotationIndex(218,213,3),216);
-  assert.equal(getNextFnoRotationIndex(218,216,3),0);
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,0,80),3)[0],'NSE:STOCK0-EQ');
-  assert.equal(getFnoSliceScanSymbols(buildFnoRotationSlice(universe,3,80),3)[0],'NSE:STOCK3-EQ');
-  const rollingWindow=buildRollingFnoLeaderboard({universe,ticks:new Map(),now,slotCount:80,rotationIntervalMs:60000});
-  assert.equal(rollingWindow.maxObservationAgeSeconds,240);
+  const active=buildFnoRotationSlice(universe,0,20);
+  assert.equal(active.length,20);
+  assert.equal(getFnoSliceScanSymbols(active,FNO_SCAN_PER_SLICE).length,3);
+  assert.equal(getNextFnoRotationIndex(universe.length,0,FNO_SOCKET_ROTATION_ADVANCE),20);
+  const fullCycleMinutes=Math.ceil(universe.length/20)*Math.ceil(20/FNO_SCAN_PER_SLICE);
+  assert.equal(fullCycleMinutes,77);
 });

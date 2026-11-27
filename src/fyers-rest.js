@@ -81,7 +81,7 @@ function recordUpstreamRequest(now = Date.now(), source = 'UNCLASSIFIED', path =
 export function validateNseSymbol(symbol) {
   return typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]{1,48}$/.test(symbol);
 }
-const INDEX_HISTORY_SYMBOLS = new Set(['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX']);
+const INDEX_HISTORY_SYMBOLS = new Set(['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','NSE:FINNIFTY-INDEX']);
 export function validateHistorySymbol(symbol) {
   return validateNseSymbol(symbol) || INDEX_HISTORY_SYMBOLS.has(symbol);
 }

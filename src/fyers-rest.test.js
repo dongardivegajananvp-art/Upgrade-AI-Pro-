@@ -272,7 +272,7 @@ test('queued REST work has strict freshness deadlines by request class', () => {
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.ACCOUNT), 65_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.CONTEXT), 120_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.RESEARCH), 120_000);
-  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.SCANNER), 10_000);
+  assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.SCANNER), 40_000);
   assert.equal(getRestQueueMaxAgeMs(REST_PRIORITY.WARMUP), 120_000);
 });
 

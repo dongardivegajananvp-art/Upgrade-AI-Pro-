@@ -455,7 +455,8 @@ const server = http.createServer(async (req,res) => {
           const prior=fnoSymbolScanLedger.get(item.symbol)||null;
           const tick=snapshot.ticks.get(item.symbol)||null;
           const tickAgeMs=tick?now-Number(tick.receivedAt):null;
-          const tickFresh=Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10);
+          const exchangeReceiptDelayMs=tick?Number(tick.receivedAt)-Number(tick.exchangeTime)*1000:null;
+          const tickFresh=Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&now/1000-Number(tick.exchangeTime)<=10&&exchangeReceiptDelayMs>=0&&exchangeReceiptDelayMs<=5000);
           return {symbol:item.symbol,name:item.name||item.underlying||item.symbol,
             scanStatus:prior?.status||'NOT_SCANNED',lastScanAt:prior?.scannedAt||null,
             scanAttempts:prior?.attemptCount||0,scanReason:prior?.reason||'Awaiting its rotation slot',

@@ -6,7 +6,7 @@ import {
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
   sortRestQueue, admitRestJob, findFairRestQueueIndex, getRestQueueMaxAgeMs,
-  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, getRestTotalWindowLimit, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
+  isRestQueueExpired, getRestQueueExpiryWaitMs, isRestBackgroundPriority, getRestRequestWindowWaitMs, getRestAccountWindowWaitMs, getRestTotalWindowLimit, buildRestEndpointHealth, findRestQueueDuplicate, buildRestDispatchGate, buildRestCoalesceKey
 } from '../src/rest-scheduler-utils.js';
 
 test('queued REST work waits only for the minimum pacing deadline', () => {
@@ -208,7 +208,8 @@ test('interactive Entry and Chart work retain priority over fair background clas
 
 test('non-Entry REST traffic leaves two global request slots reserved for Entry', () => {
   assert.equal(getRestTotalWindowLimit(100),5);
-  for (const priority of [90,80,60,40,30,20,10,-20]) assert.equal(getRestTotalWindowLimit(priority),3);
+  for (const priority of [90,80,60,40,30,10,-20]) assert.equal(getRestTotalWindowLimit(priority),3);
+  assert.equal(getRestTotalWindowLimit(20),3);
   const now=Date.UTC(2026,10,23,5,0,0);
   const fourNonEntry=Array.from({length:3},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:80}));
   assert.ok(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(80))>0);
@@ -221,7 +222,7 @@ test('queued REST requests expire at their exact deadline and invalid timestamps
   assert.equal(getRestQueueMaxAgeMs(100),60000);
   assert.equal(getRestQueueMaxAgeMs(90),15000);
   assert.equal(getRestQueueMaxAgeMs(80),30000);
-  assert.equal(getRestQueueMaxAgeMs(20),30000);
+  assert.equal(getRestQueueMaxAgeMs(20),65000);
   assert.equal(getRestQueueMaxAgeMs(30),120000);
   assert.equal(getRestQueueMaxAgeMs(40),120000);
   assert.equal(getRestQueueMaxAgeMs(10),10000);
@@ -325,4 +326,25 @@ test('REST drain wakes at the earliest queued request expiry instead of overslee
   assert.equal(getRestQueueExpiryWaitMs(jobs,now),5000);
   assert.equal(getRestQueueExpiryWaitMs(jobs,15000),0);
   assert.equal(getRestQueueExpiryWaitMs([],now),0);
+});
+
+
+test('Account Feed retains two rolling-window slots without bypassing the global FYERS cap', () => {
+  const now=Date.UTC(2026,10,23,5,0,0);
+  assert.equal(getRestTotalWindowLimit(20),3);
+  const twoAccount=[
+    {at:new Date(now-2000).toISOString(),priority:20,path:'/positions'},
+    {at:new Date(now-1000).toISOString(),priority:20,path:'/orders'}
+  ];
+  assert.ok(getRestAccountWindowWaitMs(twoAccount,now)>0);
+  assert.equal(getRestAccountWindowWaitMs(twoAccount,now+60_001),0);
+  const oneAccount=[twoAccount[0]];
+  assert.equal(getRestAccountWindowWaitMs(oneAccount,now),0);
+  const background=[
+    {at:new Date(now-3000).toISOString(),priority:10,path:'/history'},
+    {at:new Date(now-2000).toISOString(),priority:40,path:'/history'},
+  ];
+  assert.ok(getRestRequestWindowWaitMs(background,now,getRestTotalWindowLimit(20))===0);
+  const globalFive=[...background,...twoAccount,{at:new Date(now).toISOString(),priority:80,path:'/history'}];
+  assert.ok(getRestRequestWindowWaitMs(globalFive,now,getRestTotalWindowLimit(100))>0);
 });

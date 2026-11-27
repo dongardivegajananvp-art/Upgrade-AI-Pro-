@@ -11,8 +11,8 @@ let cooldownUntil = 0;
 // Process-local cooldown timestamps disappear on restart. Start in a conservative
 // recovery state so background scanner traffic cannot immediately hit the edge.
 let recoveryProbeRequired = REST_RECOVERY_REQUIRED_ON_START;
-// One recovery probe is permitted after startup or a 429 cooldown. A failed
-// probe stays closed; no queued interactive request may turn into a retry storm.
+// One recovery probe is permitted after startup or a 429 cooldown. Failed
+// probes retry only after bounded backoff; they never trigger an immediate retry storm.
 let recoveryProbeAttempted = false;
 let recoveryProbeRetryAt = 0;
 let recoveryProbeFailureCount = 0;
@@ -650,6 +650,8 @@ export function restoreRestSafetyState(state, now = Date.now()) {
   cooldownUntil = Math.max(cooldownUntil, restoredUntil);
   recoveryProbeRequired = true;
   recoveryProbeAttempted = false;
+  recoveryProbeRetryAt = 0;
+  recoveryProbeFailureCount = 0;
   lastRestStatus = 'RATE_LIMITED';
   lastRestError = 'Restored encrypted FYERS REST cooldown from authenticated browser session until ' + new Date(cooldownUntil).toISOString();
   return true;

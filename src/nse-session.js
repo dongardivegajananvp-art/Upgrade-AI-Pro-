@@ -9,3 +9,15 @@ export function isNseRegularSession(now = Date.now()) {
   const minute = ist.getUTCHours() * 60 + ist.getUTCMinutes();
   return day >= 1 && day <= 5 && minute >= 555 && minute < 930;
 }
+
+
+// Dedicated signal-generation window. Existing active positions/setups continue
+// to be monitored through the full regular NSE session.
+export function isNseSignalWindow(now = Date.now()) {
+  const timestamp = Number(now);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return false;
+  const ist = new Date(timestamp + 19800000);
+  const day = ist.getUTCDay();
+  const minute = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return day >= 1 && day <= 5 && minute >= 570 && minute < 720;
+}

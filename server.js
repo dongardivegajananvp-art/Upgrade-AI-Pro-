@@ -19,7 +19,7 @@ import { getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { validateFixedRiskPlan, updateActiveSetupFromTick } from './src/active-setup-lifecycle.js';
 import { requiresFyersSession } from './src/api-access.js';
-import { isNseRegularSession } from './src/nse-session.js';
+import { isNseRegularSession, isNseSignalWindow } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
 import { waitForCurrentFnoMaster } from './src/fno-master-readiness.js';
 
@@ -66,6 +66,8 @@ let fnoUniverseLoadedDate = null;
 let fnoUniverseRetryDate = null;
 let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
+let activeSetupMonitorTimer = null;
+let lastPinnedActiveSetupContractsKey = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
 let fnoStrategyScanRotation = null;
@@ -85,8 +87,9 @@ function startFnoStrategyScanner() {
   fnoStrategyScanTimer=setInterval(async () => {
     if (fnoStrategyScanBusy) return;
     if (Date.now() < fnoStrategyScanRetryAt) { fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET'; return; }
-    if (!isNseRegularSession(Date.now())) {
-      fnoStrategyScanStats.status='OUTSIDE_NSE_SESSION';
+    if (!isNseSignalWindow(Date.now())) {
+      fnoStrategyScanStats.status='OUTSIDE_SIGNAL_WINDOW';
+      fnoStrategyScanStats.lastReason='New signal generation is scheduled only from 09:30 to 12:00 IST; active setup monitoring continues until market close';
       return;
     }
     const sessionMarket=getMarketData();
@@ -317,9 +320,24 @@ function updateActiveSetupLifecycle(market) {
     activeSetupLedger.set(id,updateActiveSetupFromTick(setup,tick,Date.now()));
   }
   const activeContracts = [...new Set([...activeSetupLedger.values()].filter(row => row.status === 'ACTIVE').map(row => row.contract))];
-  setActiveTradeOptionSymbols(activeContracts);
+  const activeContractsKey = activeContracts.join('|');
+  if (activeContractsKey !== lastPinnedActiveSetupContractsKey) {
+    setActiveTradeOptionSymbols(activeContracts);
+    lastPinnedActiveSetupContractsKey = activeContractsKey;
+  }
   market.activeSetups = [...activeSetupLedger.values()].map(row => ({...row}));
   return market;
+}
+function startActiveSetupMonitor() {
+  if (activeSetupMonitorTimer) return;
+  activeSetupMonitorTimer = setInterval(() => {
+    if (!isNseRegularSession(Date.now())) return;
+    if (![...activeSetupLedger.values()].some(row => row.status === 'ACTIVE')) return;
+    // Tick-driven exit monitoring runs server-side; it does not depend on the
+    // browser polling /api/market-data or remaining open after setup trigger.
+    updateActiveSetupLifecycle(getMarketData());
+  }, 1000);
+  activeSetupMonitorTimer.unref?.();
 }
 function normalizeActiveSetup(input) {
   if (!input || typeof input !== 'object') return null;
@@ -353,6 +371,7 @@ function getSessionMarketData() {
 }
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
+  startActiveSetupMonitor();
   const sessionDate = getNseSessionDate();
   if (fnoUniverseRetryDate !== sessionDate) {
     fnoUniverseRetryDate = sessionDate;
@@ -589,13 +608,17 @@ const server = http.createServer(async (req,res) => {
   }
   if (req.method === 'GET' && url.pathname === '/health') {
     const market = getSessionMarketData();
-    return send(res,200,buildHealthStatus({
-      market, masterCurrent:isFnoMasterCurrent(), marketSessionOpen:isNseRegularSession(Date.now()), sessionDate:getNseSessionDate(),
-      loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(), authStatus:getAuthStatus(),
-      scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS}, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
-      rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
-      rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
-    }));
+    return send(res,200,{
+      ...buildHealthStatus({
+        market, masterCurrent:isFnoMasterCurrent(), marketSessionOpen:isNseRegularSession(Date.now()), sessionDate:getNseSessionDate(),
+        loadedDate:fnoUniverseLoadedDate, ordersEnabled:tradingEnabled(), authStatus:getAuthStatus(),
+        scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS}, scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,
+        rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
+        rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
+      }),
+      schedule:{timezone:'Asia/Kolkata',signalWindow:'09:30-12:00',marketMonitoringWindow:'09:15-15:30',
+        signalWindowOpen:isNseSignalWindow(Date.now()),activeSetupMonitoring:'SERVER_SIDE_UNTIL_MARKET_CLOSE'}
+    });
   }
   if (req.method === 'GET' && url.pathname === '/api/status') {
     if (!hasFyersSession) {

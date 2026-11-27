@@ -2,19 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFiveMinuteHistoryRange, normalizeFiveMinuteCandles, filterFiveMinuteCandlesToNseSession, filterLastNseTradingSessions } from '../src/fyers-rest.js';
 
-test('five-minute history requests a multi-session FYERS window', () => {
+test('five-minute history requests a multi-session FYERS epoch window ending at the last completed bar', () => {
   const now = Date.parse('2026-11-20T04:10:00.000Z'); // 09:40 IST
   assert.deepEqual(getFiveMinuteHistoryRange(now), {
-    from: '2026-11-10',
-    to: '2026-11-20'
+    from: Date.parse('2026-11-09T18:30:00.000Z') / 1000,
+    to: Date.parse('2026-11-20T04:09:59.000Z') / 1000,
+    dateFormat: '0',
+    intervalSeconds: 300
   });
 });
 
 test('five-minute history range supports an explicit bounded lookback', () => {
   const now = Date.parse('2026-11-20T04:10:00.000Z');
   assert.deepEqual(getFiveMinuteHistoryRange(now, 3), {
-    from: '2026-11-17',
-    to: '2026-11-20'
+    from: Date.parse('2026-11-16T18:30:00.000Z') / 1000,
+    to: Date.parse('2026-11-20T04:09:59.000Z') / 1000,
+    dateFormat: '0',
+    intervalSeconds: 300
   });
 });
 
@@ -45,7 +49,12 @@ test('legacy one-session filter remains available while the chart uses ten tradi
   const candles = filterFiveMinuteCandlesToNseSession(normalizeFiveMinuteCandles(rows, now), now);
   assert.equal(candles.length, 1);
   assert.equal(candles[0].time, sessionStart);
-  assert.deepEqual(getFiveMinuteHistoryRange(now), { from: '2026-11-10', to: '2026-11-20' });
+  assert.deepEqual(getFiveMinuteHistoryRange(now), {
+    from: Date.parse('2026-11-09T18:30:00.000Z') / 1000,
+    to: Date.parse('2026-11-20T04:09:59.000Z') / 1000,
+    dateFormat: '0',
+    intervalSeconds: 300
+  });
 });
 
 

@@ -41,7 +41,7 @@ export function analyzeSetupResearch({candles=[],fifteenMinuteCandles=[],tick,se
   if(!valid(candles)||candles.length<50)return{status:'UNAVAILABLE',reason:'At least 50 verified completed 5-minute candles are required'};
   if(!contiguousWindow(candles,50))return{status:'UNAVAILABLE',reason:'The latest 50 completed 5-minute candles must be contiguous across verified NSE sessions'};
   if(!valid(fifteenMinuteCandles)||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return{status:'UNAVAILABLE',reason:'At least 50 fresh, contiguous completed 15-minute candles are required'};
-  if(!tick||!Number.isFinite(Number(tick.exchangeTime))||!Number.isFinite(Number(tick.receivedAt))||now-Number(tick.receivedAt)<0||now-Number(tick.receivedAt)>10000||now/1000-Number(tick.exchangeTime)<-3||now/1000-Number(tick.exchangeTime)>10||Number(tick.receivedAt)-Number(tick.exchangeTime)*1000<0||Number(tick.receivedAt)-Number(tick.exchangeTime)*1000>5000)return{status:'UNAVAILABLE',reason:'Fresh low-latency exchange-timestamped FYERS tick is required for research'};
+  if(!tick||!Number.isFinite(Number(tick.exchangeTime))||!Number.isFinite(Number(tick.receivedAt))||now-Number(tick.receivedAt)<0||now-Number(tick.receivedAt)>10000||now/1000-Number(tick.exchangeTime)<-3||false||Number(tick.receivedAt)-Number(tick.exchangeTime)*1000<0||Number(tick.receivedAt)-Number(tick.exchangeTime)*1000>5000)return{status:'UNAVAILABLE',reason:'Fresh low-latency exchange-timestamped FYERS tick is required for research'};
   const trend=rows=>{const closes=rows.map(c=>Number(c.close)),e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1);if(!Number.isFinite(e20)||!Number.isFinite(e50))return'NEUTRAL';return last>e20&&e20>e50?'BULLISH':last<e20&&e20<e50?'BEARISH':'NEUTRAL';};
   const expected=setup?.side==='LONG'?'BULLISH':'BEARISH',fifteenTrend=trend(fifteenMinuteCandles),fiveTrend=trend(candles),patternCandle=candles.find(c=>Number(c.time)===Number(setup?.confirmedAt));
   const derivedRegime=fifteenTrend===fiveTrend&&fifteenTrend!=='NEUTRAL'?'TRENDING_'+fifteenTrend:(fifteenTrend==='NEUTRAL'&&fiveTrend==='NEUTRAL'?'RANGE/NEUTRAL':'MIXED');
@@ -523,7 +523,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
     strategyLedger:(setup?.strategyLedger||[]).map(row=>row.status==='DETECTED'?{...row,status:'BLOCKED',reason:'Underlying strategy detected; '+reason}:row)
   });
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
-  const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
+  const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&true);
   setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,fifteenMinuteCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
   if(!tickFresh(optionTick))return blockDetected('Fresh FYERS option premium tick is required');

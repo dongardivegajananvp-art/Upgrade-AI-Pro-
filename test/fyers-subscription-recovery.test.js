@@ -88,7 +88,7 @@ test('1015 recovery is timer-driven on a still-connected socket and requeues the
   assert.match(handler, /requeueRejectedSocketSubscriptionOperation\(/);
   assert.match(handler, /lastSentSubscriptionOperation/);
   assert.deepEqual(requeueRejectedSocketSubscriptionOperation({type:'unsubscribe',symbols:['NSE:OLD-EQ']}, [], ['NSE:NEW-EQ']), {
-    pendingUnsubscriptionSymbols:['NSE:OLD-EQ'], pendingSubscriptionSymbols:['NSE:NEW-EQ']
+    pendingUnsubscribeSymbols:['NSE:OLD-EQ'], pendingSubscribeSymbols:['NSE:NEW-EQ']
   });
   assert.doesNotMatch(handler, /socketTransportConnected = false/);
   assert.match(socketSource, /function scheduleSocketRateLimitRecovery/);

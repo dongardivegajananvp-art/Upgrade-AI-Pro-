@@ -2,8 +2,9 @@ import { detectNineStrategySetup } from './strategy-engine.js';
 
 // Evaluate every official NSE F&O underlying independently from its own verified
 // FYERS tick and cached completed candles. Missing data is explicitly BLOCKED.
-export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), fiveMinute = new Map(), fifteenMinute = new Map(), now = Date.now(), topGainers = [] } = {}) {
+export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), fiveMinute = new Map(), fifteenMinute = new Map(), now = Date.now(), topGainers = [], excludeSymbols = [] } = {}) {
   const gainers = new Set(topGainers.map(item => item?.symbol).filter(Boolean));
+  const excluded = new Set(excludeSymbols.map(value => String(value||'').trim()).filter(Boolean));
   const evaluations = [];
   const candidates = [];
   for (const item of universe) {
@@ -27,14 +28,19 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
     };
     evaluations.push(row);
     if (result.status === 'UNDERLYING_SETUP_CONFIRMED' && row.fresh) {
-      candidates.push({ ...row, side: result.side, strategy: result.strategy,
+      if (!excluded.has(symbol)) candidates.push({ ...row, side: result.side, strategy: result.strategy,
+        lastCompletedCandleTime: five?.candles?.at(-1)?.time || null,
         qualityScore: null, grade: 'PRICE_SETUP', targetR: 2,
         targetRationale: 'Minimum 2R is calculated only after official option verification',
         evidence: ['Fresh FYERS underlying tick', 'Completed 5-minute strategy price structure'],
         invalidation: 'Re-evaluate the strategy structure on the next completed 5-minute candle' });
     }
   }
-  candidates.sort((a,b) => b.qualityScore - a.qualityScore || String(a.symbol).localeCompare(String(b.symbol)));
+  // Prefer a fresh Top-5 F&O gainer when multiple price-only candidates are
+  // available. This is queue priority, not a fabricated quality score.
+  candidates.sort((a,b) => Number(gainers.has(b.symbol))-Number(gainers.has(a.symbol)) ||
+    Number(b.lastCompletedCandleTime||0)-Number(a.lastCompletedCandleTime||0) ||
+    String(a.symbol).localeCompare(String(b.symbol)));
   return {
     status: candidates.length ? 'PRICE_SETUPS_AVAILABLE' : 'NO_PRICE_SETUP',
     universeCount: evaluations.length,

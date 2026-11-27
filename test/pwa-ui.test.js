@@ -34,7 +34,7 @@ test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v19/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {
@@ -52,7 +52,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v19/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -193,7 +193,7 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v19/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -203,7 +203,7 @@ test('restored cached chart never suppresses a fresh verified history request fo
   const end = app.indexOf('\nfunction drawHistoryChart', start);
   assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
   const flow = app.slice(start, end);
-  assert.ok(flow.includes('if (symbol === selectedSymbol && !chartRestoredFromCache) return'));
+  assert.ok(flow.includes("if(symbol===selectedSymbol&&!chartRestoredFromCache&&chartViewMode==='UNDERLYING') return"));
   assert.ok(app.includes('chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol'));
   assert.ok(flow.includes("fetch('/api/history?symbol='"));
 });
@@ -243,7 +243,7 @@ test('chart requests ten completed NSE trading sessions and renders day partitio
 test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
   const snapshotSource = app.includes('normalizeChartSnapshot');
   assert.ok(snapshotSource);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v19/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
 });
 
 test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {
@@ -255,7 +255,7 @@ test('live candle summary is rendered only after the matching fresh tick updates
   const summary = flow.indexOf('renderLiveCandleSummary(underlyingTick)');
   assert.ok(update >= 0 && summary > update,
     'summary must render after the live candle from the same status snapshot is assigned');
-  assert.match(flow, /if \(selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\s\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\s\S]*?renderChartViewport\(\);/);
+  assert.match(flow, /if \(chartViewMode==='UNDERLYING' && selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\s\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\s\S]*?renderChartViewport\(\);/);
 });
 
 test('option contract identity check is independent of selected underlying tick freshness', () => {
@@ -338,4 +338,26 @@ test('live ticks never replace the chart loading or history-error state when com
   assert.ok(historyGuard >= 0 && clearArea > historyGuard,
     'renderer must preserve loading/error content until verified completed candles exist');
   assert.match(renderer, /chartLiveCandle[\s\S]*?chartCandles/);
+});
+
+test('opportunity cycle automatically hands the next fresh price candidate to option verification when a slot is free',()=>{
+  assert.match(app,/availableSlots>0&&!userSelectedSymbol/);
+  assert.match(app,/const nextCandidate=data\.top3\.find/);
+  assert.match(app,/qualityScore!==null/);
+  assert.match(server,/excludeSymbols:excludedUnderlyings/);
+  assert.match(server,/ACTIVE_SETUP_LIMIT_NO_TRADE/);
+  assert.match(server,/recentlyClosedSetupByUnderlying/);
+  assert.match(server,/closedCandleTime/);
+  assert.match(app,/userSelectedSymbol=false;lastAutoTop3CandidateKey=null/);
+});
+
+test('each retained setup opens its exact verified option strike history chart',()=>{
+  assert.match(app,/VIEW CHART/);
+  assert.match(app,/viewActiveOptionChart\(row\)/);
+  assert.match(app,/\/api\/option-history\?symbol=/);
+  assert.match(app,/chartViewMode='OPTION';chartViewSymbol=contract/);
+  assert.match(app,/OPTION CHART · LIVE FYERS TICK FRESH/);
+  assert.match(server,/url\.pathname === '\/api\/option-history'/);
+  assert.match(server,/getVerifiedOptionContract\(symbol\)/);
+  assert.match(server,/FYERS_VERIFIED_OPTION_HISTORY/);
 });

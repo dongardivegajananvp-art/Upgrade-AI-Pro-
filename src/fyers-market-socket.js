@@ -10,10 +10,11 @@ export { getSocketSubscriptionDelta } from './socket-subscription-utils.js';
 
 const require = createRequire(import.meta.url);
 const FyersDataSocket = require('fyers-api-v3').fyersDataSocket;
-const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
+const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'NSE:FINNIFTY-INDEX'];
 // Keep a wide safety margin under FYERS Standard's account-wide 100-symbol cap.
-// Three indices + eighty rotating equities + five pinned Top Gainers + one selected underlying + one selected option = at most 90.
-const MAX_UNDERLYING_SLOTS = 80;
+// Three indices + twenty rotating F&O symbols + five pinned gainers + selected
+// underlying/option stay comfortably below the Standard 100-symbol ceiling.
+const MAX_UNDERLYING_SLOTS = 20;
 // The shared REST governor permits three background history requests per minute.
 // The scanner consumes those slots at 20-second intervals while the 80-symbol
 // socket window rotates by three new underlyings each minute.
@@ -189,8 +190,12 @@ function asEpochSeconds(value) {
   return n > 1e12 ? n / 1000 : n;
 }
 function isFresh(tick, now = Date.now()) {
-  return Boolean(tick && now - tick.receivedAt <= 10_000 && now - tick.receivedAt >= 0 &&
-    now / 1000 - tick.exchangeTime <= 10 && now / 1000 - tick.exchangeTime >= -3);
+  if (!tick || !Number.isFinite(Number(tick.exchangeTime)) || !Number.isFinite(Number(tick.receivedAt))) return false;
+  const receiptAge = now - Number(tick.receivedAt);
+  const exchangeAge = now / 1000 - Number(tick.exchangeTime);
+  const exchangeReceiptDelayMs = Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000;
+  return receiptAge >= 0 && receiptAge <= 10_000 && exchangeAge >= -3 && exchangeAge <= 10 &&
+    exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5_000;
 }
 function acceptedSymbols() {
   return new Set(desiredSocketSubscriptions());
@@ -212,7 +217,9 @@ function accept(item) {
   const change = reportedChange !== undefined && reportedChange !== null && Number.isFinite(Number(reportedChange)) ? Number(reportedChange) : fallbackChange;
   const changePercent = reportedPercent !== undefined && reportedPercent !== null && Number.isFinite(Number(reportedPercent)) ? Number(reportedPercent) : fallbackPercent;
   const cumulativeVolume = Number(item.v ?? item.volume ?? item.vol_traded_today);
-  const tick = { symbol, price, exchangeTime, receivedAt: Date.now(), change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
+  const receivedAt = Date.now();
+  const exchangeReceiptDelayMs = receivedAt - exchangeTime * 1000;
+  const tick = { symbol, price, exchangeTime, receivedAt, exchangeReceiptDelayMs, change, changePercent, type: item.type || null, cumulativeVolume: Number.isFinite(cumulativeVolume) && cumulativeVolume >= 0 ? cumulativeVolume : null };
   const sessionWasReady = sessionFeedReady(tick.receivedAt);
   ticks.set(symbol, tick);
   if (INDEX_SYMBOLS.includes(symbol)) {

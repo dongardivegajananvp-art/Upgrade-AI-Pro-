@@ -84,5 +84,3 @@ test('three REST history checks operate inside each twenty-symbol minute slice',
   const fullCycleMinutes=Math.ceil(universe.length/20)*Math.ceil(20/FNO_SCAN_PER_SLICE);
   assert.equal(fullCycleMinutes,77);
 });
-  assert.equal(rollingWindow.maxObservationAgeSeconds,720);
-});

@@ -131,10 +131,18 @@ function startFnoStrategyScanner() {
       // Research warmups deliberately survive slice rotation and manual selection
       // changes; eligible candidates discovered in the previous slice are retained.
     }
-    const scanLimit=Math.min(snapshot.scanPerSlice || 12,active.length);
+    // Fresh rolling Top-5 gainers are subscribed independently of the 20-symbol
+    // rotation. Put them first in the bounded history-scan queue so a newly
+    // observed leader is not forced to wait for the full 218-symbol rotation.
+    // The shared REST governor and two-scan-per-minute budget remain unchanged.
+    const freshTopGainers=(sessionMarket.fno?.topGainers||[])
+      .filter(item=>item?.fresh&&snapshot.ticks.has(item.symbol))
+      .map(item=>item.symbol);
+    const scanCandidates=[...new Set([...freshTopGainers,...active])];
+    const scanLimit=Math.min(snapshot.scanPerSlice || 12,scanCandidates.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
     // 15m context refreshes so research preparation cannot starve F&O coverage.
-    const retryPendingActive=Boolean(fnoStrategyScanRetrySymbol && active.includes(fnoStrategyScanRetrySymbol) &&
+    const retryPendingActive=Boolean(fnoStrategyScanRetrySymbol && scanCandidates.includes(fnoStrategyScanRetrySymbol) &&
       isFreshFnoTick(snapshot.ticks.get(fnoStrategyScanRetrySymbol),Date.now()));
     const shouldWarmup=!retryPendingActive && fnoResearchWarmupQueue.size>0 && fnoResearchWarmupQueue.hasReady() && fnoStrategyScanCursor>=scanLimit;
     if (shouldWarmup) {
@@ -175,7 +183,7 @@ function startFnoStrategyScanner() {
       fnoStrategyScanStats.lastReason='Global scanner cadence: one new underlying history scan every '+Math.round(FNO_SCAN_MIN_INTERVAL_MS/1000)+' seconds';
       return;
     }
-    const normalSymbol=getNextFreshFnoScanSymbol(active,snapshot.ticks,fnoSymbolScanLedger,Date.now());
+    const normalSymbol=getNextFreshFnoScanSymbol(scanCandidates,snapshot.ticks,fnoSymbolScanLedger,Date.now());
     const retryCandidate=retryPendingActive;
     const symbol=retryCandidate ? fnoStrategyScanRetrySymbol : normalSymbol;
     if(!symbol) return;

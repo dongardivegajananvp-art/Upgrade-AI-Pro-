@@ -20,6 +20,8 @@ let optionChainRetrySymbol = null;
 let optionChainRetryTimestamp = '';
 let optionChainRetryGeneration = 0;
 let refreshRunning = false;
+let indexScanRefreshRunning = false;
+let lastIndexScanRefresh = 0;
 let chartRestoredFromCache = false;
 const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
 const CHART_SNAPSHOT_KEY = 'upgrade-ai-pro:last-verified-chart:v1';
@@ -105,6 +107,74 @@ function showExpiry(value) {
   const stamp=Number(value);
   return Number.isFinite(stamp)&&stamp>0?new Date((stamp+19800)*1000).toISOString().slice(0,10):'—';
 }
+
+async function refreshIndexStrategyScan() {
+  if(indexScanRefreshRunning) return;
+  indexScanRefreshRunning=true;
+  lastIndexScanRefresh=Date.now();
+  const status=document.querySelector('#index-strategy-status');
+  const container=document.querySelector('#index-strategy-results');
+  try {
+    const response=await fetch('/api/research/indices',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.reason||'Index strategy scanner unavailable · HTTP '+response.status);
+    status.textContent=(data.freshIndexCount||0)+'/'+(data.totalIndexCount||3)+' INDEX TICKS FRESH · '+(data.scannerStatus||'UNKNOWN')+' · '+(data.marketSession||'UNKNOWN')+' · SHARED REST 2/MIN';
+    container.replaceChildren();
+    for(const row of data.scans||[]) {
+      const card=document.createElement('div');
+      card.style.cssText='padding:10px 0;border-top:1px solid #263951;font-size:12px;line-height:1.55;';
+      const title=document.createElement('strong');
+      title.textContent=(row.label||row.symbol)+' · '+(row.feedStatus==='FRESH'?'FRESH TICK':'STALE / MISSING TICK');
+      const result=document.createElement('div');
+      result.textContent=row.status==='UNDERLYING_SETUP_CONFIRMED'
+        ?'UNDERLYING SETUP CONFIRMED · '+(row.tradeStatus||'NO TRADE')
+        :(row.status||'WAITING').replaceAll('_',' ');
+      result.style.cssText='font-weight:700;color:'+(row.status==='UNDERLYING_SETUP_CONFIRMED'&&row.tradeStatus!=='NO_TRADE'?'#72e5c0':'#dceaff')+';';
+      const detail=document.createElement('div');
+      detail.textContent='STRATEGY '+(row.strategy||'—')+' · SIDE '+(row.side||'—')+' · PRICE '+(row.tickFresh?'₹'+showNumber(row.tickPrice):'—');
+      const candle=document.createElement('div');
+      const candleTime=row.lastCompletedCandleTime?new Date(Number(row.lastCompletedCandleTime)*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false})+' IST':'—';
+      const scannedAt=row.lastScanAt?new Date(row.lastScanAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'WAITING';
+      candle.textContent='COMPLETED 5M CANDLE '+candleTime+' · SCANNED '+scannedAt+' · CHECKS '+(row.strategyCheckCount||0)+'/9';
+      const reason=document.createElement('small');
+      reason.className='empty-inline';
+      reason.textContent=row.reason||'Waiting for next verified completed 5-minute candle';
+      card.append(title,result,detail,candle,reason);
+      const details=document.createElement('details');
+      const summary=document.createElement('summary');
+      summary.textContent='NINE-STRATEGY LEDGER · '+(row.strategyLedger||[]).length+' RULES';
+      details.append(summary);
+      for(const entry of row.strategyLedger||[]) {
+        const line=document.createElement('div');
+        line.className='strategy-ledger-row';
+        const name=document.createElement('b');
+        name.textContent=(entry.strategy||'STRATEGY')+' · '+(entry.status||'UNKNOWN');
+        const why=document.createElement('small');
+        why.textContent=entry.reason||'No reason returned';
+        line.append(name,why);
+        details.append(line);
+      }
+      card.append(details);
+      container.append(card);
+    }
+    if(!(data.scans||[]).length) {
+      const empty=document.createElement('div');
+      empty.className='empty-inline';
+      empty.textContent=data.note||'No index scan records are available.';
+      container.append(empty);
+    }
+    const note=document.createElement('div');
+    note.className='empty-inline';
+    note.textContent='UNDERLYING SCAN ONLY · '+(data.scanReady?'3/3 FRESH INDEX FEED VERIFIED':'WAITING FOR 3/3 FRESH INDEX FEED')+' · OPTION CE/PE TICK + COMPLETED OPTION CANDLE REQUIRED BEFORE ANY TRADE · ORDERS DISABLED';
+    container.append(note);
+  } catch(error) {
+    status.textContent='INDEX NINE-STRATEGY SCAN UNAVAILABLE';
+    container.textContent=String(error.message||'Index strategy scanner unavailable');
+  } finally {
+    indexScanRefreshRunning=false;
+  }
+}
+
 async function refreshUniverseScan() {
   if(universeScanRunning) return;
   universeScanRunning=true;lastUniverseScanRefresh=Date.now();
@@ -290,6 +360,7 @@ async function refresh() {
     mergeActiveSetups(md.activeSetups||[]);
     if(s.auth?.tokenStored) void syncActiveSetups();
     if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
+    if(s.auth?.tokenStored && Date.now()-lastIndexScanRefresh>=15000) refreshIndexStrategyScan();
     renderMovers(md.fno || {});
     if (selectedSymbol && setupEvaluationDone && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
       void ensureResearchContext(selectedSymbol).catch(() => {});

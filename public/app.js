@@ -127,7 +127,11 @@ async function refreshIndexStrategyScan() {
       title.textContent=(row.label||row.symbol)+' · '+(row.feedStatus==='FRESH'?'FRESH TICK':'STALE / MISSING TICK');
       const result=document.createElement('div');
       result.textContent=row.status==='UNDERLYING_SETUP_CONFIRMED'
-        ?'UNDERLYING SETUP CONFIRMED · '+(row.tradeStatus||'NO TRADE')
+        ?(row.tradeStatus==='OPTION_CONFIRMATION_REQUIRED_NO_TRADE'
+          ?'UNDERLYING SETUP CONFIRMED · OPTION CHECK PENDING · NO TRADE'
+          :!row.scanCurrent?'PREVIOUS CANDLE SETUP · WAITING FOR LATEST 5M BAR · NO TRADE'
+            :row.feedStatus!=='FRESH'?'INDEX FEED STALE · NO TRADE'
+              :'UNDERLYING SETUP · NO TRADE')
         :(row.status||'WAITING').replaceAll('_',' ');
       result.style.cssText='font-weight:700;color:'+(row.status==='UNDERLYING_SETUP_CONFIRMED'&&row.tradeStatus!=='NO_TRADE'?'#72e5c0':'#dceaff')+';';
       const detail=document.createElement('div');

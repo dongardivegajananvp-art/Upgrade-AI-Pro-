@@ -843,6 +843,7 @@ const server = http.createServer(async (req,res) => {
         rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
         rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
       }),
+      indexScanner:{status:indexStrategyScannerStatus,freshIndexCount:countFreshIndexTicks(market.indices||{},Date.now()),totalIndexCount:INDEX_STRATEGY_SYMBOLS.length,scans:Object.values(indexStrategyScanStats).map(row=>({...row,actionable:false,orders:'DISABLED'}))},
       schedule:{timezone:'Asia/Kolkata',signalWindow:'09:15-15:30',marketMonitoringWindow:'09:15-15:30',
         signalWindowOpen:isNseSignalWindow(Date.now()),activeSetupMonitoring:'SERVER_SIDE_UNTIL_MARKET_CLOSE'}
     });
@@ -876,7 +877,7 @@ const server = http.createServer(async (req,res) => {
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim()),
       refreshPinConfigured:Boolean(process.env.FYERS_PIN?.trim())
     },
-    fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:market.fno, indexScanner:{mode:'THREE_INDEX_NINE_STRATEGY_UNDERLYING_ONLY',status:indexStrategyScannerStatus,freshIndexCount:countFreshIndexTicks(market.indices||{},Date.now()),totalIndexCount:INDEX_STRATEGY_SYMBOLS.length,scans:Object.values(indexStrategyScanStats).map(row=>({...row,actionable:false,orders:'DISABLED'}))}, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {

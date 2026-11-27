@@ -385,12 +385,25 @@ export function getFiveMinuteCacheValidUntil(now = Date.now(), settleMs = 2000) 
   return nextCompletedBucket + Math.max(0, Number(settleMs) || 0);
 }
 
-export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
-  const days = Math.max(2, Math.floor(Number(lookbackDays) || 10));
-  return {
-    from: new Date(now - days * 86400000 + 19800000).toISOString().slice(0, 10),
-    to: istDate(now)
-  };
+// FYERS date_format=1 accepts calendar dates only. For an intraday request this
+// can truncate the current session at its date boundary. Use epoch seconds and
+// end immediately before the currently-forming interval so only completed bars
+// are requested (FYERS historical-data guidance).
+export function getIntradayHistoryRange(now = Date.now(), intervalSeconds = 300, lookbackDays = 20) {
+  const timestamp = Number(now);
+  const interval = Math.max(1, Math.floor(Number(intervalSeconds) || 300));
+  const days = Math.max(2, Math.floor(Number(lookbackDays) || 20));
+  if (!Number.isFinite(timestamp) || timestamp <= 0) throw new Error('A valid intraday history timestamp is required');
+  const currentIstMidnight = Math.floor((timestamp + 19800000) / 86400000) * 86400 - 19800;
+  const from = currentIstMidnight - days * 86400;
+  const currentBucket = Math.floor(timestamp / (interval * 1000)) * interval;
+  return { from, to: currentBucket - 1, dateFormat: '0', intervalSeconds: interval };
+}
+export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 20) {
+  return getIntradayHistoryRange(now, 300, lookbackDays);
+}
+export function getFifteenMinuteHistoryRange(now = Date.now(), lookbackDays = 45) {
+  return getIntradayHistoryRange(now, 900, lookbackDays);
 }
 
 const fiveMinuteCache = new Map();
@@ -429,13 +442,21 @@ export async function getFiveMinuteSessionHistory(symbol, now = Date.now(), prio
     if (cached && cached.sessionDate === date && now < cached.validUntil) return cached.value;
     const range = getFiveMinuteHistoryRange(now, 20);
     const body = await fyersGet(DATA_BASE, '/history', {
-      symbol, resolution: '5', date_format: '1', range_from: range.from, range_to: range.to
+      symbol, resolution: '5', date_format: '0',
+      range_from: String(range.from), range_to: String(range.to)
     }, priority, source);
     if (body.s !== 'ok' || !Array.isArray(body.candles)) throw new Error('FYERS did not return verified ten-session 5-minute history');
     const candles = filterLastNseTradingSessions(normalizeFiveMinuteCandles(body.candles, now), 10);
     if (!candles.length) throw new Error('No completed FYERS 5-minute candles are available for the last ten NSE sessions');
     const sessions = [...new Set(candles.map(candle => new Date((candle.time + 19800) * 1000).toISOString().slice(0, 10)))];
-    const value = { symbol, resolution: '5', sessionDate: date, candles, count: candles.length, sessions, sessionCount: sessions.length, source: 'FYERS_VERIFIED_5M_HISTORY', range: 'LAST_10_NSE_TRADING_SESSIONS', actionable: true };
+    const lastCompletedCandleTime = candles.at(-1).time;
+    const ageSeconds = Math.floor(now / 1000) - (lastCompletedCandleTime + 300);
+    const value = {
+      symbol, resolution: '5', sessionDate: date, candles, count: candles.length, sessions,
+      sessionCount: sessions.length, lastCompletedCandleTime, ageSeconds: Math.max(0, ageSeconds),
+      source: 'FYERS_VERIFIED_5M_HISTORY', range: 'LAST_10_NSE_TRADING_SESSIONS',
+      requestRange: { from: range.from, to: range.to, dateFormat: '0' }, actionable: true
+    };
     fiveMinuteCache.set(symbol, { savedAt: now, validUntil:getFiveMinuteCacheValidUntil(now), sessionDate: date, value });
     return value;
   });
@@ -471,15 +492,21 @@ export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority
     const cachedLast=Number(cached?.value?.candles?.at(-1)?.time);
     const cachedAge=now/1000-(cachedLast+900);
     if(cached&&now<=cached.validUntil&&Number.isFinite(cachedAge)&&cachedAge>=-3&&cachedAge<=1800)return cached.value;
-    const to=istDate(now);
-    const from=new Date(now-45*86400000+19800000).toISOString().slice(0,10);
-    const body=await fyersGet(DATA_BASE,'/history',{symbol,resolution:'15',date_format:'1',range_from:from,range_to:to},priority,source);
+    const range=getFifteenMinuteHistoryRange(now,45);
+    const body=await fyersGet(DATA_BASE,'/history',{
+      symbol,resolution:'15',date_format:'0',
+      range_from:String(range.from),range_to:String(range.to)
+    },priority,source);
     if(body.s!=='ok'||!Array.isArray(body.candles))throw new Error('FYERS did not return verified 15-minute history');
     const candles=normalizeFifteenMinuteCandles(body.candles,now);
     if(candles.length<50)throw new Error('Insufficient completed FYERS 15-minute candles; 50 are required for EMA20/EMA50');
     const last=candles.at(-1),age=now/1000-(Number(last.time)+900);
     if(!Number.isFinite(age)||age< -3||age>1800)throw new Error('Latest completed FYERS 15-minute candle is stale or out of sequence');
-    const value={symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M',lastCompletedCandleTime:last.time,ageSeconds:Math.max(0,Math.floor(age))};
+    const value={
+      symbol,resolution:'15',candles,count:candles.length,source:'FYERS_HISTORY_15M',
+      lastCompletedCandleTime:last.time,ageSeconds:Math.max(0,Math.floor(age)),
+      requestRange:{from:range.from,to:range.to,dateFormat:'0'}
+    };
     fifteenMinuteCache.set(symbol,{savedAt:now,validUntil:getFifteenMinuteCacheValidUntil(candles,now),value});
     return value;
   });

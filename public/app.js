@@ -78,13 +78,16 @@ async function syncActiveSetups(force=false) {
   try { const response=await fetch('/api/active-setups',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({setups:active})});const result=await response.json();if(response.ok&&Array.isArray(result.setups))mergeActiveSetups(result.setups); } catch {}
 }
 function registerTriggeredSetup(setup,underlying,contract) {
+  const entryAt=new Date().toISOString();
+  const id=contract+'|'+String(setup.optionCandleTime||setup.confirmedAt||entryAt);
+  const sameTrigger=activeSetups.find(row=>row.id===id);
+  if(sameTrigger)return {ok:true,existing:true,row:sameTrigger};
   const duplicate=activeSetups.find(row=>row.status==='ACTIVE'&&(row.contract===contract||row.underlying===underlying));
   if(duplicate)return {ok:true,existing:true,row:duplicate};
   if(activeSetups.filter(row=>row.status==='ACTIVE').length>=2)return {ok:false,reason:'Two verified setups are already active; existing Entry/SL/Target levels are being retained'};
   const entry=Number(setup.entry),stopLoss=Number(setup.stopLoss),target=Number(setup.target),risk=entry-stopLoss,reward=target-entry;
   if(!(entry>0&&stopLoss>0&&stopLoss<entry&&target>entry&&risk>0&&reward/risk>=2))return {ok:false,reason:'Fixed Entry/SL/Target failed minimum 1:2 risk validation'};
-  const entryAt=new Date().toISOString();
-  const row={id:contract+'|'+String(setup.optionCandleTime||setup.confirmedAt||entryAt),underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.optionSide||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
+  const row={id,underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.optionSide||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
   activeSetups.push(row);saveActiveSetups();renderActiveSetups();void syncActiveSetups(true);return {ok:true,existing:false,row};
 }
 function renderActiveSetups() {
@@ -1368,12 +1371,13 @@ async function evaluateSelectedSetup() {
     if(setup.status==='SETUP_CONFIRMED') {
       const retained=registerTriggeredSetup(setup,evaluatedSymbol,evaluatedContract);
       if(!retained.ok) { state.textContent='ENTRY NOT ADDED · '+retained.reason; state.dataset.state='blocked'; chartSetupLevels=null; renderChartViewport(); return; }
-      document.querySelector('#setup-entry').textContent='₹'+showNumber(setup.entry);
-      document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
-      document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
-      document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
-      state.textContent='SIGNAL VERIFIED · '+setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
-      chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
+      const fixed=retained.row;
+      document.querySelector('#setup-entry').textContent='₹'+showNumber(fixed.entry);
+      document.querySelector('#setup-sl').textContent='₹'+showNumber(fixed.stopLoss);
+      document.querySelector('#setup-target').textContent='₹'+showNumber(fixed.target);
+      document.querySelector('#setup-rr').textContent='1:'+showNumber(fixed.rr);
+      state.textContent=(fixed.status==='ACTIVE'?'ACTIVE ENTRY RETAINED · ':'PREVIOUS TRIGGER · ')+fixed.strategy+' · '+fixed.contract+' · '+(fixed.status==='ACTIVE'?'MONITORING FIXED SL / TARGET':fixed.status.replaceAll('_',' ')); state.dataset.state=fixed.status==='ACTIVE'?'confirmed':'blocked';
+      chartSetupLevels = { entry: Number(fixed.entry), stopLoss: Number(fixed.stopLoss), target: Number(fixed.target) };
       renderChartViewport();
     } else {
       chartSetupLevels = null; renderChartViewport();

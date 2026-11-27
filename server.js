@@ -653,7 +653,8 @@ const server = http.createServer(async (req,res) => {
       const tickFresh=isFreshIndexTick(tick,now);
       const candleTime=Number(prior.lastCompletedCandleTime||0);
       const candleAgeSeconds=candleTime>0?now/1000-(candleTime+300):null;
-      const scanCurrent=Number.isFinite(candleAgeSeconds)&&candleAgeSeconds>=0&&candleAgeSeconds<=600;
+      const expectedLatestCompletedCandleTime=Math.floor(now/300_000)*300-300;
+      const scanCurrent=Number.isFinite(candleAgeSeconds)&&candleAgeSeconds>=0&&candleAgeSeconds<=600&&candleTime===expectedLatestCompletedCandleTime;
       const tradeStatus=inSession&&freshIndexCount===3&&tickFresh&&scanCurrent&&prior.status==='UNDERLYING_SETUP_CONFIRMED'
         ?'OPTION_CONFIRMATION_REQUIRED_NO_TRADE':'NO_TRADE';
       return {

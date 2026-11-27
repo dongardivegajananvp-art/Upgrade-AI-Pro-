@@ -342,7 +342,7 @@ function startFnoStrategyScanner() {
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
     try {
       // Re-read immediately before requesting history; the tick must still be fresh.
-      const latest=getFnoUniverseSnapshot();
+      let latest=getFnoUniverseSnapshot();
       scanTick=latest.ticks.get(symbol)||null;
       if(!isFreshFnoTick(scanTick,Date.now())) {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');

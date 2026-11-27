@@ -350,6 +350,13 @@ function startFnoStrategyScanner() {
       const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'fno-scanner-5m');
       fnoStrategyScanStats.sliceScannedCount++;
       if(Array.isArray(history.candles)&&history.candles.length>0) fnoStrategyScanStats.candleReceivedCount++;
+      // REST queue waits can span multiple ticks. Re-read both the feed tick and
+      // WebSocket candle snapshot after history returns; never log pre-wait state.
+      latest=getFnoUniverseSnapshot();
+      scanTick=latest.ticks.get(symbol)||null;
+      if(!isFreshFnoTick(scanTick,Date.now())) {
+        throw new Error('Fresh FYERS underlying/futures tick is required after history wait; scan result discarded');
+      }
       const websocketObservation=latest.websocketCandles?.get(symbol)||null;
       const tick=scanTick;
       const market=getMarketData();

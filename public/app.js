@@ -1399,7 +1399,7 @@ async function evaluateSelectedSetup() {
     if(response.status===429) {
       setupOptionTrigger=null;
       setupRetryAfter=Number.isFinite(Number(setup.retryAt))&&Number(setup.retryAt)>Date.now()
-        ?Number(setup.retryAt):Date.now()+60*60*1000;
+        ?Number(setup.retryAt):Date.now()+60_000;
       state.textContent='FYERS REST COOLDOWN · ENTRY CHECK PAUSED UNTIL SAFE RETRY';
       state.dataset.state='blocked';
       return;

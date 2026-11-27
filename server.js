@@ -22,6 +22,7 @@ import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession, isNseSignalWindow } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
 import { waitForCurrentFnoMaster } from './src/fno-master-readiness.js';
+import { INDEX_STRATEGY_SYMBOLS, INDEX_STRATEGY_LABELS, countFreshIndexTicks, isFreshIndexTick, isVerifiedIndexHistory, buildIndexStrategyScanRecord } from './src/index-strategy-scan-utils.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -88,7 +89,134 @@ const fnoResearchWarmupQueue = createResearchWarmupQueue({ maxSize: 500 });
 // Per-underlying audit ledger: records actual scan attempts and explicit skips/failures.
 // It is diagnostic only and never upgrades stale/missing data to an actionable setup.
 const fnoSymbolScanLedger = new Map();
+const indexStrategyScanStats = Object.fromEntries(INDEX_STRATEGY_SYMBOLS.map(symbol => [symbol, {
+  symbol, label:INDEX_STRATEGY_LABELS[symbol], status:'NOT_STARTED',
+  tradeStatus:'NO_TRADE', tickFresh:false, candleCount:0, strategyCheckCount:0,
+  attemptCount:0, lastScanAt:null, lastCompletedCandleTime:null,
+  reason:'Waiting for three fresh FYERS index ticks'
+}]));
+let indexStrategyScannerStatus='NOT_STARTED';
+let indexStrategyScanTimer=null;
+let indexStrategyScanBusy=false;
+let indexStrategyScanCursor=0;
+let indexStrategyScanRetryAt=0;
+
 const fnoStrategyScanStats = { status:'NOT_STARTED', scannedCount:0, sliceScannedCount:0, candleReceivedCount:0, strategyCheckCount:0, sliceStrategyCheckCount:0, lastSymbol:null, lastStatus:null, lastReason:null, lastScanAt:null, warmupSymbol:null, warmupStatus:'IDLE', warmupQueueDepth:0, warmupCompletedCount:0, warmupRejectedCount:0, warmupRetryCount:0, warmupLastCompletedSymbol:null, warmupLastFailure:null, warmupLastRetryAt:null };
+
+function startIndexStrategyScanner() {
+  if (indexStrategyScanTimer) return;
+  indexStrategyScannerStatus='RUNNING';
+  indexStrategyScanTimer=setInterval(async () => {
+    if (indexStrategyScanBusy || Date.now()<indexStrategyScanRetryAt) return;
+    const now=Date.now();
+    if (!isNseSignalWindow(now)) {
+      indexStrategyScannerStatus='OUTSIDE_NSE_SESSION';
+      return;
+    }
+    const market=getMarketData(now);
+    const freshCount=countFreshIndexTicks(market.indices||{},now);
+    if (freshCount!==3) {
+      indexStrategyScannerStatus='WAITING_FOR_3_OF_3_FRESH_INDEX_TICKS';
+      return;
+    }
+    const rest=getRestDiagnostics();
+    if (rest.cooldownActive || rest.recoveryProbeRequired) {
+      indexStrategyScannerStatus=rest.cooldownActive?'FYERS_REST_COOLDOWN_WAIT':'FYERS_REST_RECOVERY_PROBE_WAIT';
+      return;
+    }
+    const symbol=INDEX_STRATEGY_SYMBOLS[indexStrategyScanCursor%INDEX_STRATEGY_SYMBOLS.length];
+    indexStrategyScanCursor=(indexStrategyScanCursor+1)%INDEX_STRATEGY_SYMBOLS.length;
+    const tick=market.indices[symbol];
+    if (!isFreshIndexTick(tick,now)) return;
+    const dispatch=getRestDispatchReadiness(REST_PRIORITY.SCANNER,'/history');
+    if (!dispatch.ready) {
+      indexStrategyScannerStatus='WAITING_FOR_SHARED_REST_BUDGET';
+      return;
+    }
+    indexStrategyScanBusy=true;
+    indexStrategyScannerStatus='RUNNING';
+    try {
+      const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'index-nine-strategy-5m');
+      const scanAt=Date.now();
+      const latestMarket=getMarketData(scanAt);
+      const latestTick=latestMarket.indices?.[symbol]||null;
+      if (countFreshIndexTicks(latestMarket.indices||{},scanAt)!==3 || !isFreshIndexTick(latestTick,scanAt)) {
+        indexStrategyScannerStatus='WAITING_FOR_3_OF_3_FRESH_INDEX_TICKS';
+        return;
+      }
+      if (!isVerifiedIndexHistory(history,scanAt)) {
+        indexStrategyScanStats[symbol]={
+          ...indexStrategyScanStats[symbol],status:'DATA_UNAVAILABLE_NO_TRADE',
+          tradeStatus:'NO_TRADE',tickFresh:true,lastCheckedAt:new Date(scanAt).toISOString(),
+          reason:'Recent completed FYERS 5-minute index history is unavailable; no candle was synthesized'
+        };
+        indexStrategyScannerStatus='WAITING_FOR_VERIFIED_INDEX_CANDLES';
+        return;
+      }
+      const lastCandleTime=Number(history.lastCompletedCandleTime);
+      const previous=indexStrategyScanStats[symbol];
+      if (lastCandleTime<=Number(previous.lastCompletedCandleTime||0)) {
+        indexStrategyScannerStatus='RUNNING';
+        return;
+      }
+      let fifteenMinuteHistory={candles:[]};
+      let fifteenMinuteHistoryError=null;
+      try {
+        fifteenMinuteHistory=await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'index-nine-strategy-15m');
+      } catch(error) {
+        fifteenMinuteHistoryError=String(error?.message||'15-minute index context unavailable').slice(0,160);
+      }
+      const evaluationAt=Date.now();
+      const evaluationMarket=getMarketData(evaluationAt);
+      const evaluationTick=evaluationMarket.indices?.[symbol]||null;
+      if (countFreshIndexTicks(evaluationMarket.indices||{},evaluationAt)!==3 || !isFreshIndexTick(evaluationTick,evaluationAt)) {
+        indexStrategyScannerStatus='WAITING_FOR_3_OF_3_FRESH_INDEX_TICKS';
+        return;
+      }
+      const result=detectNineStrategySetup({
+        underlyingCandles:history.candles,
+        underlyingTick:evaluationTick,
+        dailyCandles:[],
+        fifteenMinuteCandles:fifteenMinuteHistory.candles||[],
+        isTopGainer:false,
+        researchEnabled:false,
+        now:evaluationAt
+      });
+      const record=buildIndexStrategyScanRecord({
+        symbol,tick:evaluationTick,history,result,now:evaluationAt,
+        attemptCount:Number(previous.attemptCount||0)+1
+      });
+      record.fifteenMinuteCandleCount=Array.isArray(fifteenMinuteHistory.candles)?fifteenMinuteHistory.candles.length:0;
+      record.fifteenMinuteHistoryStatus=record.fifteenMinuteCandleCount>=50?'FYERS_15M_CONTEXT_AVAILABLE':'BLOCKED';
+      record.fifteenMinuteHistoryReason=fifteenMinuteHistoryError;
+      indexStrategyScanStats[symbol]=record;
+      indexStrategyScannerStatus='RUNNING';
+      console.info('[FYERS_INDEX_SCANNER] completed:',JSON.stringify({
+        symbol,label:record.label,status:record.status,tradeStatus:record.tradeStatus,
+        strategy:record.strategy,side:record.side,tickFresh:record.tickFresh,
+        tickExchangeTime:record.tickExchangeTime,lastCompletedCandleTime:record.lastCompletedCandleTime,
+        candleCount:record.candleCount,strategyCheckCount:record.strategyCheckCount,
+        source:record.historySource,orders:'DISABLED'
+      }));
+    } catch(error) {
+      const message=String(error?.message||'Index strategy scan failed').slice(0,180);
+      indexStrategyScanStats[symbol]={
+        ...indexStrategyScanStats[symbol],status:'DATA_UNAVAILABLE_NO_TRADE',
+        tradeStatus:'NO_TRADE',tickFresh:isFreshIndexTick(tick,Date.now()),
+        lastCheckedAt:new Date().toISOString(),reason:message
+      };
+      const restState=getRestDiagnostics();
+      indexStrategyScanRetryAt=restState.cooldownUntil?Date.parse(restState.cooldownUntil):Date.now()+10_000;
+      indexStrategyScannerStatus=/cooldown|429|recovery probe|queue/i.test(message)
+        ?'WAITING_FOR_SHARED_REST_BUDGET':'DATA_UNAVAILABLE_NO_TRADE';
+      console.warn('[FYERS_INDEX_SCANNER] scan blocked:',JSON.stringify({symbol,reason:message,status:indexStrategyScannerStatus}));
+    } finally {
+      indexStrategyScanBusy=false;
+    }
+  },5_000);
+  indexStrategyScanTimer.unref?.();
+}
+
 function startFnoStrategyScanner() {
   if (fnoStrategyScanTimer) return;
   fnoStrategyScanStats.status='RUNNING';
@@ -409,6 +537,7 @@ function startFyersRefreshMonitor() {
 function ensureFyersMarketStarted() {
   startFyersRefreshMonitor();
   const market = startMarketSocket();
+  startIndexStrategyScanner();
   startActiveSetupMonitor();
   const sessionDate = getNseSessionDate();
   if (fnoUniverseRetryDate !== sessionDate) {
@@ -512,6 +641,41 @@ const server = http.createServer(async (req,res) => {
       .map(item=>({symbol:item.symbol,name:item.name||item.underlying||item.symbol,underlying:item.underlying}));
     return send(res,200,{status:'OFFICIAL_FNO_MASTER_MATCHES',query,universeCount:snapshot.universe?.length||0,resultCount:results.length,results});
   }
+
+  if (req.method === 'GET' && url.pathname === '/api/research/indices') {
+    const now=Date.now();
+    const market=getMarketData(now);
+    const freshIndexCount=countFreshIndexTicks(market.indices||{},now);
+    const inSession=isNseSignalWindow(now);
+    const scans=INDEX_STRATEGY_SYMBOLS.map(symbol=>{
+      const prior=indexStrategyScanStats[symbol];
+      const tick=market.indices?.[symbol]||null;
+      const tickFresh=isFreshIndexTick(tick,now);
+      const candleTime=Number(prior.lastCompletedCandleTime||0);
+      const candleAgeSeconds=candleTime>0?now/1000-(candleTime+300):null;
+      const expectedLatestCompletedCandleTime=Math.floor(now/300_000)*300-300;
+      const scanCurrent=Number.isFinite(candleAgeSeconds)&&candleAgeSeconds>=0&&candleAgeSeconds<=600&&candleTime===expectedLatestCompletedCandleTime;
+      const tradeStatus=inSession&&freshIndexCount===3&&tickFresh&&scanCurrent&&prior.status==='UNDERLYING_SETUP_CONFIRMED'
+        ?'OPTION_CONFIRMATION_REQUIRED_NO_TRADE':'NO_TRADE';
+      return {
+        ...prior,tickFresh,tickPrice:tickFresh?tick.price:null,
+        tickExchangeTime:tick?.exchangeTime||prior.tickExchangeTime||null,
+        tickReceivedAt:tick?.receivedAt||prior.tickReceivedAt||null,
+        feedStatus:tickFresh?'FRESH':'STALE_OR_MISSING',
+        scanCurrent,tradeStatus,actionable:false,orders:'DISABLED'
+      };
+    });
+    return send(res,200,{
+      status:inSession?'LIVE_INDEX_SCAN':'OUTSIDE_NSE_SESSION',
+      marketSession:inSession?'OPEN':'CLOSED',
+      scannerStatus:indexStrategyScannerStatus,
+      freshIndexCount,totalIndexCount:INDEX_STRATEGY_SYMBOLS.length,
+      scanReady:inSession&&freshIndexCount===3,
+      scans,restBudget:'SHARED_BACKGROUND_MAX_2_PER_MINUTE',
+      note:'Three fresh FYERS index ticks and recent completed FYERS 5-minute candles are required. Nine underlying strategies only; any detected setup still requires independent fresh CE/PE tick and completed option-candle confirmation. No Entry/SL/Target or orders are produced by this index scan.'
+    });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
   if (req.method === 'GET' && url.pathname === '/api/active-setups') return send(res,200,{setups:[...activeSetupLedger.values()].map(row=>({...row}))});
   if (req.method === 'POST' && url.pathname === '/api/active-setups') {
@@ -680,6 +844,7 @@ const server = http.createServer(async (req,res) => {
         rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
         rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
       }),
+      indexScanner:{status:indexStrategyScannerStatus,freshIndexCount:countFreshIndexTicks(market.indices||{},Date.now()),totalIndexCount:INDEX_STRATEGY_SYMBOLS.length,scans:Object.values(indexStrategyScanStats).map(row=>({...row,actionable:false,orders:'DISABLED'}))},
       schedule:{timezone:'Asia/Kolkata',signalWindow:'09:15-15:30',marketMonitoringWindow:'09:15-15:30',
         signalWindowOpen:isNseSignalWindow(Date.now()),activeSetupMonitoring:'SERVER_SIDE_UNTIL_MARKET_CLOSE'}
     });
@@ -713,7 +878,7 @@ const server = http.createServer(async (req,res) => {
       secretConfigured:Boolean(process.env.FYERS_SECRET_KEY?.trim()),
       refreshPinConfigured:Boolean(process.env.FYERS_PIN?.trim())
     },
-    fnoCoverage:market.fno, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
+    fnoCoverage:market.fno, indexScanner:{mode:'THREE_INDEX_NINE_STRATEGY_UNDERLYING_ONLY',status:indexStrategyScannerStatus,freshIndexCount:countFreshIndexTicks(market.indices||{},Date.now()),totalIndexCount:INDEX_STRATEGY_SYMBOLS.length,scans:Object.values(indexStrategyScanStats).map(row=>({...row,actionable:false,orders:'DISABLED'}))}, scanner:{mode:'ROLLING_FNO_NINE_STRATEGY_EVALUATION',...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:getFnoUniverseSnapshot().scanPerSlice,rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,simultaneous:false}, strategyEngine:'NINE_STRATEGY_WITH_VERIFIED_MULTI_TIMEFRAME_RESEARCH · ROLLING F&O UNIVERSE EVALUATION · CACHED FYERS DATA ONLY', orderPlacementEnabled:tradingEnabled(), marketSession:'NSE 09:15-15:30 Asia/Kolkata'
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/fyers/login') {

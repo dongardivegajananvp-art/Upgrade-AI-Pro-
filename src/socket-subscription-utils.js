@@ -6,6 +6,11 @@ export function shouldAdvanceFnoRotation({ pendingCount = 0, cooldownActive = fa
   return Number(pendingCount) === 0 && cooldownActive !== true;
 }
 
+export function canResumeSocketSubscriptionRecovery({ transportConnected = false, socketStatus = '', now = Date.now(), cooldownUntil = 0 } = {}) {
+  return transportConnected === true && socketStatus === 'RATE_LIMITED_WAIT' &&
+    Number.isFinite(Number(now)) && Number.isFinite(Number(cooldownUntil)) && Number(now) >= Number(cooldownUntil);
+}
+
 export function getSocketSubscriptionDelta(currentSymbols = [], desiredSymbols = []) {
   const current = [...new Set((Array.isArray(currentSymbols) ? currentSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
   const desired = [...new Set((Array.isArray(desiredSymbols) ? desiredSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];

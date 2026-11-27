@@ -82,6 +82,13 @@ export function getUnknownRateLimitCooldownUntil(now, retryAfter, attempt = 1, b
 }
 
 // Bounded exponential backoff for WebSocket 1015/rate-limit recovery.
+export function getRecoveryProbeRetryDelayMs(attempt, baseMs = 60_000, maxMs = 5 * 60_000) {
+  const n = Math.max(1, Math.floor(Number(attempt) || 1));
+  const base = Math.max(1, Number(baseMs) || 60_000);
+  const cap = Math.max(base, Number(maxMs) || 5 * 60_000);
+  return Math.min(cap, base * (2 ** Math.min(n - 1, 20)));
+}
+
 export function getSocketRateLimitBackoffMs(attempt, baseMs = 60_000, maxMs = 15 * 60_000) {
   const n = Math.max(1, Math.floor(Number(attempt) || 1));
   const base = Math.max(1, Number(baseMs) || 60_000);
@@ -226,9 +233,9 @@ export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Dat
 // Queue age limits prevent requests whose UI/market context has expired from
 // being submitted upstream after a long rate-governor wait.
 export function getRestTotalWindowLimit(priority = 0) {
-  // Four of six global requests/minute are available to non-Entry work.
-  // Two slots remain reserved for the live Entry verification path.
-  return Number(priority) >= REST_PRIORITY.ENTRY ? 6 : 4;
+  // Cloudflare 1015 hit the shared origin on mixed REST traffic. Cap non-Entry
+  // work at three requests/minute and reserve two of five slots for Entry.
+  return Number(priority) >= REST_PRIORITY.ENTRY ? 5 : 3;
 }
 
 export function getRestQueueMaxAgeMs(priority = 0) {

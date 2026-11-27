@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLoginUrl, verifyLoginState, consumeLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
+import { createLoginUrl, verifyLoginState, consumeLoginState, getAuthStatus, exchangeAuthCode, createSessionCookie, restoreSessionCookie, createRefreshSessionCookie, restoreRefreshSessionCookie, refreshAccessToken, createRestSafetyCookie, restoreRestSafetyCookie } from './fyers-auth.js';
 
 test('FYERS login URL includes configured redirect and cryptographic state',()=>{
  const login=createLoginUrl({appId:'TEST-100',redirectUri:'https://example.test/api/fyers/auth/callback'});
@@ -37,6 +37,18 @@ test('FYERS session survives process-memory loss through an encrypted HttpOnly c
    assert.ok(cookie.maxAge>0);
    assert.equal(restoreSessionCookie(cookie.value,{appId:'TEST-100',appSecret:'test-secret'}),true);
    assert.equal(getAuthStatus().tokenStored,true);
+   const refreshCookie=createRefreshSessionCookie({appId:'TEST-100',appSecret:'test-secret'});
+   assert.ok(refreshCookie && refreshCookie.maxAge>0);
+   assert.equal(refreshCookie.value.includes('sensitive-refresh-token'),false);
+   assert.equal(restoreRefreshSessionCookie(refreshCookie.value,{appId:'TEST-100',appSecret:'test-secret'}),true);
+   assert.equal(restoreRefreshSessionCookie(refreshCookie.value,{appId:'OTHER-100',appSecret:'test-secret'}),false);
+   const refreshed=await refreshAccessToken({appId:'TEST-100',appSecret:'test-secret',pin:'1234',now:Date.now()+24*60*60*1000});
+   assert.equal(refreshed.refreshed,true);
+   assert.equal(getAuthStatus().tokenStored,true);
+   assert.equal(refreshPayload.grant_type,'refresh_token');
+   assert.equal(refreshPayload.refresh_token,'sensitive-refresh-token');
+   assert.equal(refreshPayload.pin,'1234');
+   assert.equal(refreshPayload.appIdHash.length,64);
    // A live process token must not make an arbitrary or tampered cookie valid.
    assert.equal(restoreSessionCookie('forged-cookie-value'.repeat(4),{appId:'TEST-100',appSecret:'test-secret'}),false);
    const tamperedCookie = cookie.value.slice(0, -1) + (cookie.value.endsWith('x') ? 'y' : 'x');
@@ -45,7 +57,7 @@ test('FYERS session survives process-memory loss through an encrypted HttpOnly c
      exchangeAuthCode({appId:'TEST-100',appSecret:'test-secret',authCode:'one-time-test-code'}),
      /already been processed/
    );
-   assert.equal(requestCount,1);
+   assert.equal(requestCount,2);
  } finally {
    globalThis.fetch=originalFetch;
  }

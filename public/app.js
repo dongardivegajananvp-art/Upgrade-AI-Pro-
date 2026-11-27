@@ -1568,3 +1568,5 @@ fnoSearchInput.addEventListener('input',()=>{
 fnoSearchInput.addEventListener('keydown',event=>{
   if(event.key==='Enter'){clearTimeout(fnoSearchDebounce);runFnoSymbolSearch();}
 });
+
+renderActiveSetups();

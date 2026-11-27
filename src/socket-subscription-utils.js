@@ -132,3 +132,26 @@ export function buildFnoCandleObservationSymbols(activeSymbols = [], pinnedTopGa
   ];
   return [...new Set(values.filter(symbol => typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol)))];
 }
+
+
+// Produce one serialized WebSocket control operation; removals take priority
+// so a rotating slice frees its old slots before new symbols are subscribed.
+export function buildNextSocketSubscriptionOperation(pendingUnsubscribeSymbols = [], pendingSubscribeSymbols = [], batchSize = SOCKET_SUBSCRIPTION_BATCH_SIZE) {
+  const unsubscribe = [...new Set((Array.isArray(pendingUnsubscribeSymbols) ? pendingUnsubscribeSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
+  const subscribe = [...new Set((Array.isArray(pendingSubscribeSymbols) ? pendingSubscribeSymbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
+  const type = unsubscribe.length ? 'unsubscribe' : subscribe.length ? 'subscribe' : null;
+  if (!type) return null;
+  const source = type === 'unsubscribe' ? unsubscribe : subscribe;
+  return { type, symbols: source.slice(0, Math.max(1, Math.floor(Number(batchSize) || SOCKET_SUBSCRIPTION_BATCH_SIZE))) };
+}
+
+// Requeue only the operation rejected by FYERS 1015. A failed unsubscribe
+// must remain locally subscribed; a failed subscribe must remain pending.
+export function requeueRejectedSocketSubscriptionOperation(operation, pendingUnsubscribeSymbols = [], pendingSubscribeSymbols = []) {
+  const unsubscribe = [...(Array.isArray(pendingUnsubscribeSymbols) ? pendingUnsubscribeSymbols : [])];
+  const subscribe = [...(Array.isArray(pendingSubscribeSymbols) ? pendingSubscribeSymbols : [])];
+  const symbols = [...new Set((Array.isArray(operation?.symbols) ? operation.symbols : []).filter(symbol => typeof symbol === 'string' && symbol))];
+  if (operation?.type === 'unsubscribe') return { pendingUnsubscribeSymbols: [...new Set([...symbols, ...unsubscribe])], pendingSubscribeSymbols: [...new Set(subscribe)] };
+  if (operation?.type === 'subscribe') return { pendingUnsubscribeSymbols: [...new Set(unsubscribe)], pendingSubscribeSymbols: [...new Set([...symbols, ...subscribe])] };
+  return { pendingUnsubscribeSymbols: [...new Set(unsubscribe)], pendingSubscribeSymbols: [...new Set(subscribe)] };
+}

@@ -773,6 +773,9 @@ function selectUserSymbol(symbol, livePrice=null) {
 
 function drawHistoryChart(candles) {
   chartCandles = Array.isArray(candles) ? candles.slice() : [];
+  // Open on the latest 75 five-minute bars (about one NSE session), not all ten sessions compressed into one view.
+  chartZoom = Math.max(1, chartCandles.length / 75);
+  chartPan = 0;
   try {
     const snapshot = normalizeChartSnapshot({ symbol: selectedSymbol, savedAt: Date.now(), candles: chartCandles });
     if (snapshot) localStorage.setItem(CHART_SNAPSHOT_KEY, JSON.stringify(snapshot));
@@ -785,6 +788,9 @@ function restorePersistedChart() {
     if (!snapshot) return;
     selectedSymbol = snapshot.symbol;
     chartCandles = snapshot.candles;
+    // Cached history is also display-only; keep the most recent session readable by default.
+    chartZoom = Math.max(1, chartCandles.length / 75);
+    chartPan = 0;
     chartRestoredFromCache = true;
     const title = document.querySelector('#symbol');
     if (title) title.textContent = selectedSymbol + ' · LAST 10 SESSIONS VERIFIED FYERS HISTORY · NOT LIVE';
@@ -877,6 +883,22 @@ function renderChartViewport() {
     const label=document.createElementNS(ns,'text');
     label.setAttribute('x',left+plotW+12);label.setAttribute('y',gy+5);label.setAttribute('fill','#9bb0ca');label.setAttribute('font-size','14');
     label.textContent=showNumber(price);svg.append(label);
+  }
+  // Keep the current verified FYERS price visually anchored on the price scale.
+  if (chartLiveCandle && visible.some(c=>c.time===chartLiveCandle.time)) {
+    const livePrice=Number(chartLiveCandle.close);
+    if (Number.isFinite(livePrice) && livePrice>0) {
+      const liveY=y(livePrice);
+      const liveLine=document.createElementNS(ns,'line');
+      liveLine.setAttribute('x1',left);liveLine.setAttribute('x2',left+plotW);
+      liveLine.setAttribute('y1',liveY);liveLine.setAttribute('y2',liveY);
+      liveLine.setAttribute('stroke','#7bd8ff');liveLine.setAttribute('stroke-width','1.8');
+      liveLine.setAttribute('stroke-dasharray','7 4');liveLine.setAttribute('opacity','.95');svg.append(liveLine);
+      const liveLabel=document.createElementNS(ns,'text');
+      liveLabel.setAttribute('x',left+plotW+10);liveLabel.setAttribute('y',liveY-7);
+      liveLabel.setAttribute('fill','#7bd8ff');liveLabel.setAttribute('font-size','13');
+      liveLabel.setAttribute('font-weight','900');liveLabel.textContent='LIVE '+showNumber(livePrice);svg.append(liveLabel);
+    }
   }
   // Demand/supply are drawn only from confirmed local pivot candles in the visible completed history.
   const pivots=[];

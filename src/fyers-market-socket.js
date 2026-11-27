@@ -16,8 +16,8 @@ const INDEX_SYMBOLS = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'NSE:FINNIFTY
 // underlying/option stay comfortably below the Standard 100-symbol ceiling.
 const MAX_UNDERLYING_SLOTS = 20;
 // The shared REST governor permits three background history requests per minute.
-// The scanner consumes those slots at 20-second intervals while the 80-symbol
-// socket window rotates by three new underlyings each minute.
+// History-backed strategy checks remain at that provider-safe cadence while the
+// 20-symbol live socket window rotates to the next slice each minute.
 const SCAN_PER_SLICE = FNO_SCAN_PER_SLICE;
 const ROTATION_INTERVAL_MS = 60_000;
 let socket = null;
@@ -336,7 +336,7 @@ function applyFnoRotation(advance = false) {
       const nextPinned=observed.map(item=>item.symbol).filter(Boolean).slice(0,5);
       // Pin the five highest recently observed F&O gainers across rotations.
       // This keeps their WebSocket feed alive instead of dropping them when the
-      // 80-symbol market-wide slice advances; stale ticks remain non-actionable.
+      // 20-symbol market-wide slice advances; stale ticks remain non-actionable.
       if(nextPinned.length) pinnedTopGainerSymbols=nextPinned;
       syncSocketSubscriptions(buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...next, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, true), advance ? 'fno-rotation-with-top-gainer-pins' : 'fno-slice-selection-with-top-gainer-pins');
     } catch (error) {
@@ -382,7 +382,7 @@ export function setFnoUniverse(items) {
     }, ROTATION_INTERVAL_MS);
     rotationTimer.unref?.();
   }
-  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 76 };
+  return { universeCount: universe.length, activeCount: activeFnoSymbols.length, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, rotationIntervalMs: ROTATION_INTERVAL_MS, symbolCap: 100, reservedHeadroom: 70 };
 }
 export function setSelectedUnderlyingSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol) && universe.some(item => item.symbol === symbol) ? symbol : null;

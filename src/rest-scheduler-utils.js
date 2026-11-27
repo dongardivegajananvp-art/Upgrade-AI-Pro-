@@ -236,7 +236,7 @@ export function getRestTotalWindowLimit(priority = 0) {
   // Cloudflare 1015 hit the shared origin on mixed REST traffic. Cap ordinary
   // non-Entry work at three requests/minute; Account Feed and Entry may use the
   // full five-request origin budget, with their own reserved windows below.
-  return Number(priority) >= REST_PRIORITY.ENTRY || Number(priority) === REST_PRIORITY.ACCOUNT ? 5 : 3;
+  return Number(priority) >= REST_PRIORITY.ENTRY ? 5 : 3;
 }
 
 // Positions and orderbook are separate read-only endpoints. Keep two slots per

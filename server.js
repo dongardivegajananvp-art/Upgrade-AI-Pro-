@@ -993,6 +993,9 @@ const server = http.createServer(async (req,res) => {
     try {
       if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
+      // Refresh lifecycle from the latest official option ticks before deciding
+      // whether an active slot is still occupied by a position that has exited.
+      const market = getSessionMarketData();
       const activeRows=[...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE');
       if(activeRows.length>=MAX_ACTIVE_SETUP_LEDGER) return send(res,200,{
         status:'ACTIVE_SETUP_LIMIT_NO_TRADE',
@@ -1004,7 +1007,6 @@ const server = http.createServer(async (req,res) => {
         reason:'This underlying or option contract already has an active retained setup.',
         activeSetupCount:activeRows.length,availableSetupSlots:Math.max(0,MAX_ACTIVE_SETUP_LEDGER-activeRows.length),orders:'DISABLED'
       });
-      const market = getMarketData();
       const freshIndexCount=Object.values(market.indices||{}).filter(tick=>tick?.fresh).length;
       if(freshIndexCount!==3) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'All three FYERS indices (NIFTY 50, BANK NIFTY and FIN NIFTY) must be fresh; one stale index blocks the setup'});
       const underlying = market.selectedUnderlying;

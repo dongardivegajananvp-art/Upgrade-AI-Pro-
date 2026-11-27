@@ -63,7 +63,8 @@ export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scan
     return Boolean(tick && Number.isFinite(Number(tick.price)) && Number(tick.price) > 0 &&
       Number.isFinite(Number(tick.receivedAt)) && now - Number(tick.receivedAt) >= 0 &&
       now - Number(tick.receivedAt) <= 10000 && Number.isFinite(Number(tick.exchangeTime)) &&
-      now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10);
+      now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10 &&
+      Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 >= 0 && Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 <= 5000);
   });
   if (!eligible.length) return null;
   const lastAttempt = symbol => {

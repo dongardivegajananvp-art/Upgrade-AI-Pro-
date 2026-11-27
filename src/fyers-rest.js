@@ -527,7 +527,7 @@ export function getFifteenMinuteCacheValidUntil(candles, now = Date.now()) {
   return time*1000+30*60_000+2_000;
 }
 export async function getFifteenMinuteHistory(symbol, now = Date.now(), priority = REST_PRIORITY.WARMUP, source = 'fifteen-minute-research') {
-  if (!validateNseSymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying symbol is required for 15-minute history');
+  if (!validateHistorySymbol(symbol)) throw new Error('A valid NSE equity/F&O underlying or supported NSE index is required for 15-minute history');
   return runHistoryRequestOnce('15m:' + symbol, async () => {
     const cached=fifteenMinuteCache.get(symbol);
     const cachedLast=Number(cached?.value?.candles?.at(-1)?.time);

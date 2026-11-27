@@ -4,7 +4,7 @@
 // The 20-symbol socket slice is an observation/rotation window, NOT a promise that
 // all 20 symbols receive REST history in one minute. Only actual successful checks
 // are counted by the scanner ledger and UI.
-export const FNO_SCAN_PER_SLICE = 3;
+export const FNO_SCAN_PER_SLICE = 2;
 // Rotate exactly 20 F&O symbols into the live socket window each minute.
 export const FNO_SOCKET_ROTATION_ADVANCE = 20;
 export const FNO_SYMBOL_RESCAN_COOLDOWN_MS = 5 * 60 * 1000;

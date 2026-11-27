@@ -9,7 +9,7 @@ test('evaluates every official universe symbol independently and reports missing
   assert.equal(result.evaluations.length,3);
   assert.equal(result.blockedCount,3);
   assert.ok(result.evaluations.every(row=>row.status==='DATA_UNAVAILABLE_NO_TRADE'));
-  assert.ok(result.evaluations.every(row=>row.strategyLedger.length===10));
+  assert.ok(result.evaluations.every(row=>row.strategyLedger.length===9));
   assert.equal(result.top3.length,0);
 });
 

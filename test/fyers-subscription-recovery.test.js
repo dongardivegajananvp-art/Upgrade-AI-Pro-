@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange } from '../src/socket-subscription-utils.js';
+import { readFile } from 'node:fs/promises';
+import { getSocketSubscriptionDelta, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, canResumeSocketSubscriptionRecovery } from '../src/socket-subscription-utils.js';
 
 test('FYERS auto-reconnect with unchanged symbols sends no duplicate subscriptions', () => {
   const current = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX', 'NSE:ABC-EQ'];
@@ -74,4 +75,19 @@ test('changing selected underlying atomically clears the prior option; unchanged
   assert.equal(resolveSelectedOptionOnUnderlyingChange('NSE:ANGELONE-EQ','NSE:ABB-EQ','NSE:ANGELONE26DEC345CE'), null);
   assert.equal(resolveSelectedOptionOnUnderlyingChange('NSE:ABB-EQ','NSE:ABB-EQ','NSE:ABB26DEC7000CE'), 'NSE:ABB26DEC7000CE');
   assert.equal(resolveSelectedOptionOnUnderlyingChange(null,'NSE:ABB-EQ',null), null);
+});
+
+
+test('1015 recovery is timer-driven on a still-connected socket and requeues the rejected batch', async () => {
+  const socketSource = await readFile(new URL('../src/fyers-market-socket.js', import.meta.url), 'utf8');
+  const errorStart = socketSource.indexOf("socket.on('error'");
+  const closeStart = socketSource.indexOf("socket.on('close'", errorStart);
+  assert.ok(errorStart >= 0 && closeStart > errorStart);
+  const handler = socketSource.slice(errorStart, closeStart);
+  assert.match(handler, /scheduleSocketRateLimitRecovery\(backoffMs\)/);
+  assert.match(handler, /pendingSubscriptionSymbols = \[\.\.\.retryBatch, \.\.\.pendingSubscriptionSymbols\]/);
+  assert.doesNotMatch(handler, /socketTransportConnected = false/);
+  assert.match(socketSource, /function scheduleSocketRateLimitRecovery/);
+  assert.equal(canResumeSocketSubscriptionRecovery({transportConnected:true,socketStatus:'RATE_LIMITED_WAIT',now:120_000,cooldownUntil:120_000}),true);
+  assert.equal(canResumeSocketSubscriptionRecovery({transportConnected:false,socketStatus:'RATE_LIMITED_WAIT',now:120_000,cooldownUntil:120_000}),false);
 });

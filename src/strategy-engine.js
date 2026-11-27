@@ -1,6 +1,6 @@
 import { isValidOhlcvCandle, validateSessionCandleWindow } from './candle-validation.js';
 import { buildRiskPlan } from './safety.js';
-// NSE-only ten-strategy engine; the original nine approved rules remain unchanged.
+// NSE-only nine-strategy engine with the original approved rules preserved.
 // Research enrichment is deliberately unavailable until its separate data sources are implemented.
 function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, contiguousCount = 21) {
   const stamp = Number(exchangeTime);
@@ -68,14 +68,13 @@ const STRATEGIES = Object.freeze([
   'BULLISH_CONTINUATION',
   'BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE',
-  'OPENING_RANGE_BREAKOUT',
-  'DAY_LOW_REVERSAL_BREAKOUT'
+  'OPENING_RANGE_BREAKOUT'
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
   'TOP_GAINER_MOMENTUM_BREAKOUT','FIFTEEN_MIN_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
-  'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','DAY_LOW_REVERSAL_BREAKOUT','EMA20_EMA50_TREND'
+  'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
 
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
@@ -186,42 +185,6 @@ function candidate(strategy, side, level, candle, details={}) {
   return { strategy, side, breakoutLevel:number(level), confirmedAt:number(candle.time), confirmationClose:number(candle.close), ...details };
 }
 
-// Day-Low reversal: a completed 5-minute bullish rejection must hold the
-// established session low, then the next completed candle must close above
-// the rejection candle high. This is a long-only setup; it never buys a falling
-// price merely because it is near the low.
-export function detectDayLowReversal(rows) {
-  if (!Array.isArray(rows) || rows.length < 4) return null;
-  const key = istDayKey(number(rows.at(-1).time));
-  const day = rows.filter(c => istDayKey(number(c.time)) === key);
-  if (day.length < 4) return null;
-  const anchor = day.slice(0, -2);
-  if (anchor.length < 2) return null;
-  // Establish support only from candles that precede the rejection candle.
-  // Including the rejection candle here lets a fresh session low define its own
-  // support and can incorrectly turn a falling knife into a reversal setup.
-  const anchorLows = anchor.map(c => number(c.low));
-  if (!anchorLows.every(Number.isFinite)) return null;
-  const dayLow = Math.min(...anchorLows);
-  const rejection = day.at(-2);
-  const trigger = day.at(-1);
-  if (![dayLow, number(rejection.open), number(rejection.high), number(rejection.low), number(rejection.close), number(trigger.open), number(trigger.high), number(trigger.low), number(trigger.close)].every(Number.isFinite) || dayLow <= 0) return null;
-  const tolerance = dayLow * 0.0015;
-  const body = Math.abs(number(rejection.close) - number(rejection.open));
-  const lowerWick = Math.min(number(rejection.open), number(rejection.close)) - number(rejection.low);
-  // A small support probe is allowed, but a material new low invalidates the
-  // established-support reversal thesis.
-  const touchedSupport = number(rejection.low) >= dayLow - tolerance && number(rejection.low) <= dayLow + tolerance;
-  const heldSupport = number(rejection.close) > dayLow && number(trigger.low) >= dayLow;
-  const bullishRejection = number(rejection.close) > number(rejection.open) && body > 0 && lowerWick >= body;
-  const confirmedBreakout = number(trigger.close) > number(trigger.open) && number(trigger.close) > number(rejection.high);
-  if (!touchedSupport || !heldSupport || !bullishRejection || !confirmedBreakout) return null;
-  return candidate('DAY_LOW_REVERSAL_BREAKOUT', 'LONG', number(rejection.high), trigger, {
-    dayLowLevel: dayLow,
-    rejectionCandleTime: number(rejection.time),
-    entryPattern: 'DAY_LOW_HOLD_BULLISH_REJECTION_HIGH_BREAK'
-  });
-}
 export function detectDoublePattern(rows) {
   const start=Math.max(2,rows.length-45), end=rows.length-3;
   const highs=[],lows=[];
@@ -460,7 +423,6 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No current-session day-high/day-low break followed by a retest and close reclaim/rejection was confirmed');
-  consider('DAY_LOW_REVERSAL_BREAKOUT',sessionRows.length>=4&&sessionContiguous,()=>detectDayLowReversal(sessionRows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No session-low support hold, bullish rejection candle and next-candle high breakout were all confirmed');
   consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles','No two comparable swing highs/lows, neckline break, and subsequent neckline retest were all confirmed');
   consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');

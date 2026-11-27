@@ -233,9 +233,17 @@ export function findFairRestQueueIndex(jobs = [], recentRequests = [], now = Dat
 // Queue age limits prevent requests whose UI/market context has expired from
 // being submitted upstream after a long rate-governor wait.
 export function getRestTotalWindowLimit(priority = 0) {
-  // Cloudflare 1015 hit the shared origin on mixed REST traffic. Cap non-Entry
-  // work at three requests/minute and reserve two of five slots for Entry.
-  return Number(priority) >= REST_PRIORITY.ENTRY ? 5 : 3;
+  // Cloudflare 1015 hit the shared origin on mixed REST traffic. Cap ordinary
+  // non-Entry work at three requests/minute; Account Feed and Entry may use the
+  // full five-request origin budget, with their own reserved windows below.
+  return Number(priority) >= REST_PRIORITY.ENTRY || Number(priority) === REST_PRIORITY.ACCOUNT ? 5 : 3;
+}
+
+// Positions and orderbook are separate read-only endpoints. Keep two slots per
+// rolling minute available to Account Feed so scanner/research cannot starve it.
+export function getRestAccountWindowWaitMs(requests = [], now = Date.now(), maxRequests = 2, windowMs = 60_000) {
+  return getRestRequestWindowWaitMs(requests, now, maxRequests, windowMs,
+    REST_PRIORITY.ACCOUNT, REST_PRIORITY.ACCOUNT);
 }
 
 export function getRestQueueMaxAgeMs(priority = 0) {
@@ -247,7 +255,7 @@ export function getRestQueueMaxAgeMs(priority = 0) {
   if (value >= REST_PRIORITY.CHART) return 30_000;
   // CONTEXT and RESEARCH (priorities 30/40) often need two sequential
   // history requests. They must not inherit the shorter ACCOUNT queue TTL.
-  if (value === REST_PRIORITY.ACCOUNT) return 30_000;
+  if (value === REST_PRIORITY.ACCOUNT) return 65_000;
   if (value === REST_PRIORITY.SCANNER) return 10_000;
   return 120_000;
 }

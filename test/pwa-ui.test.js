@@ -63,7 +63,7 @@ test('chart supports direct TradingView-style zoom and pan without legacy zoom b
   assert.match(app, /addEventListener\('dblclick'/);
   assert.match(app, /chartPan/);
   assert.match(css, /touch-action:none/);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v21/);
 });
 
 test('early option breakout is rechecked on the live tick, not delayed until the next 5-minute candle', () => {
@@ -204,7 +204,7 @@ test('verified chart snapshot survives reload with bounded valid candles and rej
 });
 
 test('PWA offline shell caches the last-session snapshot module and bumps its cache version', () => {
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v21/);
   assert.match(serviceWorker, /'\/session-snapshot\.js'/);
 });
 
@@ -254,7 +254,7 @@ test('chart requests ten completed NSE trading sessions and renders day partitio
 test('ten-session chart cache preserves up to 800 verified five-minute candles', () => {
   const snapshotSource = app.includes('normalizeChartSnapshot');
   assert.ok(snapshotSource);
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v21/);
 });
 
 test('live candle summary is rendered only after the matching fresh tick updates the chart candle', () => {

@@ -20,7 +20,7 @@ test('freshness requires exchange-to-receipt delay at or below five seconds', ()
 });
 
 test('freshness requires receipt age at or below ten seconds', () => {
-  assert.equal(assessFeed(tick(250, 9_750), baseNow).status, 'FRESH');
+  assert.equal(assessFeed(tick(0, 10_000), baseNow).status, 'FRESH');
   assert.equal(assessFeed(tick(250, 10_001), baseNow).status, 'STALE');
 });
 

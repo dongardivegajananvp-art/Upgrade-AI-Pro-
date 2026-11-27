@@ -203,7 +203,7 @@ test('restored cached chart never suppresses a fresh verified history request fo
   const end = app.indexOf('\nfunction drawHistoryChart', start);
   assert.ok(start >= 0 && end > start, 'selectSymbol implementation is present');
   const flow = app.slice(start, end);
-  assert.ok(flow.includes('if (symbol === selectedSymbol && !chartRestoredFromCache) return'));
+  assert.ok(flow.includes("if(symbol===selectedSymbol&&!chartRestoredFromCache&&chartViewMode==='UNDERLYING') return"));
   assert.ok(app.includes('chartRestoredFromCache && selectedSymbol === underlyingTick?.symbol'));
   assert.ok(flow.includes("fetch('/api/history?symbol='"));
 });
@@ -255,7 +255,7 @@ test('live candle summary is rendered only after the matching fresh tick updates
   const summary = flow.indexOf('renderLiveCandleSummary(underlyingTick)');
   assert.ok(update >= 0 && summary > update,
     'summary must render after the live candle from the same status snapshot is assigned');
-  assert.match(flow, /if \(selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\s\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\s\S]*?renderChartViewport\(\);/);
+  assert.match(flow, /if \(chartViewMode==='UNDERLYING' && selectedSymbol && underlyingTick\?\.symbol === selectedSymbol && underlyingTick\.fresh\) \{[\s\S]*?chartLiveCandle = underlyingTick\.liveCandle \|\| null;[\s\S]*?renderChartViewport\(\);/);
 });
 
 test('option contract identity check is independent of selected underlying tick freshness', () => {
@@ -338,4 +338,26 @@ test('live ticks never replace the chart loading or history-error state when com
   assert.ok(historyGuard >= 0 && clearArea > historyGuard,
     'renderer must preserve loading/error content until verified completed candles exist');
   assert.match(renderer, /chartLiveCandle[\s\S]*?chartCandles/);
+});
+
+test('opportunity cycle automatically hands the next fresh price candidate to option verification when a slot is free',()=>{
+  assert.match(app,/availableSlots>0&&!userSelectedSymbol/);
+  assert.match(app,/const nextCandidate=data\.top3\.find/);
+  assert.match(app,/qualityScore!==null/);
+  assert.match(server,/excludeSymbols:excludedUnderlyings/);
+  assert.match(server,/ACTIVE_SETUP_LIMIT_NO_TRADE/);
+  assert.match(server,/recentlyClosedSetupByUnderlying/);
+  assert.match(server,/closedCandleTime/);
+  assert.match(app,/userSelectedSymbol=false;lastAutoTop3CandidateKey=null/);
+});
+
+test('each retained setup opens its exact verified option strike history chart',()=>{
+  assert.match(app,/VIEW CHART/);
+  assert.match(app,/viewActiveOptionChart\(row\)/);
+  assert.match(app,/\/api\/option-history\?symbol=/);
+  assert.match(app,/chartViewMode='OPTION';chartViewSymbol=contract/);
+  assert.match(app,/OPTION CHART · LIVE FYERS TICK FRESH/);
+  assert.match(server,/url\.pathname === '\/api\/option-history'/);
+  assert.match(server,/getVerifiedOptionContract\(symbol\)/);
+  assert.match(server,/FYERS_VERIFIED_OPTION_HISTORY/);
 });

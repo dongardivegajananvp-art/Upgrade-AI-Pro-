@@ -1377,7 +1377,8 @@ async function evaluateSelectedSetup() {
       document.querySelector('#setup-target').textContent='₹'+showNumber(fixed.target);
       document.querySelector('#setup-rr').textContent='1:'+showNumber(fixed.rr);
       state.textContent=(fixed.status==='ACTIVE'?'ACTIVE ENTRY RETAINED · ':'PREVIOUS TRIGGER · ')+fixed.strategy+' · '+fixed.contract+' · '+(fixed.status==='ACTIVE'?'MONITORING FIXED SL / TARGET':fixed.status.replaceAll('_',' ')); state.dataset.state=fixed.status==='ACTIVE'?'confirmed':'blocked';
-      chartSetupLevels = { entry: Number(fixed.entry), stopLoss: Number(fixed.stopLoss), target: Number(fixed.target) };
+      if(!retained.existing) chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
+      else chartSetupLevels = { entry: Number(fixed.entry), stopLoss: Number(fixed.stopLoss), target: Number(fixed.target) };
       renderChartViewport();
     } else {
       chartSetupLevels = null; renderChartViewport();

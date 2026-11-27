@@ -28,11 +28,14 @@ export function resolveSelectedOptionOnUnderlyingChange(previousUnderlying, next
   return previousUnderlying === nextUnderlying ? selectedOption : null;
 }
 
-export function prioritizeSubscriptionQueue(pendingSymbols = [], prioritySymbol = null) {
+export function prioritizeSubscriptionQueue(pendingSymbols = [], prioritySymbols = null) {
   const queue = [...new Set((Array.isArray(pendingSymbols) ? pendingSymbols : [])
     .filter(symbol => typeof symbol === 'string' && symbol))];
-  if (typeof prioritySymbol !== 'string' || !prioritySymbol || !queue.includes(prioritySymbol)) return queue;
-  return [prioritySymbol, ...queue.filter(symbol => symbol !== prioritySymbol)];
+  const requested = Array.isArray(prioritySymbols) ? prioritySymbols : [prioritySymbols];
+  const priorities = [...new Set(requested.filter(symbol => typeof symbol === 'string' && symbol && queue.includes(symbol)))];
+  if (!priorities.length) return queue;
+  const prioritySet = new Set(priorities);
+  return [...priorities, ...queue.filter(symbol => !prioritySet.has(symbol))];
 }
 
 export function splitSubscriptionBatches(symbols = [], batchSize = 4) {

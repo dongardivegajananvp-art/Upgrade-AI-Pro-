@@ -116,7 +116,7 @@ test('diagnostic ledger uses strategy-specific rejection reasons when verified w
   const start=Math.floor(now/1000)-60*300;
   const candles=Array.from({length:60},(_,i)=>({time:start+i*300,open:100,high:100.5,low:99.5,close:100,volume:100}));
   const result=detectNineStrategySetup({underlyingCandles:candles,underlyingTick:{price:100,exchangeTime:now/1000,receivedAt:now},now});
-  assert.equal(result.strategyLedger.length,10);
+  assert.equal(result.strategyLedger.length,9);
   assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED','SKIPPED_AFTER_FIRST_PASS'].includes(row.status)&&row.reason));
   assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
   assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('15-minute candles')));

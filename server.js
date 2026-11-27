@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
-import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRefreshSessionCookie, restoreRefreshSessionCookie, refreshAccessToken, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
+import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRefreshSessionCookie, restoreRefreshSessionCookie, refreshAccessToken, shouldReuseAuthenticatedSession, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
 import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol, setActiveTradeOptionSymbols } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
@@ -708,12 +708,15 @@ const server = http.createServer(async (req,res) => {
     console.info('[FYERS_OAUTH] login route reached');
     try {
       const auth = getAuthStatus();
-      if (auth.tokenStored && hasFyersSession) {
+      if (shouldReuseAuthenticatedSession({auth,hasSession:hasFyersSession})) {
         ensureFyersMarketStarted();
         const session = createSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
         const sessionCookie = `fyers_session=${session.value}; Max-Age=${session.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`;
-        console.info('[FYERS_OAUTH] existing authenticated session reused; token exchange skipped');
-        res.writeHead(302,{location:'/?fyers=session-restored','set-cookie':sessionCookie,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
+        const refresh = createRefreshSessionCookie({appId:process.env.FYERS_APP_ID,appSecret:process.env.FYERS_SECRET_KEY});
+        const cookies=[sessionCookie];
+        if(refresh) cookies.push(`fyers_refresh=${refresh.value}; Max-Age=${refresh.maxAge}; Path=/api; HttpOnly; Secure; SameSite=Lax`);
+        console.info('[FYERS_OAUTH] existing authenticated session reused; encrypted refresh session reissued:',Boolean(refresh));
+        res.writeHead(302,{location:'/?fyers=session-restored','set-cookie':cookies,'cache-control':'no-store','referrer-policy':'no-referrer'}); return res.end();
       }
       const login = createLoginUrl({ appId:process.env.FYERS_APP_ID, redirectUri:process.env.FYERS_REDIRECT_URI });
       console.info('[FYERS_OAUTH] redirect generated; app id configured:', Boolean(process.env.FYERS_APP_ID?.trim()), 'redirect matches expected:', process.env.FYERS_REDIRECT_URI?.trim() === EXPECTED_REDIRECT_URI);

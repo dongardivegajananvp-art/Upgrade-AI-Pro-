@@ -399,7 +399,7 @@ export function getIntradayHistoryRange(now = Date.now(), intervalSeconds = 300,
   const currentBucket = Math.floor(timestamp / (interval * 1000)) * interval;
   return { from, to: currentBucket - 1, dateFormat: '0', intervalSeconds: interval };
 }
-export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 20) {
+export function getFiveMinuteHistoryRange(now = Date.now(), lookbackDays = 10) {
   return getIntradayHistoryRange(now, 300, lookbackDays);
 }
 export function getFifteenMinuteHistoryRange(now = Date.now(), lookbackDays = 45) {

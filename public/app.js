@@ -119,7 +119,8 @@ async function viewActiveOptionChart(row) {
   };
   resetChartViewport();
   const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
-  title.textContent=contract+' · LOADING VERIFIED FYERS OPTION HISTORY';
+  const strikeLabel=row.strike?((row.optionSide||'OPTION')+' '+showNumber(row.strike,2)+(row.expiry?' · '+showExpiry(row.expiry):'')):contract;
+  title.textContent=strikeLabel+' · LOADING VERIFIED FYERS OPTION HISTORY';
   document.querySelector('#chart-candle-status').textContent='OPTION STRIKE · LOADING COMPLETED FYERS 5-MIN CANDLES';
   area.replaceChildren();
   const loading=document.createElement('div');loading.className='chart-empty';
@@ -132,7 +133,7 @@ async function viewActiveOptionChart(row) {
     if(!response.ok||!Array.isArray(data.candles)||!data.candles.length)
       throw new Error(data.reason||'Verified FYERS option candles are unavailable');
     drawHistoryChart(data.candles);
-    title.textContent=contract+' · OPTION STRIKE CHART · '+(data.count??data.candles.length)+' COMPLETED FYERS 5-MIN CANDLES';
+    title.textContent=strikeLabel+' · '+contract+' · '+(data.count??data.candles.length)+' COMPLETED FYERS 5-MIN CANDLES';
     document.querySelector('#chart-candle-status').textContent='EXACT OPTION CONTRACT · COMPLETED FYERS HISTORY · ENTRY / SL / TARGET LEVELS';
     document.querySelector('#chart-area')?.scrollIntoView?.({behavior:'smooth',block:'start'});
     const market=await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);

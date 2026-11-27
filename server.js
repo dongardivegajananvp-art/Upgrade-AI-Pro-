@@ -23,6 +23,7 @@ import { isNseRegularSession, isNseSignalWindow } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
 import { waitForCurrentFnoMaster } from './src/fno-master-readiness.js';
 import { INDEX_STRATEGY_SYMBOLS, INDEX_STRATEGY_LABELS, countFreshIndexTicks, isFreshIndexTick, isVerifiedIndexHistory, buildIndexStrategyScanRecord } from './src/index-strategy-scan-utils.js';
+import { getOpportunityCycleState } from './src/opportunity-cycle.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -767,14 +768,16 @@ const server = http.createServer(async (req,res) => {
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();
-        const activeUnderlyings=[...new Set([...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').map(row=>row.underlying))];
-        const coolingUnderlyings=[];
-        for(const [symbol,closed] of recentlyClosedSetupByUnderlying) {
-          const latestCandleTime=Number(histories.fiveMinute.get(symbol)?.candles?.at(-1)?.time||0);
-          if(latestCandleTime<=Number(closed.setupCandleTime||0)) coolingUnderlyings.push(symbol);
-          else recentlyClosedSetupByUnderlying.delete(symbol);
-        }
-        const excludedUnderlyings=[...new Set([...activeUnderlyings,...coolingUnderlyings])];
+        const latestCandleTimes=new Map((snapshot.universe||[]).map(item=>[
+          item.symbol,Number(histories.fiveMinute.get(item.symbol)?.candles?.at(-1)?.time||0)
+        ]));
+        const opportunityCycle=getOpportunityCycleState({
+          setups:[...activeSetupLedger.values()],
+          recentlyClosed:recentlyClosedSetupByUnderlying,
+          latestCandleTimes,maxActiveSetups:MAX_ACTIVE_SETUP_LEDGER
+        });
+        for(const symbol of opportunityCycle.expiredClosedUnderlyings) recentlyClosedSetupByUnderlying.delete(symbol);
+        const excludedUnderlyings=opportunityCycle.excludedUnderlyings;
         const result=evaluateRollingFnoUniverse({
           universe:snapshot.universe,ticks:snapshot.ticks,
           fiveMinute:histories.fiveMinute,fifteenMinute:histories.fifteenMinute,
@@ -813,7 +816,7 @@ const server = http.createServer(async (req,res) => {
         // candidates merely because the active WebSocket slice just rotated and
         // its per-slice diagnostic counter was reset.
         const safeTop3=Array.isArray(result.top3)?result.top3:[];
-        return send(res,200,{...result,status:safeTop3.length?result.status:strategyChecksThisSlice>0?result.status:'NO_TRADE_DATA',top3:safeTop3,candidateCount:safeTop3.length,activeSetupCount:activeUnderlyings.length,availableSetupSlots:Math.max(0,MAX_ACTIVE_SETUP_LEDGER-activeUnderlyings.length),excludedActiveUnderlyings:activeUnderlyings,excludedUntilNextFiveMinuteCandle:coolingUnderlyings,opportunityCycleStatus:activeUnderlyings.length>=MAX_ACTIVE_SETUP_LEDGER?'WAITING_FOR_ACTIVE_SLOT':safeTop3.length?'NEXT_VERIFIED_CANDIDATE_AVAILABLE':'SCANNING_FOR_NEXT_CANDIDATE',marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
+        return send(res,200,{...result,status:safeTop3.length?result.status:strategyChecksThisSlice>0?result.status:'NO_TRADE_DATA',top3:safeTop3,candidateCount:safeTop3.length,activeSetupCount:opportunityCycle.activeCount,availableSetupSlots:opportunityCycle.availableSlots,excludedActiveUnderlyings:opportunityCycle.activeUnderlyings,excludedUntilNextFiveMinuteCandle:opportunityCycle.coolingUnderlyings,opportunityCycleStatus:opportunityCycle.availableSlots===0?'WAITING_FOR_ACTIVE_SLOT':safeTop3.length?'NEXT_VERIFIED_CANDIDATE_AVAILABLE':'SCANNING_FOR_NEXT_CANDIDATE',marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
           rotationIntervalMs:snapshot.rotationIntervalMs,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:snapshot.scanPerSlice,sliceSize:snapshot.activeSymbols?.length||0,fullCycleMinutes,strategyChecksThisSlice,candleReceivedThisSlice:Number(fnoStrategyScanStats.candleReceivedCount||0),symbolCap:snapshot.symbolCap,
           scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS},coverageSummary,symbolCoverage,
           note:'Twenty-symbol live socket slices rotate each minute. History-backed strategy checks remain within the FYERS REST governor; counters report actual completed checks only. Per-symbol scan/tick coverage is observational only. Missing/stale inputs are BLOCKED; no synthetic data or orders.'});

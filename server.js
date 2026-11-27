@@ -4,7 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRefreshSessionCookie, restoreRefreshSessionCookie, refreshAccessToken, shouldReuseAuthenticatedSession, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
-import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol, setActiveTradeOptionSymbols } from './src/fyers-market-socket.js';
+import { startMarketSocket, getMarketData, getMarketTick, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol, setActiveTradeOptionSymbols, pinSetupEvaluationSymbols, releaseSetupEvaluationSymbols } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
@@ -1029,7 +1029,11 @@ const server = http.createServer(async (req,res) => {
         return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected option contract identity, underlying or CE/PE side does not match the requested setup'});
       }
       const flightKey = body.underlying + '|' + body.contract;
-      const setup = await setupEvaluationFlight.run(flightKey, async () => {
+      const pin = pinSetupEvaluationSymbols(flightKey,[body.underlying,body.contract]);
+      if(pin.status!=='SETUP_EVALUATION_SYMBOLS_PINNED') return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:pin.reason||'Setup feed symbols could not be pinned safely'});
+      let setup;
+      try {
+        setup = await setupEvaluationFlight.run(flightKey, async () => {
         const startedAt = Date.now();
         console.info('[SETUP_EVAL] started:',JSON.stringify({underlying:body.underlying,contract:body.contract,contractSide:contract.side,strike:contract.strike,expiry:contract.expiry}));
         // Load the setup's history inputs sequentially. Promise.all queued four
@@ -1057,7 +1061,7 @@ const server = http.createServer(async (req,res) => {
         // Re-read after REST work: never let history latency silently weaken the
         // strict 10-second underlying/option WebSocket freshness gates.
         const latestMarket=getMarketData();
-        const latestUnderlying=latestMarket.selectedUnderlying,latestOption=latestMarket.selectedOption;
+        const latestUnderlying=getMarketTick(body.underlying),latestOption=getMarketTick(body.contract);
         if(!latestUnderlying?.fresh||latestUnderlying.symbol!==body.underlying)
           return {status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Underlying tick became stale while verified research history was loading'};
         if(!latestOption?.fresh||latestOption.symbol!==body.contract)
@@ -1087,7 +1091,10 @@ const server = http.createServer(async (req,res) => {
           durationMs:Date.now()-startedAt
         }));
         return {...result,underlying:body.underlying,contract:body.contract,contractDetails:{side:contract.side,strike:contract.strike,expiry:contract.expiry},underlyingCandleTime:underlyingHistory.candles.at(-1)?.time||null,source:'FYERS_VERIFIED_DATA'};
-      });
+        });
+      } finally {
+        releaseSetupEvaluationSymbols(flightKey);
+      }
       return send(res,200,setup);
     } catch (error) {
       const rateLimited=/429|cooldown/i.test(String(error.message));

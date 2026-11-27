@@ -50,3 +50,21 @@ test('rolling scanner surfaces a fresh 5m price setup without daily/15m research
   assert.equal(excluded.candidateCount,0);
   assert.equal(excluded.evaluations[0].status,'UNDERLYING_SETUP_CONFIRMED');
 });
+
+test('next opportunity queue prefers a fresh Top-5 gainer without inventing a quality score',()=>{
+  const now=Date.parse('2026-11-26T08:00:30Z');
+  const start=Date.parse('2026-11-26T03:45:00Z')/1000;
+  const candles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1;
+    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:0};
+  });
+  const symbols=['NSE:AAA-EQ','NSE:BBB-EQ'];
+  const ticks=new Map(symbols.map(symbol=>[symbol,{symbol,price:151,exchangeTime:now/1000-1,receivedAt:now}]));
+  const history=new Map(symbols.map(symbol=>[symbol,{candles}]));
+  const result=evaluateRollingFnoUniverse({
+    universe:symbols.map(symbol=>({symbol})),ticks,fiveMinute:history,now,
+    topGainers:[{symbol:'NSE:BBB-EQ'}]
+  });
+  assert.equal(result.top3[0].symbol,'NSE:BBB-EQ');
+  assert.equal(result.top3[0].qualityScore,null);
+});

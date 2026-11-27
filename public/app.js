@@ -35,6 +35,7 @@ let chartZoom = 1;
 let chartPan = 0;
 let chartPriceZoom = 1;
 let chartGestureActive = false;
+let chartFollowLive = true;
 let chartLastTouchTap = 0;
 let setupEvaluationRunning = false;
 let setupEvaluationDone = false;
@@ -841,16 +842,59 @@ function renderLiveCandleSummary(tick) {
   }
 }
 function resetChartViewport() {
-  chartZoom = 1; chartPan = 0; chartPriceZoom = 1;
+  chartZoom = Math.max(1, chartCandles.length / 75);
+  chartPan = 0; chartPriceZoom = 1; chartFollowLive = true;
+}
+function ensureChartControls(area) {
+  if (!area?.parentElement) return;
+  let controls = area.parentElement.querySelector('[data-chart-controls]');
+  if (!controls) {
+    controls = document.createElement('div');
+    controls.dataset.chartControls = 'true';
+    controls.setAttribute('aria-label', 'Chart navigation controls');
+    controls.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 9px;';
+    const makeButton = (label, title, action) => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.textContent = label; button.title = title;
+      button.style.cssText = 'border:1px solid #3b506d;border-radius:7px;background:#13243a;color:#dceaff;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer;min-height:34px;';
+      button.addEventListener('click', action);
+      controls.append(button);
+      return button;
+    };
+    const zoomOut = makeButton('−', 'Zoom out', () => { chartZoom = Math.max(1, chartZoom / 1.2); renderChartViewport(); });
+    zoomOut.setAttribute('aria-label', 'Zoom out');
+    const zoomIn = makeButton('+', 'Zoom in', () => { chartZoom = Math.min(Math.max(1, chartCandles.length / 8), chartZoom * 1.2); renderChartViewport(); });
+    zoomIn.setAttribute('aria-label', 'Zoom in');
+    const follow = makeButton('LIVE FOLLOW · ON', 'Keep the latest verified FYERS candle in view', () => {
+      chartFollowLive = !chartFollowLive;
+      if (chartFollowLive) chartPan = 0;
+      renderChartViewport();
+    });
+    follow.dataset.followButton = 'true';
+    const reset = makeButton('RESET VIEW', 'Reset zoom and return to the latest candles', () => {
+      resetChartViewport(); renderChartViewport();
+    });
+    reset.dataset.resetButton = 'true';
+    area.parentElement.insertBefore(controls, area);
+  }
+  const follow = controls.querySelector('[data-follow-button]');
+  if (follow) {
+    follow.textContent = chartFollowLive ? 'LIVE FOLLOW · ON' : 'LIVE FOLLOW · OFF';
+    follow.setAttribute('aria-pressed', String(chartFollowLive));
+    follow.style.borderColor = chartFollowLive ? '#168b75' : '#3b506d';
+    follow.style.color = chartFollowLive ? '#8cf0d4' : '#dceaff';
+  }
 }
 function renderChartViewport() {
   const area = document.querySelector('#chart-area');
   // Never replace the loading/error state with a live-only chart. A live tick is
   // not a substitute for verified completed FYERS history, especially on indices.
   if (!chartCandles.length) return;
+  ensureChartControls(area);
   const candles = chartLiveCandle && chartLiveCandle.time > 0 ? [...chartCandles, chartLiveCandle] : chartCandles;
   area.replaceChildren();
   if (!candles.length) return;
+  if (chartFollowLive) chartPan = 0;
   const visibleCount = Math.max(8, Math.min(candles.length, Math.ceil(candles.length / chartZoom)));
   const maxPan = Math.max(0, candles.length - visibleCount);
   chartPan = Math.max(0, Math.min(maxPan, chartPan));
@@ -862,6 +906,9 @@ function renderChartViewport() {
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', 'FYERS completed five-minute candlestick chart with supply and demand structure zones');
   svg.setAttribute('preserveAspectRatio', 'none');
+  svg.style.touchAction = 'none';
+  svg.style.userSelect = 'none';
+  svg.style.webkitUserSelect = 'none';
   const chartSymbolLabel = (selectedSymbol || 'SELECT SYMBOL')
     .replace(/^(NSE|BSE):/, '')
     .replace(/-EQ$/, '')
@@ -1074,6 +1121,7 @@ function renderChartViewport() {
   };
   svg.addEventListener('pointerdown',event=>{
     if(event.pointerType==='mouse'&&event.button!==0)return;
+    event.preventDefault();
     if(event.pointerType==='touch'&&pointers.size===0){
       const now=Date.now();
       if(now-chartLastTouchTap<320){
@@ -1097,6 +1145,7 @@ function renderChartViewport() {
   });
   svg.addEventListener('pointermove',event=>{
     if(!pointers.has(event.pointerId))return;
+    event.preventDefault();
     pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
     if(pointers.size>=2&&pinchState){
       const points=[...pointers.values()];
@@ -1106,11 +1155,13 @@ function renderChartViewport() {
       svg.style.transformOrigin='center center';
     }else if(dragState){
       const dx=event.clientX-dragState.startX,dy=event.clientY-dragState.startY;
+      if(Math.abs(dx)>6 && !dragState.axis) chartFollowLive=false;
       svg.style.transform=dragState.axis?'scaleY('+clamp(Math.exp(-dy*.008),.7,1.4)+')':'translateX('+dx+'px)';
     }
   });
   svg.addEventListener('pointerup',finishGesture);
   svg.addEventListener('pointercancel',finishGesture);
+  svg.addEventListener('lostpointercapture',finishGesture);
   svg.addEventListener('dblclick',()=>{resetChartViewport();chartGestureActive=false;renderChartViewport();});
   // Draw the watermark after candles/zones so it remains visible on dark charts.
   // Pointer events stay disabled so chart crosshair and OHLCV inspection keep working.

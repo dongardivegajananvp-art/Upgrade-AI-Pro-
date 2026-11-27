@@ -88,7 +88,7 @@ function startFnoStrategyScanner() {
     }
     const sessionMarket=getMarketData();
     const freshIndexCount=Object.values(sessionMarket.indices||{}).filter(tick=>tick?.fresh).length;
-    if (freshIndexCount===0) {
+    if (freshIndexCount!==3) {
       fnoStrategyScanStats.status='WAITING_FOR_FRESH_INDEX_FEED';
       return;
     }
@@ -641,6 +641,8 @@ const server = http.createServer(async (req,res) => {
       if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
       const market = getMarketData();
+      const freshIndexCount=Object.values(market.indices||{}).filter(tick=>tick?.fresh).length;
+      if(freshIndexCount!==3) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'All three FYERS indices (NIFTY 50, BANK NIFTY and FIN NIFTY) must be fresh; one stale index blocks the setup'});
       const underlying = market.selectedUnderlying;
       const option = market.selectedOption;
       if (!underlying?.fresh || underlying.symbol !== body.underlying) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Selected underlying tick is not fresh'});

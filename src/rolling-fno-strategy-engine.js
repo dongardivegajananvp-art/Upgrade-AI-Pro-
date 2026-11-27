@@ -36,7 +36,11 @@ export function evaluateRollingFnoUniverse({ universe = [], ticks = new Map(), f
         invalidation: 'Re-evaluate the strategy structure on the next completed 5-minute candle' });
     }
   }
-  candidates.sort((a,b) => b.qualityScore - a.qualityScore || String(a.symbol).localeCompare(String(b.symbol)));
+  // Prefer a fresh Top-5 F&O gainer when multiple price-only candidates are
+  // available. This is queue priority, not a fabricated quality score.
+  candidates.sort((a,b) => Number(gainers.has(b.symbol))-Number(gainers.has(a.symbol)) ||
+    Number(b.lastCompletedCandleTime||0)-Number(a.lastCompletedCandleTime||0) ||
+    String(a.symbol).localeCompare(String(b.symbol)));
   return {
     status: candidates.length ? 'PRICE_SETUPS_AVAILABLE' : 'NO_PRICE_SETUP',
     universeCount: evaluations.length,

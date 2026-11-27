@@ -34,9 +34,10 @@ export function isVerifiedIndexHistory(history, now = Date.now()) {
   const last = history.candles.at(-1);
   const time = Number(last?.time);
   const ageSeconds = Number(now) / 1000 - (time + 300);
+  const expectedLatestCompletedTime = Math.floor(Number(now) / 300_000) * 300 - 300;
   return last?.completed === true && Number.isFinite(time) && time > 0 &&
     Number.isFinite(ageSeconds) && ageSeconds >= 0 && ageSeconds <= 600 &&
-    Number(history.lastCompletedCandleTime) === time;
+    time === expectedLatestCompletedTime && Number(history.lastCompletedCandleTime) === time;
 }
 
 export function buildIndexStrategyScanRecord({ symbol, tick, history, result, now = Date.now(), attemptCount = 1 } = {}) {

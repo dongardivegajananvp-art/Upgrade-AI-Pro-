@@ -181,8 +181,8 @@ test('background history budget preserves two rolling-window slots for Entry and
     source:'fno-scanner-5m', priority:REST_PRIORITY.SCANNER
   }));
   assert.equal(getHistoryRequestWindowWaitMs(requests, now, 8), 0);
-  assert.ok(getHistoryRequestWindowWaitMs(requests, now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) > 0);
-  assert.equal(getHistoryRequestWindowWaitMs(requests.slice(0,3), now, 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1), 0);
+  assert.ok(getHistoryRequestWindowWaitMs(requests, now, 2, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1) > 0);
+  assert.equal(getHistoryRequestWindowWaitMs(requests.slice(0,1), now, 2, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1), 0);
   const entryRequests = [...requests, {at:new Date(now).toISOString(),path:'/history',source:'entry-option-history',priority:REST_PRIORITY.ENTRY}];
   assert.equal(getHistoryRequestWindowWaitMs(entryRequests, now, 8), 0);
 });

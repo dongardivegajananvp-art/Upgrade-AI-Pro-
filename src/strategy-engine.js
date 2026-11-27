@@ -197,14 +197,21 @@ export function detectDayLowReversal(rows) {
   if (day.length < 4) return null;
   const anchor = day.slice(0, -2);
   if (anchor.length < 2) return null;
-  const dayLow = Math.min(...day.slice(0, -1).map(c => number(c.low)));
+  // Establish support only from candles that precede the rejection candle.
+  // Including the rejection candle here lets a fresh session low define its own
+  // support and can incorrectly turn a falling knife into a reversal setup.
+  const anchorLows = anchor.map(c => number(c.low));
+  if (!anchorLows.every(Number.isFinite)) return null;
+  const dayLow = Math.min(...anchorLows);
   const rejection = day.at(-2);
   const trigger = day.at(-1);
-  if (![dayLow, number(rejection.open), number(rejection.high), number(rejection.low), number(rejection.close), number(trigger.open), number(trigger.high), number(trigger.low), number(trigger.close)].every(Number.isFinite)) return null;
+  if (![dayLow, number(rejection.open), number(rejection.high), number(rejection.low), number(rejection.close), number(trigger.open), number(trigger.high), number(trigger.low), number(trigger.close)].every(Number.isFinite) || dayLow <= 0) return null;
   const tolerance = dayLow * 0.0015;
   const body = Math.abs(number(rejection.close) - number(rejection.open));
   const lowerWick = Math.min(number(rejection.open), number(rejection.close)) - number(rejection.low);
-  const touchedSupport = number(rejection.low) <= dayLow + tolerance;
+  // A small support probe is allowed, but a material new low invalidates the
+  // established-support reversal thesis.
+  const touchedSupport = number(rejection.low) >= dayLow - tolerance && number(rejection.low) <= dayLow + tolerance;
   const heldSupport = number(rejection.close) > dayLow && number(trigger.low) >= dayLow;
   const bullishRejection = number(rejection.close) > number(rejection.open) && body > 0 && lowerWick >= body;
   const confirmedBreakout = number(trigger.close) > number(trigger.open) && number(trigger.close) > number(rejection.high);

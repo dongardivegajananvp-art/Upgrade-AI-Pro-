@@ -406,7 +406,7 @@ export function detectFifteenMinuteTrendPullback(rows, fifteenMinuteCandles=[], 
 
 export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600, historicalAsOf=null }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason,strategyLedger:STRATEGIES.map(strategy=>({strategy,status:'BLOCKED',reason}))});
-  const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
+  const tickFresh=t=>{if(!t||!finite(t.price)||number(t.price)<=0||!finite(t.exchangeTime)||!finite(t.receivedAt))return false;const receiptAge=now-number(t.receivedAt),exchangeAge=now/1000-number(t.exchangeTime),exchangeReceiptDelay=number(t.receivedAt)-number(t.exchangeTime)*1000;return receiptAge>=0&&receiptAge<=10000&&exchangeAge>=-3&&exchangeAge<=10&&exchangeReceiptDelay>=0&&exchangeReceiptDelay<=5000;};
   const historicalRows=Array.isArray(underlyingCandles)?underlyingCandles:[];
   const lastHistoricalTime=Number(historicalRows.at(-1)?.time);
   const historicalMode=historicalAsOf!==null&&historicalAsOf!==undefined&&Number.isFinite(Number(historicalAsOf))&&Number(historicalAsOf)===lastHistoricalTime+300;

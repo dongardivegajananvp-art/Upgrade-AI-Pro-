@@ -11,6 +11,17 @@ const [app, css, html, manifest, serviceWorker, server] = await Promise.all([
   readFile(new URL('../server.js', import.meta.url), 'utf8')
 ]);
 
+test('background scanner panels are hidden without disabling their refresh jobs', () => {
+  for (const id of ['index-nine-strategy-scan','ai-multi-timeframe-research','full-nse-fno-nine-strategy-scan']) {
+    assert.match(html, new RegExp('hidden data-background-runner="' + id + '"'));
+  }
+  assert.match(app, /refreshUniverseScan\(\)/);
+  assert.match(app, /refreshIndexStrategyScan\(\)/);
+  assert.match(app, /ensureResearchContext\(selectedSymbol\)/);
+  assert.match(app, /fetch\('\/api\/research\?symbol='/);
+  assert.match(app, /document\.hidden/);
+});
+
 test('top five gainer cards expose direction and stale-state styling', () => {
   for (const state of ['up', 'down', 'flat', 'stale']) {
     assert.ok(css.includes('.mover-card[data-state="' + state + '"]'));
@@ -34,7 +45,7 @@ test('PWA supports standalone desktop/mobile layout, responsive breakpoints, and
   assert.ok(css.includes('@media(min-width:1200px)'));
   assert.ok(css.includes('@media(min-width:701px) and (max-width:1100px)'));
   assert.ok(css.includes('@media(max-width:700px)'));
-  assert.match(serviceWorker, /upgrade-ai-pro-shell-v20/);
+  assert.match(serviceWorker, /upgrade-ai-pro-shell-v21/);
 });
 
 test('top five gainers use distinct rank-based card colors', () => {

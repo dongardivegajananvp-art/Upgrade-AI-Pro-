@@ -216,7 +216,7 @@ function startFnoStrategyScanner() {
         symbol,status:research.status,reason:research.reason||null,
         attemptedAt:new Date(scanStartedAt).toISOString(),scannedAt:fnoStrategyScanStats.lastScanAt,
         attemptCount:fnoSymbolScanLedger.get(symbol)?.attemptCount||1,
-        tickFresh:Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&Date.now()/1000-Number(tick.exchangeTime)>=-3),
+        tickFresh:Boolean(tick&&tickAgeMs>=0&&tickAgeMs<=10000&&Date.now()/1000-Number(tick.exchangeTime)>=-3&&Number(tick.receivedAt)-Number(tick.exchangeTime)*1000>=0&&Number(tick.receivedAt)-Number(tick.exchangeTime)*1000<=5000),
         tickExchangeTime:tick?.exchangeTime||null,tickReceivedAt:tick?.receivedAt||null,
         candleCount:history.candles.length,lastCompletedCandleTime:history.candles.at(-1)?.time||null,
         source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[],

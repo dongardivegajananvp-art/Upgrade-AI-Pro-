@@ -102,7 +102,7 @@ function registerTriggeredSetup(setup,underlying,contract) {
   if(activeSetups.filter(row=>row.status==='ACTIVE').length>=2)return {ok:false,reason:'Two verified setups are already active; existing Entry/SL/Target levels are being retained'};
   const entry=Number(setup.entry),stopLoss=Number(setup.stopLoss),target=Number(setup.target),risk=entry-stopLoss,reward=target-entry;
   if(!(entry>0&&stopLoss>0&&stopLoss<entry&&target>entry&&risk>0&&reward/risk>=2))return {ok:false,reason:'Fixed Entry/SL/Target failed minimum 1:2 risk validation'};
-  const row={id,underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.optionSide||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,setupCandleTime:Number(setup.underlyingCandleTime)||null,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
+  const row={id,underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.contractDetails?.side||setup.optionSide||null,strike:Number(setup.contractDetails?.strike)||null,expiry:Number(setup.contractDetails?.expiry)||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,setupCandleTime:Number(setup.underlyingCandleTime)||null,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
   activeSetups.push(row);
   // After an entry is retained, let the independent scanner hand off the next
   // eligible underlying instead of remaining pinned to the just-triggered one.
@@ -168,7 +168,7 @@ function renderActiveSetups() {
   if(!activeSetups.length) { const empty=document.createElement('div');empty.textContent='No triggered setup is currently retained.';empty.style.fontSize='11px';panel.append(empty);return; }
   for(const row of [...activeSetups].reverse()) {
     const card=document.createElement('div');card.style.cssText='padding:8px 0;border-top:1px solid #263951;font-size:11px;line-height:1.6;';
-    const title=document.createElement('strong');title.textContent=(row.underlying||'NSE STOCK')+' · '+(row.contract||'OPTION');
+    const title=document.createElement('strong');title.textContent=(row.underlying||'NSE STOCK')+' · '+(row.optionSide||'OPTION')+(row.strike?' '+showNumber(row.strike,2):'')+' · '+(row.contract||'OPTION');
     const status=document.createElement('span');status.textContent='  ·  '+(row.status==='ACTIVE'?'ACTIVE · '+(row.feedStatus||'WAITING FOR TICK'):row.status.replaceAll('_',' '));
     status.style.color=row.status==='ACTIVE'?'#72e5c0':row.status==='TARGET_HIT'?'#72e5c0':'#ff9a9a';
     const levels=document.createElement('div');levels.textContent='ENTRY ₹'+showNumber(row.entry)+'  ·  SL ₹'+showNumber(row.stopLoss)+'  ·  TARGET ₹'+showNumber(row.target)+'  ·  RR 1:'+showNumber(row.rr,2);

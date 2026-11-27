@@ -23,6 +23,9 @@ let refreshRunning = false;
 let chartRestoredFromCache = false;
 const TOP_GAINERS_SNAPSHOT_KEY = 'upgrade-ai-pro:last-session-top5:v1';
 const CHART_SNAPSHOT_KEY = 'upgrade-ai-pro:last-verified-chart:v1';
+const ACTIVE_SETUP_KEY = 'upgrade-ai-pro:active-setups:v1';
+let activeSetups = (() => { try { const rows=JSON.parse(localStorage.getItem(ACTIVE_SETUP_KEY)||'[]'); return Array.isArray(rows)?rows.filter(row=>row&&row.id&&row.contract&&row.status):[]; } catch { return []; } })();
+let activeSetupSyncAt = 0;
 let selectedUnderlyingPrice = null;
 let optionChainRows = [];
 let selectedOptionSide = 'CE';
@@ -62,6 +65,38 @@ function tickStatusText(md, freshCount) {
   if (freshCount === 3 && md.socketStatus !== 'CONNECTED') return 'FYERS RECONNECTING · LAST TICKS NOT CONFIRMED';
   if (freshCount > 0) return 'FYERS PARTIAL / STALE · ' + freshCount + '/3 INDEX TICKS FRESH';
   return 'FYERS STALE · WAITING FOR FRESH EXCHANGE TICKS';
+}
+function saveActiveSetups() { try { localStorage.setItem(ACTIVE_SETUP_KEY,JSON.stringify(activeSetups.slice(-10))); } catch {} }
+function mergeActiveSetups(rows=[]) {
+  if(!Array.isArray(rows)||!rows.length)return;
+  const byId=new Map(activeSetups.map(row=>[row.id,row]));
+  for(const row of rows) { if(!row?.id)continue; const prior=byId.get(row.id); byId.set(row.id,prior?.status&&prior.status!=='ACTIVE'?prior:{...prior,...row}); }
+  activeSetups=[...byId.values()].slice(-10);saveActiveSetups();renderActiveSetups();
+}
+async function syncActiveSetups(force=false) {
+  const active=activeSetups.filter(row=>row.status==='ACTIVE');
+  if(!force&&Date.now()-activeSetupSyncAt<15000)return;activeSetupSyncAt=Date.now();
+  try { const response=await fetch('/api/active-setups',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({setups:active})});const result=await response.json();if(response.ok&&Array.isArray(result.setups))mergeActiveSetups(result.setups); } catch {}
+}
+function registerTriggeredSetup(setup,underlying,contract) {
+  const entryAt=new Date().toISOString();
+  const id=contract+'|'+String(setup.optionCandleTime||setup.confirmedAt||entryAt);
+  const sameTrigger=activeSetups.find(row=>row.id===id);
+  if(sameTrigger)return {ok:true,existing:true,row:sameTrigger};
+  const duplicate=activeSetups.find(row=>row.status==='ACTIVE'&&(row.contract===contract||row.underlying===underlying));
+  if(duplicate)return {ok:true,existing:true,row:duplicate};
+  if(activeSetups.filter(row=>row.status==='ACTIVE').length>=2)return {ok:false,reason:'Two verified setups are already active; existing Entry/SL/Target levels are being retained'};
+  const entry=Number(setup.entry),stopLoss=Number(setup.stopLoss),target=Number(setup.target),risk=entry-stopLoss,reward=target-entry;
+  if(!(entry>0&&stopLoss>0&&stopLoss<entry&&target>entry&&risk>0&&reward/risk>=2))return {ok:false,reason:'Fixed Entry/SL/Target failed minimum 1:2 risk validation'};
+  const row={id,underlying,contract,strategy:setup.strategy||'VERIFIED_STRATEGY',optionSide:setup.optionSide||null,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,exitPrice:null,closedAt:null};
+  activeSetups.push(row);saveActiveSetups();renderActiveSetups();void syncActiveSetups(true);return {ok:true,existing:false,row};
+}
+function renderActiveSetups() {
+  let panel=document.getElementById('active-setups-panel');
+  if(!panel) { panel=document.createElement('section');panel.id='active-setups-panel';panel.style.cssText='margin:10px 0;padding:10px;border:1px solid #31445f;border-radius:10px;background:#0c1828;color:#dceaff;';const state=document.getElementById('setup-state');if(state?.parentNode)state.parentNode.insertBefore(panel,state.nextSibling); }
+  panel.replaceChildren();const heading=document.createElement('strong');heading.textContent='TRIGGERED SETUPS · RETAINED UNTIL SL / TARGET';heading.style.cssText='display:block;font-size:12px;margin-bottom:8px;letter-spacing:.3px;';panel.append(heading);
+  if(!activeSetups.length) { const empty=document.createElement('div');empty.textContent='No triggered setup is currently retained.';empty.style.fontSize='11px';panel.append(empty);return; }
+  for(const row of [...activeSetups].reverse()) { const card=document.createElement('div');card.style.cssText='padding:8px 0;border-top:1px solid #263951;font-size:11px;line-height:1.6;';const title=document.createElement('strong');title.textContent=(row.underlying||'NSE STOCK')+' · '+(row.contract||'OPTION');const status=document.createElement('span');status.textContent='  ·  '+(row.status==='ACTIVE'?'ACTIVE · '+(row.feedStatus||'WAITING FOR TICK'):row.status.replaceAll('_',' '));status.style.color=row.status==='ACTIVE'?'#72e5c0':row.status==='TARGET_HIT'?'#72e5c0':'#ff9a9a';const levels=document.createElement('div');levels.textContent='ENTRY ₹'+showNumber(row.entry)+'  ·  SL ₹'+showNumber(row.stopLoss)+'  ·  TARGET ₹'+showNumber(row.target)+'  ·  RR 1:'+showNumber(row.rr,2);const observed=document.createElement('div');observed.textContent=row.lastObservedPrice!=null?'LAST VERIFIED OPTION ₹'+showNumber(row.lastObservedPrice)+(row.exitPrice!=null?' · EXIT ₹'+showNumber(row.exitPrice):''):'Waiting for fresh option tick to monitor exit';observed.style.color='#9fb1c9';card.append(title,status,levels,observed);panel.append(card); }
 }
 function showNumber(value, digits=2) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-IN',{maximumFractionDigits:digits}) : '—';
@@ -252,6 +287,8 @@ async function refresh() {
       if (accountStatus) accountStatus.textContent = 'FYERS ACCOUNT FEED · SESSION REQUIRED';
     }
     const md = s.marketData || {};
+    mergeActiveSetups(md.activeSetups||[]);
+    if(s.auth?.tokenStored) void syncActiveSetups();
     if(s.auth?.tokenStored && Date.now()-lastUniverseScanRefresh>=30000) refreshUniverseScan();
     renderMovers(md.fno || {});
     if (selectedSymbol && setupEvaluationDone && researchContextReadySymbol !== selectedSymbol && !researchContextLoadingSymbol && Date.now() >= researchContextRetryAt) {
@@ -1383,12 +1420,16 @@ async function evaluateSelectedSetup() {
       setupRetryAfter = Date.now() + 5000;
     }
     if(setup.status==='SETUP_CONFIRMED') {
-      document.querySelector('#setup-entry').textContent='₹'+showNumber(setup.entry);
-      document.querySelector('#setup-sl').textContent='₹'+showNumber(setup.stopLoss);
-      document.querySelector('#setup-target').textContent='₹'+showNumber(setup.target);
-      document.querySelector('#setup-rr').textContent='1:'+showNumber(setup.rr);
-      state.textContent='SIGNAL VERIFIED · '+setup.strategy+' · '+setup.optionSide+' · AI '+(setup.research?.grade||'RESEARCH')+' · '+showNumber(setup.targetR||setup.rr)+'R TARGET'; state.dataset.state='confirmed';
-      chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
+      const retained=registerTriggeredSetup(setup,evaluatedSymbol,evaluatedContract);
+      if(!retained.ok) { state.textContent='ENTRY NOT ADDED · '+retained.reason; state.dataset.state='blocked'; chartSetupLevels=null; renderChartViewport(); return; }
+      const fixed=retained.row;
+      document.querySelector('#setup-entry').textContent='₹'+showNumber(fixed.entry);
+      document.querySelector('#setup-sl').textContent='₹'+showNumber(fixed.stopLoss);
+      document.querySelector('#setup-target').textContent='₹'+showNumber(fixed.target);
+      document.querySelector('#setup-rr').textContent='1:'+showNumber(fixed.rr);
+      state.textContent=(fixed.status==='ACTIVE'?'ACTIVE ENTRY RETAINED · ':'PREVIOUS TRIGGER · ')+fixed.strategy+' · '+fixed.contract+' · '+(fixed.status==='ACTIVE'?'MONITORING FIXED SL / TARGET':fixed.status.replaceAll('_',' ')); state.dataset.state=fixed.status==='ACTIVE'?'confirmed':'blocked';
+      if(!retained.existing) chartSetupLevels = { entry: Number(setup.entry), stopLoss: Number(setup.stopLoss), target: Number(setup.target) };
+      else chartSetupLevels = { entry: Number(fixed.entry), stopLoss: Number(fixed.stopLoss), target: Number(fixed.target) };
       renderChartViewport();
     } else {
       chartSetupLevels = null; renderChartViewport();
@@ -1583,3 +1624,5 @@ fnoSearchInput.addEventListener('input',()=>{
 fnoSearchInput.addEventListener('keydown',event=>{
   if(event.key==='Enter'){clearTimeout(fnoSearchDebounce);runFnoSymbolSearch();}
 });
+
+renderActiveSetups();

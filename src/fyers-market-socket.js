@@ -29,6 +29,7 @@ let pinnedTopGainerSymbols = [];
 let rotationIndex = 0;
 let rotationTimer = null;
 let selectedOptionSymbol = null;
+let activeTradeOptionSymbols = [];
 let optionSubscriptionStatus = 'NOT_SELECTED';
 let optionSubscriptionError = null;
 let optionSubscriptionRequestedAt = null;
@@ -77,10 +78,11 @@ function sessionFeedReady(now = Date.now()) {
 }
 
 function desiredSocketSubscriptions(now = Date.now()) {
-  return buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, isNseRegularSession(now));
+  const sessionOpen=isNseRegularSession(now);
+  return [...new Set([...buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionOpen), ...(sessionOpen ? activeTradeOptionSymbols : [])])];
 }
 function pruneSocketSymbolState() {
-  const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol].filter(Boolean);
+  const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol, ...activeTradeOptionSymbols].filter(Boolean);
   pruneSymbolMap(ticks, allowed, 300);
   pruneSymbolMap(tickTelemetryLoggedAt, allowed, 300);
 }
@@ -403,6 +405,19 @@ export function setSelectedUnderlyingSymbol(symbol) {
   applyFnoRotation();
   return { status: next ? 'UNDERLYING_PINNED_TO_SOCKET_SLICE' : 'UNDERLYING_CLEARED', symbol: next };
 }
+export function setActiveTradeOptionSymbols(symbols = []) {
+  if (!Array.isArray(symbols) || symbols.length > 2) return { status:'REJECTED', reason:'At most two active option contracts may be pinned' };
+  const next = [...new Set(symbols.filter(symbol => typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]+$/.test(symbol)))];
+  if (next.length !== symbols.length) return { status:'REJECTED', reason:'Every active option contract must be a valid NSE symbol' };
+  activeTradeOptionSymbols = next;
+  pruneSocketSymbolState();
+  if (socket && socketStatus === 'CONNECTED') {
+    try { syncSocketSubscriptions(desiredSocketSubscriptions(), 'active-trade-option-pins'); }
+    catch (error) { lastError = safeError(error); return { status:'SUBSCRIPTION_UPDATE_ERROR', reason:lastError }; }
+  }
+  console.info('[FYERS_DATA] active trade option pins:', JSON.stringify({count:next.length,symbols:next}));
+  return { status:'ACTIVE_TRADE_OPTIONS_PINNED', symbols:[...next] };
+}
 export function setSelectedOptionSymbol(symbol) {
   const next = symbol && /^NSE:[A-Z0-9&._-]+$/.test(symbol) ? symbol : null;
   if (next === selectedOptionSymbol) {
@@ -617,6 +632,7 @@ export function getMarketData(now = Date.now()) {
       closeCount: socketCloseCount, errorCount: socketErrorCount
     },
     selectedUnderlyingSymbol, selectedOption: optionTick ? { ...optionTick, fresh: isFresh(optionTick, now) } : null,
+    activeOptionTicks: activeTradeOptionSymbols.map(symbol => { const tick=ticks.get(symbol)||null; return {symbol,tick:tick?{...tick,fresh:isFresh(tick,now)}:null}; }),
     optionSubscription: {
       status: optionSubscriptionStatus,
       symbol: selectedOptionSymbol,
@@ -627,7 +643,7 @@ export function getMarketData(now = Date.now()) {
     },
     selectedUnderlying: selectedUnderlyingSymbol && ticks.get(selectedUnderlyingSymbol) ? { ...ticks.get(selectedUnderlyingSymbol), fresh: isFresh(ticks.get(selectedUnderlyingSymbol), now), liveCandle: selectedLiveCandle ? { ...selectedLiveCandle } : null } : null,
     selectedOptionSymbol,
-    subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
+    subscriptionCount: desiredSocketSubscriptions(now).length,
     symbolLimit: 100, indices,
     fno: {
       status: !universe.length ? 'SYMBOL_MASTER_NOT_LOADED' : ['ERROR','RATE_LIMITED','RATE_LIMITED_WAIT','SUBSCRIPTION_UPDATE_ERROR','SUBSCRIPTION_LIMIT_BLOCKED','DISCONNECTED'].includes(socketStatus) ? 'SOCKET_ERROR' : topGainers.length ? 'ROTATING_LIVE_COVERAGE' : 'WAITING_FOR_FNO_TICKS',
@@ -636,7 +652,7 @@ export function getMarketData(now = Date.now()) {
       websocketCandleCoverage,
       rankingMode: 'ROLLING_SESSION_OBSERVATIONS_NOT_SIMULTANEOUS', maxObservationAgeSeconds: rolling.maxObservationAgeSeconds,
       rotationIntervalMs: ROTATION_INTERVAL_MS, scanPerSlice: universe.length > MAX_UNDERLYING_SLOTS ? getFnoScanBatchSize(universe.length,rotationIndex,SCAN_PER_SLICE) : activeFnoSymbols.length, currentSliceStart: universe.length ? rotationIndex : 0,
-      subscriptionCount: INDEX_SYMBOLS.length + activeFnoSymbols.length + (selectedOptionSymbol && !activeFnoSymbols.includes(selectedOptionSymbol) ? 1 : 0),
+      subscriptionCount: desiredSocketSubscriptions(now).length,
       topGainers: topGainers.map(tick => ({ symbol: tick.symbol, price: tick.price, change: tick.change, changePercent: tick.changePercent, exchangeTime: tick.exchangeTime, receivedAt: tick.receivedAt, fresh: tick.fresh, ageSeconds: tick.ageSeconds, actionable: false }))
     }
   };

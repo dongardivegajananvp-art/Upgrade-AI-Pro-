@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, getRestTotalWindowLimit, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
+import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, getRestTotalWindowLimit, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getRecoveryProbeRetryDelayMs, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getFifteenMinuteCacheValidUntil, getIntradayHistoryRange, getFiveMinuteHistoryRange, getFifteenMinuteHistoryRange, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
@@ -112,6 +112,14 @@ test('fourth FYERS 429 in the same IST day blocks until the next IST midnight', 
   assert.equal(getRateLimitCooldownUntil(now, '0', 4), nextIstMidnight);
 });
 
+test('failed REST recovery probes retry with bounded backoff instead of a permanent lock', () => {
+  assert.equal(getRecoveryProbeRetryDelayMs(1), 60_000);
+  assert.equal(getRecoveryProbeRetryDelayMs(2), 120_000);
+  assert.equal(getRecoveryProbeRetryDelayMs(3), 240_000);
+  assert.equal(getRecoveryProbeRetryDelayMs(20), 5 * 60_000);
+  assert.equal(getRecoveryProbeRetryDelayMs(0), 60_000);
+});
+
 test('FYERS WebSocket 1015 recovery uses bounded exponential backoff', () => {
   assert.equal(getSocketRateLimitBackoffMs(1), 60_000);
   assert.equal(getSocketRateLimitBackoffMs(2), 120_000);
@@ -180,18 +188,18 @@ test('background history budget preserves two rolling-window slots for Entry and
 });
 
 
-test('global FYERS REST budget reserves two of six requests per minute for live Entry', () => {
-  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ENTRY), 6);
-  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.CHART), 4);
-  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.OPTION_CHAIN), 4);
-  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ACCOUNT), 4);
-  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.SCANNER), 4);
+test('global FYERS REST budget reserves two of five requests per minute for live Entry', () => {
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ENTRY), 5);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.CHART), 3);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.OPTION_CHAIN), 3);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ACCOUNT), 3);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.SCANNER), 3);
   const now=Date.UTC(2026,10,23,5,0,0);
-  const nonEntry=Array.from({length:4},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.CHART}));
+  const nonEntry=Array.from({length:3},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.CHART}));
   assert.ok(getRestRequestWindowWaitMs(nonEntry,now,getRestTotalWindowLimit(REST_PRIORITY.CHART))>0);
   assert.equal(getRestRequestWindowWaitMs(nonEntry,now,getRestTotalWindowLimit(REST_PRIORITY.ENTRY)),0);
-  const allSix=[...nonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.ENTRY}))];
-  assert.ok(getRestRequestWindowWaitMs(allSix,now,getRestTotalWindowLimit(REST_PRIORITY.ENTRY))>0);
+  const allFive=[...nonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.ENTRY}))];
+  assert.ok(getRestRequestWindowWaitMs(allFive,now,getRestTotalWindowLimit(REST_PRIORITY.ENTRY))>0);
 });
 
 test('global FYERS REST budget counts every endpoint and preserves interactive headroom', () => {
@@ -204,10 +212,10 @@ test('global FYERS REST budget counts every endpoint and preserves interactive h
     {at:new Date(now-10_000).toISOString(),path:'/history',source:'chart-history',priority:REST_PRIORITY.CHART},
     {at:new Date(now-5_000).toISOString(),path:'/history',source:'research-context-daily',priority:REST_PRIORITY.CONTEXT}
   ];
-  assert.ok(getRestRequestWindowWaitMs(requests, now, 6) > 0);
+  assert.ok(getRestRequestWindowWaitMs(requests, now, 5) > 0);
   assert.equal(getRestRequestWindowWaitMs(requests, now, 3, 60_000, REST_PRIORITY.CHART, Number.POSITIVE_INFINITY), 0);
   assert.ok(getRestRequestWindowWaitMs(requests, now, 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART-1) > 0);
-  assert.equal(getRestRequestWindowWaitMs(requests.slice(0,5), now, 6), 0);
+  assert.ok(getRestRequestWindowWaitMs(requests.slice(0,4), now, 5) === 0);
 });
 
 

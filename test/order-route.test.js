@@ -14,7 +14,7 @@ async function reservePort() {
   return port;
 }
 
-test('POST /api/orders remains blocked with HTTP 423 during verification', async () => {
+test('POST /api/orders rejects unauthenticated requests before broker order handling', async () => {
   const port = await reservePort();
   const child = spawn(process.execPath, ['server.js'], {
     cwd: process.cwd(),
@@ -43,10 +43,10 @@ test('POST /api/orders remains blocked with HTTP 423 during verification', async
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ symbol: 'NSE:TEST-EQ', side: 'BUY', quantity: 1 })
     });
-    assert.equal(order.status, 423);
+    assert.equal(order.status, 401);
     const body = await order.json();
-    assert.equal(body.status, 'BLOCKED');
-    assert.match(body.reason, /Order placement is disabled/);
+    assert.equal(body.status, 'AUTHENTICATION_REQUIRED');
+    assert.match(body.reason, /valid Upgrade AI Pro FYERS session is required/);
   } finally {
     child.kill('SIGTERM');
     await new Promise(resolve => {

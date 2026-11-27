@@ -78,7 +78,8 @@ function sessionFeedReady(now = Date.now()) {
 }
 
 function desiredSocketSubscriptions(now = Date.now()) {
-  return [...new Set([...buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, isNseRegularSession(now)), ...activeTradeOptionSymbols])];
+  const sessionOpen=isNseRegularSession(now);
+  return [...new Set([...buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionOpen), ...(sessionOpen ? activeTradeOptionSymbols : [])])];
 }
 function pruneSocketSymbolState() {
   const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol, ...activeTradeOptionSymbols].filter(Boolean);

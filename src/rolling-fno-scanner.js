@@ -23,7 +23,8 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
         !Number.isFinite(Number(tick.exchangeTime)) || istDayKey(tick.exchangeTime) !== today) continue;
     const ageSeconds = Math.max(0, Math.floor((now - Number(tick.receivedAt)) / 1000));
     if (ageSeconds > maxObservationAgeSeconds) continue;
-    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3;
+    const exchangeReceiptDelayMs=Number(tick.receivedAt)-Number(tick.exchangeTime)*1000;
+    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3 && exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000;
     const row = { ...tick, fresh, ageSeconds };
     observed.push(row);
     if (fresh) freshObserved.push(row);

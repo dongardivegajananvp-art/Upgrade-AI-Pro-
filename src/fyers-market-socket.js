@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { buildFnoCandleObservationSymbols } from './socket-subscription-utils.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
 import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery } from './socket-subscription-utils.js';
@@ -693,7 +694,7 @@ export function getFnoUniverseSnapshot() {
   return {
     universe: universe.map(item => ({ ...item })),
     ticks: new Map(universe.map(item => [item.symbol, ticks.get(item.symbol)]).filter(([, tick]) => Boolean(tick))),
-    websocketCandles: new Map(activeFnoSymbols.map(symbol=>[symbol,fnoWebsocketCandles.snapshot(symbol)])),
+    websocketCandles: new Map(buildFnoCandleObservationSymbols(activeFnoSymbols,pinnedTopGainerSymbols,selectedUnderlyingSymbol).map(symbol=>[symbol,fnoWebsocketCandles.snapshot(symbol)])),
     activeSymbols: [...activeFnoSymbols],
     rotationIndex,
     rotationIntervalMs: ROTATION_INTERVAL_MS,

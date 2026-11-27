@@ -114,3 +114,15 @@ export function formatSocketCloseDetail(details = []) {
   }).filter(Boolean);
   return parts.join(' | ').slice(0, 240) || null;
 }
+
+
+// Candle observations must cover every actively subscribed F&O scanner candidate,
+// including pinned Top Gainers outside the current 20-symbol rotation slice.
+export function buildFnoCandleObservationSymbols(activeSymbols = [], pinnedTopGainerSymbols = [], selectedUnderlyingSymbol = null) {
+  const values = [
+    ...(Array.isArray(activeSymbols) ? activeSymbols : []),
+    ...(Array.isArray(pinnedTopGainerSymbols) ? pinnedTopGainerSymbols : []),
+    selectedUnderlyingSymbol
+  ];
+  return [...new Set(values.filter(symbol => typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]+-EQ$/.test(symbol)))];
+}

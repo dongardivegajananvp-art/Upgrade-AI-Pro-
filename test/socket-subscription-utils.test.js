@@ -110,3 +110,19 @@ test('F&O rotation waits until paced subscriptions drain and rate-limit cooldown
   assert.equal(shouldAdvanceFnoRotation({pendingCount: 0, cooldownActive: true}), false);
   assert.equal(shouldAdvanceFnoRotation({pendingCount: 0, cooldownActive: false}), true);
 });
+
+
+test('F&O candle observation snapshots include active slice, pinned Top Gainers, and selected underlying', async () => {
+  const { buildFnoCandleObservationSymbols } = await import('../src/socket-subscription-utils.js');
+  const symbols = buildFnoCandleObservationSymbols(
+    ['NSE:SLICE-A-EQ', 'NSE:SLICE-B-EQ'],
+    ['NSE:TOP-A-EQ', 'NSE:TOP-B-EQ', 'NSE:SLICE-A-EQ'],
+    'NSE:SELECTED-EQ'
+  );
+  assert.deepEqual(symbols, ['NSE:SLICE-A-EQ', 'NSE:SLICE-B-EQ', 'NSE:TOP-A-EQ', 'NSE:TOP-B-EQ', 'NSE:SELECTED-EQ']);
+});
+
+test('F&O candle observation symbol selection rejects invalid symbols and remains unique', async () => {
+  const { buildFnoCandleObservationSymbols } = await import('../src/socket-subscription-utils.js');
+  assert.deepEqual(buildFnoCandleObservationSymbols(['MCX:CRUDEOIL26NOVFUT', 'NSE:ABC-EQ', 'NSE:ABC-EQ'], ['bad-symbol']), ['NSE:ABC-EQ']);
+});

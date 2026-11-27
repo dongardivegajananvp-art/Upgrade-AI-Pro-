@@ -7,7 +7,7 @@ test('F&O live socket rotation is twenty symbols per minute while REST strategy 
   assert.equal(FNO_SOCKET_ROTATION_ADVANCE, 20);
   assert.equal(FNO_SCAN_PER_SLICE, 3);
   assert.equal(buildFnoRotationSlice(universe, 0, FNO_SOCKET_ROTATION_ADVANCE).length, 20);
-  assert.equal(buildFnoRotationSlice(universe, 20, FNO_SOCKET_ROTATION_ADVANCE)[0].symbol, 'NSE:STOCK20-EQ');
+  assert.equal(buildFnoRotationSlice(universe, 20, FNO_SOCKET_ROTATION_ADVANCE)[0], 'NSE:STOCK20-EQ');
   assert.equal(Math.ceil(universe.length / FNO_SOCKET_ROTATION_ADVANCE), 10);
 });
 

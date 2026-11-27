@@ -109,6 +109,56 @@ function registerTriggeredSetup(setup,underlying,contract) {
   userSelectedSymbol=false;lastAutoTop3CandidateKey=null;
   saveActiveSetups();renderActiveSetups();void syncActiveSetups(true);return {ok:true,existing:false,row};
 }
+async function viewActiveOptionChart(row) {
+  const contract=String(row?.contract||'');
+  if(!/^NSE:[A-Z0-9&._-]+$/.test(contract)) return;
+  const generation=++chartViewGeneration;
+  chartViewMode='OPTION';chartViewSymbol=contract;chartLiveCandle=null;
+  chartSetupLevels={
+    entry:Number(row.entry),stopLoss:Number(row.stopLoss),target:Number(row.target)
+  };
+  resetChartViewport();
+  const title=document.querySelector('#symbol'),area=document.querySelector('#chart-area');
+  title.textContent=contract+' · LOADING VERIFIED FYERS OPTION HISTORY';
+  document.querySelector('#chart-candle-status').textContent='OPTION STRIKE · LOADING COMPLETED FYERS 5-MIN CANDLES';
+  area.replaceChildren();
+  const loading=document.createElement('div');loading.className='chart-empty';
+  loading.textContent='Loading this exact entered option contract from FYERS history. No synthetic candles are used.';
+  area.append(loading);
+  try {
+    const response=await fetch('/api/option-history?symbol='+encodeURIComponent(contract),{cache:'no-store'});
+    const data=await response.json();
+    if(generation!==chartViewGeneration||chartViewMode!=='OPTION'||chartViewSymbol!==contract)return;
+    if(!response.ok||!Array.isArray(data.candles)||!data.candles.length)
+      throw new Error(data.reason||'Verified FYERS option candles are unavailable');
+    drawHistoryChart(data.candles);
+    title.textContent=contract+' · OPTION STRIKE CHART · '+(data.count??data.candles.length)+' COMPLETED FYERS 5-MIN CANDLES';
+    document.querySelector('#chart-candle-status').textContent='EXACT OPTION CONTRACT · COMPLETED FYERS HISTORY · ENTRY / SL / TARGET LEVELS';
+    const chart=document.querySelector('#chart');
+    chart?.scrollIntoView?.({behavior:'smooth',block:'start'});
+    const market=await fetch('/api/market-data',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
+    if(generation===chartViewGeneration&&chartViewMode==='OPTION') updateOptionChartLiveStatus(market,contract);
+  } catch(error) {
+    if(generation!==chartViewGeneration||chartViewMode!=='OPTION'||chartViewSymbol!==contract)return;
+    area.replaceChildren();
+    const note=document.createElement('div');note.className='chart-empty';
+    note.textContent=String(error.message||'Option history unavailable')+' · NO SYNTHETIC DATA · NO TRADE';
+    area.append(note);
+    title.textContent=contract+' · OPTION CHART UNAVAILABLE';
+    document.querySelector('#chart-candle-status').textContent='OPTION HISTORY NOT VERIFIED';
+  }
+}
+function updateOptionChartLiveStatus(market,contract) {
+  const row=(market?.activeOptionTicks||[]).find(item=>item.symbol===contract);
+  const tick=row?.tick||null;
+  const status=document.querySelector('#chart-candle-status');
+  if(tick?.fresh) {
+    const clock=new Date(Number(tick.exchangeTime)*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    status.textContent='OPTION CHART · LIVE FYERS TICK FRESH ₹'+showNumber(tick.price)+' · '+clock+' IST · HISTORICAL COMPLETED 5M CANDLES';
+  } else {
+    status.textContent='OPTION CHART · LIVE TICK '+(tick?'STALE':'NOT AVAILABLE')+' · VERIFIED HISTORICAL 5M CANDLES ONLY';
+  }
+}
 function renderActiveSetups() {
   let panel=document.getElementById('active-setups-panel');
   if(!panel) { panel=document.createElement('section');panel.id='active-setups-panel';panel.style.cssText='margin:10px 0;padding:10px;border:1px solid #31445f;border-radius:10px;background:#0c1828;color:#dceaff;';const state=document.getElementById('setup-state');if(state?.parentNode)state.parentNode.insertBefore(panel,state.nextSibling); }
@@ -717,7 +767,7 @@ function renderMovers(fno) {
   });
 }
 async function selectIndexSymbol(symbol) {
-  userSelectedSymbol=true;
+  userSelectedSymbol=true;chartViewGeneration++;chartViewMode='UNDERLYING';chartViewSymbol=null;
   if (!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','NSE:FINNIFTY-INDEX'].includes(symbol)) return;
   selectedSymbol = symbol; researchContextReadySymbol = null; researchContextRetryAt = 0; resetChartViewport(); selectedUnderlyingPrice = null; selectedContractSymbol = null; chartSetupLevels = null; setupOptionTrigger = null; setupRetryAfter = 0;
   setupEvaluationDone = true; setupEvaluationRunning = false; chartLiveCandle = null; chartCandles = [];
@@ -800,9 +850,10 @@ async function ensureResearchContext(symbol) {
 }
 async function selectSymbol(symbol, livePrice = null) {
   if (!symbol) return;
+  if(symbol===selectedSymbol&&!chartRestoredFromCache&&chartViewMode==='UNDERLYING') return;
+  chartViewGeneration++;chartViewMode='UNDERLYING';chartViewSymbol=null;
   // A persisted chart is display-only. Selecting that same symbol must still
   // fetch current verified FYERS history; never let a cache hit suppress reload.
-  if (symbol === selectedSymbol && !chartRestoredFromCache) return;
   const selectionGeneration = ++symbolSelectionGeneration;
   optionSelectionGeneration++;
   selectedSymbol = symbol;
@@ -923,10 +974,12 @@ function drawHistoryChart(candles) {
   // Keep the default viewport focused on current-session price action; users can zoom out for history.
   chartZoom = Math.max(1, chartCandles.length / 75);
   chartPan = 0;
-  try {
-    const snapshot = normalizeChartSnapshot({ symbol: selectedSymbol, savedAt: Date.now(), candles: chartCandles });
-    if (snapshot) localStorage.setItem(CHART_SNAPSHOT_KEY, JSON.stringify(snapshot));
-  } catch {}
+  if(chartViewMode==='UNDERLYING') {
+    try {
+      const snapshot = normalizeChartSnapshot({ symbol: selectedSymbol, savedAt: Date.now(), candles: chartCandles });
+      if (snapshot) localStorage.setItem(CHART_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    } catch {}
+  }
   renderChartViewport();
 }
 function restorePersistedChart() {
@@ -1055,7 +1108,7 @@ function renderChartViewport() {
   svg.style.touchAction = 'none';
   svg.style.userSelect = 'none';
   svg.style.webkitUserSelect = 'none';
-  const chartSymbolLabel = (selectedSymbol || 'SELECT SYMBOL')
+  const chartSymbolLabel = (chartViewSymbol || selectedSymbol || 'SELECT SYMBOL')
     .replace(/^(NSE|BSE):/, '')
     .replace(/-EQ$/, '')
     .replace('-INDEX', '')

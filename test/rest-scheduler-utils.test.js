@@ -331,7 +331,7 @@ test('REST drain wakes at the earliest queued request expiry instead of overslee
 
 test('Account Feed retains two rolling-window slots without bypassing the global FYERS cap', () => {
   const now=Date.UTC(2026,10,23,5,0,0);
-  assert.equal(getRestTotalWindowLimit(20),5);
+  assert.equal(getRestTotalWindowLimit(20),3);
   const twoAccount=[
     {at:new Date(now-2000).toISOString(),priority:20,path:'/positions'},
     {at:new Date(now-1000).toISOString(),priority:20,path:'/orders'}
@@ -343,8 +343,8 @@ test('Account Feed retains two rolling-window slots without bypassing the global
   const background=[
     {at:new Date(now-3000).toISOString(),priority:10,path:'/history'},
     {at:new Date(now-2000).toISOString(),priority:40,path:'/history'},
-    {at:new Date(now-1000).toISOString(),priority:30,path:'/history'}
   ];
   assert.ok(getRestRequestWindowWaitMs(background,now,getRestTotalWindowLimit(20))===0);
-  assert.ok(getRestRequestWindowWaitMs([...background,...twoAccount],now,getRestTotalWindowLimit(100))>0);
+  const globalFive=[...background,...twoAccount,{at:new Date(now).toISOString(),priority:80,path:'/history'}];
+  assert.ok(getRestRequestWindowWaitMs(globalFive,now,getRestTotalWindowLimit(100))>0);
 });

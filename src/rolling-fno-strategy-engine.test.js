@@ -42,4 +42,11 @@ test('rolling scanner surfaces a fresh 5m price setup without daily/15m research
   assert.equal(result.top3[0].side,'LONG');
   assert.equal(result.top3[0].grade,'PRICE_SETUP');
   assert.equal(result.top3[0].qualityScore,null);
+  assert.equal(result.top3[0].lastCompletedCandleTime,candles.at(-1).time);
+  const excluded=evaluateRollingFnoUniverse({
+    universe:[{symbol}],ticks:new Map([[symbol,tick]]),
+    fiveMinute:new Map([[symbol,{candles}]]),now,excludeSymbols:[symbol]
+  });
+  assert.equal(excluded.candidateCount,0);
+  assert.equal(excluded.evaluations[0].status,'UNDERLYING_SETUP_CONFIRMED');
 });

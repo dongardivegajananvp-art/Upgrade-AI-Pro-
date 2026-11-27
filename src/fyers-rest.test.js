@@ -192,7 +192,7 @@ test('global FYERS REST budget reserves two of five requests per minute for live
   assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ENTRY), 5);
   assert.equal(getRestTotalWindowLimit(REST_PRIORITY.CHART), 3);
   assert.equal(getRestTotalWindowLimit(REST_PRIORITY.OPTION_CHAIN), 3);
-  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ACCOUNT), 5);
+  assert.equal(getRestTotalWindowLimit(REST_PRIORITY.ACCOUNT), 3);
   assert.equal(getRestTotalWindowLimit(REST_PRIORITY.SCANNER), 3);
   const now=Date.UTC(2026,10,23,5,0,0);
   const nonEntry=Array.from({length:3},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:REST_PRIORITY.CHART}));

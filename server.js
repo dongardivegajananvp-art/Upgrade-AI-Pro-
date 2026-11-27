@@ -136,7 +136,7 @@ function startFnoStrategyScanner() {
     // observed leader is not forced to wait for the full 218-symbol rotation.
     // The shared REST governor and two-scan-per-minute budget remain unchanged.
     const freshTopGainers=(sessionMarket.fno?.topGainers||[])
-      .filter(item=>item?.fresh&&active.length+5>0&&snapshot.ticks.has(item.symbol))
+      .filter(item=>item?.fresh&&snapshot.ticks.has(item.symbol))
       .map(item=>item.symbol);
     const scanCandidates=[...new Set([...freshTopGainers,...active])];
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,scanCandidates.length);

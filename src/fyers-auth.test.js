@@ -24,10 +24,11 @@ test('auth status never claims market data is connected before authentication',(
 test('FYERS session survives process-memory loss through an encrypted HttpOnly cookie payload',async()=>{
  const originalFetch=globalThis.fetch;
  let requestCount=0;
- globalThis.fetch=async()=>({
+ let refreshPayload=null;
+ globalThis.fetch=async(url,options={})=>({
    ok:true,status:200,
    headers:{get:()=>null},
-   text:async()=>{requestCount++;return JSON.stringify({s:'ok',access_token:'sensitive-test-token'});}
+   text:async()=>{requestCount++; if(String(url).includes('validate-refresh-token')) { refreshPayload=JSON.parse(options.body); return JSON.stringify({s:'ok',access_token:'refreshed-test-token'}); } return JSON.stringify({s:'ok',access_token:'sensitive-test-token',refresh_token:'sensitive-refresh-token'}); }
  });
  try {
    await exchangeAuthCode({appId:'TEST-100',appSecret:'test-secret',authCode:'one-time-test-code'});

@@ -88,8 +88,8 @@ function startFnoStrategyScanner() {
     if (fnoStrategyScanBusy) return;
     if (Date.now() < fnoStrategyScanRetryAt) { fnoStrategyScanStats.status='WAITING_FOR_REST_BUDGET'; return; }
     if (!isNseSignalWindow(Date.now())) {
-      fnoStrategyScanStats.status='OUTSIDE_SIGNAL_WINDOW';
-      fnoStrategyScanStats.lastReason='New signal generation is scheduled only from 09:30 to 12:00 IST; active setup monitoring continues until market close';
+      fnoStrategyScanStats.status='OUTSIDE_NSE_SESSION';
+      fnoStrategyScanStats.lastReason='Signal generation is paused outside the regular NSE session; active setup monitoring continues until market close';
       return;
     }
     const sessionMarket=getMarketData();
@@ -616,7 +616,7 @@ const server = http.createServer(async (req,res) => {
         rotationIntervalMs:getFnoUniverseSnapshot().rotationIntervalMs,
         rest:getRestDiagnostics(), runtimeMemory:process.memoryUsage()
       }),
-      schedule:{timezone:'Asia/Kolkata',signalWindow:'09:30-12:00',marketMonitoringWindow:'09:15-15:30',
+      schedule:{timezone:'Asia/Kolkata',signalWindow:'09:15-15:30',marketMonitoringWindow:'09:15-15:30',
         signalWindowOpen:isNseSignalWindow(Date.now()),activeSetupMonitoring:'SERVER_SIDE_UNTIL_MARKET_CLOSE'}
     });
   }

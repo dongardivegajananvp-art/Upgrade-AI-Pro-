@@ -23,11 +23,13 @@ test('invalid timestamps fail closed', () => {
 });
 
 
-test('signal generation runs only from 09:30 through 12:00 IST on weekdays', () => {
-  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T03:59:59.999Z')), false);
+test('signal generation runs throughout the complete NSE session', () => {
+  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T03:44:59.999Z')), false);
+  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T03:45:00.000Z')), true);
   assert.equal(isNseSignalWindow(Date.parse('2026-11-23T04:00:00.000Z')), true);
-  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T06:29:59.999Z')), true);
-  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T06:30:00.000Z')), false);
+  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T06:30:00.000Z')), true);
+  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T09:59:59.999Z')), true);
+  assert.equal(isNseSignalWindow(Date.parse('2026-11-23T10:00:00.000Z')), false);
   assert.equal(isNseSignalWindow(Date.parse('2026-11-21T05:00:00.000Z')), false);
   assert.equal(isNseSignalWindow(NaN), false);
 });

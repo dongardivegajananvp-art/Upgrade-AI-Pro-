@@ -208,9 +208,10 @@ test('restored cached chart never suppresses a fresh verified history request fo
   assert.ok(flow.includes("fetch('/api/history?symbol='"));
 });
 
-test('scanner UI defaults to the real four-symbol slice, not the obsolete eleven-symbol fallback', () => {
-  assert.ok(app.includes('data.scanPerSlice??4'));
-  assert.ok(!app.includes('data.scanPerSlice||11'));
+test('scanner UI reports twenty-symbol rotation and actual strategy checks', () => {
+  assert.ok(app.includes('data.sliceSize||20'));
+  assert.ok(app.includes('data.strategyChecksThisSlice||0'));
+  assert.ok(app.includes('NO TRADE - DATA NAHI'));
 });
 
 

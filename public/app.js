@@ -355,7 +355,7 @@ async function refresh() {
       if (age) {
         const receiptAge = tick ? Math.max(0, Math.floor((Date.now() - Number(tick.receivedAt)) / 1000)) : null;
         const exchangeDelay = tick && Number.isFinite(Number(tick.exchangeReceiptDelayMs)) ? Math.round(Number(tick.exchangeReceiptDelayMs)) : null;
-        age.textContent = !nseSessionOpen ? 'MARKET CLOSED' : tick?.fresh ? `FRESH ${receiptAge}s ago · EXCH→RX ${exchangeDelay}ms` : tick ? `STALE ${receiptAge}s ago` : 'NO TICK';
+        age.textContent = !nseSessionOpen ? 'MARKET CLOSED' : tick?.fresh ? `FRESH ${receiptAge}s ago · EXCH→RX ${exchangeDelay}ms` : tick ? `STALE ${receiptAge}s ago · EXCH→RX ${exchangeDelay===null?'UNKNOWN':exchangeDelay+'ms'}` : 'NO TICK';
         age.dataset.state = tick?.fresh && nseSessionOpen ? 'fresh' : tick ? 'stale' : 'unknown';
       }
       if (nseSessionOpen && tick?.fresh) {

@@ -43,6 +43,12 @@ export function splitSubscriptionBatches(symbols = [], batchSize = 4) {
   return batches;
 }
 
+export function buildSetupEvaluationSubscriptionSymbols(pins = []) {
+  const entries=pins instanceof Map?[...pins.values()]:Array.isArray(pins)?pins:[];
+  return [...new Set(entries.flatMap(entry=>Array.isArray(entry)?entry:Array.isArray(entry?.symbols)?entry.symbols:[])
+    .filter(symbol=>typeof symbol==='string'&&/^NSE:[A-Z0-9&._-]+$/.test(symbol)))];
+}
+
 export function buildDesiredSocketSubscriptions(indexSymbols = [], activeSymbols = [], selectedOptionSymbol = null) {
   const indices = Array.isArray(indexSymbols) ? indexSymbols : [...(indexSymbols || [])];
   const active = Array.isArray(activeSymbols) ? activeSymbols : [];

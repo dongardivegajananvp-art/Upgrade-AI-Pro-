@@ -159,19 +159,36 @@ function startIndexStrategyScanner() {
         indexStrategyScannerStatus='RUNNING';
         return;
       }
+      let fifteenMinuteHistory={candles:[]};
+      let fifteenMinuteHistoryError=null;
+      try {
+        fifteenMinuteHistory=await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'index-nine-strategy-15m');
+      } catch(error) {
+        fifteenMinuteHistoryError=String(error?.message||'15-minute index context unavailable').slice(0,160);
+      }
+      const evaluationAt=Date.now();
+      const evaluationMarket=getMarketData(evaluationAt);
+      const evaluationTick=evaluationMarket.indices?.[symbol]||null;
+      if (countFreshIndexTicks(evaluationMarket.indices||{},evaluationAt)!==3 || !isFreshIndexTick(evaluationTick,evaluationAt)) {
+        indexStrategyScannerStatus='WAITING_FOR_3_OF_3_FRESH_INDEX_TICKS';
+        return;
+      }
       const result=detectNineStrategySetup({
         underlyingCandles:history.candles,
-        underlyingTick:latestTick,
+        underlyingTick:evaluationTick,
         dailyCandles:[],
-        fifteenMinuteCandles:[],
+        fifteenMinuteCandles:fifteenMinuteHistory.candles||[],
         isTopGainer:false,
         researchEnabled:false,
-        now:scanAt
+        now:evaluationAt
       });
       const record=buildIndexStrategyScanRecord({
-        symbol,tick:latestTick,history,result,now:scanAt,
+        symbol,tick:evaluationTick,history,result,now:evaluationAt,
         attemptCount:Number(previous.attemptCount||0)+1
       });
+      record.fifteenMinuteCandleCount=Array.isArray(fifteenMinuteHistory.candles)?fifteenMinuteHistory.candles.length:0;
+      record.fifteenMinuteHistoryStatus=record.fifteenMinuteCandleCount>=50?'FYERS_15M_CONTEXT_AVAILABLE':'BLOCKED';
+      record.fifteenMinuteHistoryReason=fifteenMinuteHistoryError;
       indexStrategyScanStats[symbol]=record;
       indexStrategyScannerStatus='RUNNING';
       console.info('[FYERS_INDEX_SCANNER] completed:',JSON.stringify({

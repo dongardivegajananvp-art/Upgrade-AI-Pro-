@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { buildFnoCandleObservationSymbols } from './socket-subscription-utils.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, buildSetupEvaluationSubscriptionSymbols, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, buildSetupEvaluationSubscriptionSymbols, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery, buildNextSocketSubscriptionOperation, requeueRejectedSocketSubscriptionOperation } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -100,9 +100,12 @@ function scheduleSubscriptionFlush(delay = 0) {
 
     // Serialize both control operations through one paced queue. Rotation
     // unsubscribe calls must not bypass the same provider backoff as subscribe.
-    const operation = pendingUnsubscriptionSymbols.length ? 'unsubscribe' : 'subscribe';
+    const nextOperation = buildNextSocketSubscriptionOperation(
+      pendingUnsubscriptionSymbols, pendingSubscriptionSymbols, SUBSCRIPTION_BATCH_SIZE
+    );
+    if (!nextOperation) return;
+    const { type: operation, symbols: batch } = nextOperation;
     const queue = operation === 'unsubscribe' ? pendingUnsubscriptionSymbols : pendingSubscriptionSymbols;
-    const batch = splitSubscriptionBatches(queue, SUBSCRIPTION_BATCH_SIZE)[0] || [];
     queue.splice(0, batch.length);
     const pendingSet = operation === 'unsubscribe' ? pendingUnsubscriptionSet : pendingSubscriptionSet;
     for (const symbol of batch) pendingSet.delete(symbol);
@@ -645,24 +648,17 @@ export function startMarketSocket() {
         socketRateLimitUntil = Date.now() + backoffMs;
         const rejectedOperation = lastSentSubscriptionOperation;
         lastSentSubscriptionOperation = null;
-        if (rejectedOperation?.type === 'unsubscribe') {
-          // A rejected unsubscribe means the symbol may still be subscribed.
-          for (const symbol of rejectedOperation.symbols) {
-            socketSdkRequestedSymbols.add(symbol);
-            if (!pendingUnsubscriptionSet.has(symbol)) {
-              pendingUnsubscriptionSymbols.unshift(symbol);
-              pendingUnsubscriptionSet.add(symbol);
-            }
-          }
-        } else if (rejectedOperation?.type === 'subscribe') {
-          for (const symbol of rejectedOperation.symbols) socketSdkRequestedSymbols.delete(symbol);
-          for (const symbol of rejectedOperation.symbols) {
-            if (!pendingSubscriptionSet.has(symbol)) {
-              pendingSubscriptionSymbols.unshift(symbol);
-              pendingSubscriptionSet.add(symbol);
-            }
-          }
+        const retryQueues = requeueRejectedSocketSubscriptionOperation(
+          rejectedOperation, pendingUnsubscriptionSymbols, pendingSubscriptionSymbols
+        );
+        pendingUnsubscriptionSymbols = retryQueues.pendingUnsubscribeSymbols;
+        pendingSubscriptionSymbols = retryQueues.pendingSubscribeSymbols;
+        for (const symbol of rejectedOperation?.symbols || []) {
+          if (rejectedOperation.type === 'unsubscribe') socketSdkRequestedSymbols.add(symbol);
+          else if (rejectedOperation.type === 'subscribe') socketSdkRequestedSymbols.delete(symbol);
         }
+        for (const symbol of pendingUnsubscriptionSymbols) pendingUnsubscriptionSet.add(symbol);
+        for (const symbol of pendingSubscriptionSymbols) pendingSubscriptionSet.add(symbol);
         resetRateLimitAfterSubscriptionFlush = true;
         scheduleSocketRateLimitRecovery(backoffMs);
         console.warn('[FYERS_DATA] rate-limit backoff armed:', JSON.stringify({

@@ -7,6 +7,7 @@ import {
   isVerifiedIndexHistory,
   buildIndexStrategyScanRecord
 } from './index-strategy-scan-utils.js';
+import { validateHistorySymbol } from './fyers-rest.js';
 
 const now = Date.parse('2026-11-27T06:00:10.000Z');
 const freshTick = {
@@ -14,6 +15,11 @@ const freshTick = {
   exchangeTime: now / 1000 - 1,
   receivedAt: now - 500
 };
+
+test('NSE index symbols are permitted for verified 15-minute history requests', () => {
+  for (const symbol of INDEX_STRATEGY_SYMBOLS) assert.equal(validateHistorySymbol(symbol), true);
+  assert.equal(validateHistorySymbol('NSE:NOT-A-REAL-INDEX'), false);
+});
 
 test('index scanner recognizes only ticks with fresh receipt and exchange clocks', () => {
   assert.equal(isFreshIndexTick(freshTick, now), true);

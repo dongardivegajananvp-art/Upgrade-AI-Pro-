@@ -36,7 +36,7 @@ test('index scanner requires all three fresh index feeds before global evaluatio
 });
 
 test('index scanner accepts only recent completed FYERS five-minute history', () => {
-  const candleTime = now / 1000 - 300;
+  const candleTime = Math.floor(now / 300_000) * 300 - 300;
   const history = {
     source: 'FYERS_VERIFIED_5M_HISTORY',
     actionable: true,
@@ -47,6 +47,8 @@ test('index scanner accepts only recent completed FYERS five-minute history', ()
   assert.equal(isVerifiedIndexHistory({ ...history, source: 'SYNTHETIC' }, now), false);
   assert.equal(isVerifiedIndexHistory({ ...history, candles: [{ ...history.candles[0], completed: false }] }, now), false);
   assert.equal(isVerifiedIndexHistory({ ...history, lastCompletedCandleTime: candleTime - 300 }, now), false);
+  const staleButRecent = { ...history, lastCompletedCandleTime:candleTime-300, candles:[{...history.candles[0],time:candleTime-300}] };
+  assert.equal(isVerifiedIndexHistory(staleButRecent, now), false);
 });
 
 test('underlying index setup is never represented as an actionable trade', () => {

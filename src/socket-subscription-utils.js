@@ -1,6 +1,6 @@
-export const SOCKET_SUBSCRIPTION_BATCH_SIZE = 5;
-// Keep subscription control messages to six per minute while allowing five symbols per request.
-export const SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS = 10_000;
+export const SOCKET_SUBSCRIPTION_BATCH_SIZE = 10;
+// Two paced batches complete a 20-symbol rotation while reducing subscription-control churn.
+export const SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS = 30_000;
 
 export function shouldAdvanceFnoRotation({ pendingCount = 0, cooldownActive = false } = {}) {
   return Number(pendingCount) === 0 && cooldownActive !== true;

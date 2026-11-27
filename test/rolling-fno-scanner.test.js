@@ -73,14 +73,14 @@ test('selected underlying is separate from the deterministic rolling slice', () 
   assert.ok(!selected.includes('NSE:STOCK29-EQ'));
 });
 
-test('three REST history checks operate inside each twenty-symbol minute slice', () => {
-  assert.equal(FNO_SCAN_PER_SLICE,3);
+test('two REST history checks operate inside each twenty-symbol minute slice', () => {
+  assert.equal(FNO_SCAN_PER_SLICE,2);
   assert.equal(FNO_SOCKET_ROTATION_ADVANCE,20);
   const universe=Array.from({length:218},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ'}));
   const active=buildFnoRotationSlice(universe,0,20);
   assert.equal(active.length,20);
-  assert.equal(getFnoSliceScanSymbols(active,FNO_SCAN_PER_SLICE).length,3);
+  assert.equal(getFnoSliceScanSymbols(active,FNO_SCAN_PER_SLICE).length,2);
   assert.equal(getNextFnoRotationIndex(universe.length,0,FNO_SOCKET_ROTATION_ADVANCE),20);
   const fullCycleMinutes=Math.ceil(universe.length/20)*Math.ceil(20/FNO_SCAN_PER_SLICE);
-  assert.equal(fullCycleMinutes,77);
+  assert.equal(fullCycleMinutes,110);
 });

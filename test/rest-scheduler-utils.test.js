@@ -207,14 +207,14 @@ test('interactive Entry and Chart work retain priority over fair background clas
 });
 
 test('non-Entry REST traffic leaves two global request slots reserved for Entry', () => {
-  assert.equal(getRestTotalWindowLimit(100),6);
-  for (const priority of [90,80,60,40,30,20,10,-20]) assert.equal(getRestTotalWindowLimit(priority),4);
+  assert.equal(getRestTotalWindowLimit(100),5);
+  for (const priority of [90,80,60,40,30,20,10,-20]) assert.equal(getRestTotalWindowLimit(priority),3);
   const now=Date.UTC(2026,10,23,5,0,0);
-  const fourNonEntry=Array.from({length:4},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:80}));
+  const fourNonEntry=Array.from({length:3},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:80}));
   assert.ok(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(80))>0);
   assert.equal(getRestRequestWindowWaitMs(fourNonEntry,now,getRestTotalWindowLimit(100)),0);
-  const sixTotal=[...fourNonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:100}))];
-  assert.ok(getRestRequestWindowWaitMs(sixTotal,now,getRestTotalWindowLimit(100))>0);
+  const fiveTotal=[...fourNonEntry,...Array.from({length:2},(_,i)=>({at:new Date(now-i*1000).toISOString(),path:'/history',priority:100}))];
+  assert.ok(getRestRequestWindowWaitMs(fiveTotal,now,getRestTotalWindowLimit(100))>0);
 });
 
 test('queued REST requests expire at their exact deadline and invalid timestamps fail closed', () => {

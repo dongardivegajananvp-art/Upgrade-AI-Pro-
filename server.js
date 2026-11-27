@@ -4,7 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assessFeed, tradingEnabled } from './src/safety.js';
 import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, createSessionCookie, restoreSessionCookie, createRestSafetyCookie, restoreRestSafetyCookie } from './src/fyers-auth.js';
-import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol } from './src/fyers-market-socket.js';
+import { startMarketSocket, getMarketData, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol, setActiveTradeOptionSymbols } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
 import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
@@ -58,6 +58,8 @@ function parseCookies(header='') {
 }
 const consumedOAuthStates = new Set();
 const setupEvaluationFlight = createSingleFlight();
+const activeSetupLedger = new Map();
+const MAX_ACTIVE_SETUP_LEDGER = 2;
 let fnoUniverseLoadPromise = null;
 let fnoUniverseLoadedDate = null;
 let fnoUniverseRetryDate = null;
@@ -306,6 +308,52 @@ function startFnoStrategyScanner() {
 function isFnoMasterCurrent() {
   return fnoUniverseLoadedDate === getNseSessionDate();
 }
+function updateActiveSetupLifecycle(market) {
+  const ticksBySymbol = new Map((market.activeOptionTicks || []).map(row => [row.symbol, row.tick]));
+  for (const [id, setup] of activeSetupLedger) {
+    if (setup.status !== 'ACTIVE') continue;
+    const tick = ticksBySymbol.get(setup.contract);
+    const exchangeReceiptDelayMs = tick ? Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 : null;
+    const tickFresh = Boolean(tick?.fresh && Date.now() - Number(tick.receivedAt) <= 10000 &&
+      exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000);
+    setup.feedStatus = tickFresh ? 'FRESH' : tick ? 'STALE' : 'WAITING_FOR_TICK';
+    if (!tickFresh) continue;
+    setup.lastObservedPrice = Number(tick.price);
+    setup.lastObservedExchangeTime = Number(tick.exchangeTime);
+    setup.lastObservedAt = new Date(Number(tick.receivedAt)).toISOString();
+    if (Number(tick.price) <= setup.stopLoss) {
+      setup.status = 'STOP_LOSS_HIT';
+      setup.exitPrice = Number(tick.price);
+      setup.closedAt = new Date(Number(tick.receivedAt)).toISOString();
+    } else if (Number(tick.price) >= setup.target) {
+      setup.status = 'TARGET_HIT';
+      setup.exitPrice = Number(tick.price);
+      setup.closedAt = new Date(Number(tick.receivedAt)).toISOString();
+    }
+  }
+  const activeContracts = [...new Set([...activeSetupLedger.values()].filter(row => row.status === 'ACTIVE').map(row => row.contract))];
+  setActiveTradeOptionSymbols(activeContracts);
+  market.activeSetups = [...activeSetupLedger.values()].map(row => ({...row}));
+  return market;
+}
+function normalizeActiveSetup(input) {
+  if (!input || typeof input !== 'object') return null;
+  const underlying = String(input.underlying || '');
+  const contractSymbol = String(input.contract || '');
+  const contract = getVerifiedOptionContract(contractSymbol);
+  const entry = Number(input.entry), stopLoss = Number(input.stopLoss), target = Number(input.target);
+  const risk = entry - stopLoss, reward = target - entry;
+  const expectedUnderlying = underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
+  if (!validateNseSymbol(underlying) || !contract || contract.symbol !== contractSymbol ||
+      contract.underlying !== expectedUnderlying || ![entry,stopLoss,target].every(Number.isFinite) ||
+      !(stopLoss > 0 && stopLoss < entry && target > entry && risk > 0 && reward / risk >= 2)) return null;
+  const entryAt = Number.isFinite(Date.parse(input.entryAt)) ? new Date(input.entryAt).toISOString() : new Date().toISOString();
+  const id = String(input.id || (contractSymbol + '|' + entryAt));
+  return {id,underlying,contract:contractSymbol,strategy:String(input.strategy || 'VERIFIED_STRATEGY'),
+    optionSide:contract.side,entry,stopLoss,target,rr:Number((reward/risk).toFixed(4)),entryAt,
+    status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,lastObservedExchangeTime:null,lastObservedAt:null,
+    exitPrice:null,closedAt:null};
+}
 function getSessionMarketData() {
   const market = getMarketData();
   if (!isFnoMasterCurrent()) {
@@ -317,7 +365,7 @@ function getSessionMarketData() {
       lastError:'Current IST session official FYERS NSE F&O master is pending or unavailable'
     };
   }
-  return market;
+  return updateActiveSetupLifecycle(market);
 }
 function ensureFyersMarketStarted() {
   const market = startMarketSocket();
@@ -402,6 +450,28 @@ const server = http.createServer(async (req,res) => {
     return send(res,200,{status:'OFFICIAL_FNO_MASTER_MATCHES',query,universeCount:snapshot.universe?.length||0,resultCount:results.length,results});
   }
   if (req.method === 'GET' && url.pathname === '/api/market-data') return send(res,200,getSessionMarketData());
+  if (req.method === 'GET' && url.pathname === '/api/active-setups') return send(res,200,{setups:[...activeSetupLedger.values()].map(row=>({...row}))});
+  if (req.method === 'POST' && url.pathname === '/api/active-setups') {
+    try {
+      const body = await readJson(req);
+      if (!Array.isArray(body.setups) || body.setups.length > MAX_ACTIVE_SETUP_LEDGER) return send(res,400,{status:'REJECTED',reason:'At most two verified active setups may be restored'});
+      for (const input of body.setups) {
+        const normalized = normalizeActiveSetup(input);
+        if (!normalized) return send(res,400,{status:'REJECTED',reason:'Active setup identity or fixed Entry/SL/Target RR validation failed'});
+        const prior = activeSetupLedger.get(normalized.id);
+        if (prior?.status && prior.status !== 'ACTIVE') continue;
+        if (!prior && [...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').length >= MAX_ACTIVE_SETUP_LEDGER) {
+          return send(res,409,{status:'ACTIVE_SETUP_LIMIT',reason:'Maximum two active setups already retained'});
+        }
+        activeSetupLedger.set(normalized.id,{...prior,...normalized,status:prior?.status||'ACTIVE'});
+      }
+      const contracts=[...new Set([...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').map(row=>row.contract))];
+      const subscription=setActiveTradeOptionSymbols(contracts);
+      return send(res,200,{status:subscription.status,setups:[...activeSetupLedger.values()].map(row=>({...row})),subscription});
+    } catch(error) {
+      return send(res,400,{status:'REJECTED',reason:String(error.message||'Active setup restore failed').slice(0,180)});
+    }
+  }
   if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/history') return send(res,200,await getFiveMinuteSessionHistory(url.searchParams.get('symbol'),Date.now(),REST_PRIORITY.CHART,'chart-history'));

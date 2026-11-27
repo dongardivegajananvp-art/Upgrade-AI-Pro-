@@ -24,7 +24,7 @@ export function buildRollingFnoLeaderboard({ universe = [], ticks = new Map(), n
     const ageSeconds = Math.max(0, Math.floor((now - Number(tick.receivedAt)) / 1000));
     if (ageSeconds > maxObservationAgeSeconds) continue;
     const exchangeReceiptDelayMs=Number(tick.receivedAt)-Number(tick.exchangeTime)*1000;
-    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3 && exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000;
+    const fresh = ageSeconds <= 10 && now / 1000 - Number(tick.exchangeTime) >= -3 && exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000;
     const row = { ...tick, fresh, ageSeconds };
     observed.push(row);
     if (fresh) freshObserved.push(row);
@@ -64,7 +64,7 @@ export function getNextFreshFnoScanSymbol(activeSymbols, ticks = new Map(), scan
     return Boolean(tick && Number.isFinite(Number(tick.price)) && Number(tick.price) > 0 &&
       Number.isFinite(Number(tick.receivedAt)) && now - Number(tick.receivedAt) >= 0 &&
       now - Number(tick.receivedAt) <= 10000 && Number.isFinite(Number(tick.exchangeTime)) &&
-      now / 1000 - Number(tick.exchangeTime) >= -3 && now / 1000 - Number(tick.exchangeTime) <= 10 &&
+      now / 1000 - Number(tick.exchangeTime) >= -3 && true &&
       Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 >= 0 && Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000 <= 5000);
   });
   if (!eligible.length) return null;

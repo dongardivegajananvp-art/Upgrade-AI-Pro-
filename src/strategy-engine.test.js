@@ -889,7 +889,7 @@ test('fixed premium plan fails closed for invalid prices, tick size and target m
 });
 
 
-test('Day-Low reversal requires a session-low hold, bullish rejection and next-candle high breakout', () => {
+test('Day-Low reversal uses established support and rejects invalid reversal structures', () => {
   const start=Date.parse('2026-11-20T03:45:00Z')/1000;
   const rows=[
     {time:start,open:100,high:101.5,low:99,close:100.2,volume:100},
@@ -902,13 +902,20 @@ test('Day-Low reversal requires a session-low hold, bullish rejection and next-c
   assert.equal(setup?.side,'LONG');
   assert.equal(setup?.dayLowLevel,99);
   assert.equal(setup?.breakoutLevel,100.5);
-  assert.equal(detectDayLowReversal(rows.slice(0,3)),null);
-  const noSupportHold=rows.map(c=>({...c}));
-  noSupportHold[2]={...noSupportHold[2],low:99.05,close:98.9};
-  assert.equal(detectDayLowReversal(noSupportHold),null);
-  const noBreakout=rows.map(c=>({...c}));
-  noBreakout[3]={...noBreakout[3],close:100.4};
-  assert.equal(detectDayLowReversal(noBreakout),null);
+
+  const rejected = [
+    ['insufficient anchor candles', rows.slice(0,3)],
+    ['fresh lower low defines no new support', rows.map((c,i)=>i===2?{...c,open:99.2,high:100.5,low:98.5,close:99.7}:c)],
+    ['rejection does not hold support on close', rows.map((c,i)=>i===2?{...c,low:99.05,close:98.9}:c)],
+    ['bearish rejection candle', rows.map((c,i)=>i===2?{...c,open:100.4,high:100.5,low:99.05,close:100.1}:c)],
+    ['lower wick is smaller than candle body', rows.map((c,i)=>i===2?{...c,open:101,high:103,low:99.05,close:103}:i===3?{...c,open:103,high:104,low:103,close:103.5}:c)],
+    ['trigger candle breaks established support', rows.map((c,i)=>i===3?{...c,low:98.9}:c)],
+    ['trigger candle is bearish', rows.map((c,i)=>i===3?{...c,open:101,high:101.1,low:100.2,close:100.6}:c)],
+    ['trigger does not close above rejection high', rows.map((c,i)=>i===3?{...c,close:100.4}:c)]
+  ];
+  for (const [reason, candidateRows] of rejected) {
+    assert.equal(detectDayLowReversal(candidateRows),null,reason);
+  }
 });
 
 test('Day-Low reversal enters the same fresh-option and fixed 2R risk pipeline', () => {

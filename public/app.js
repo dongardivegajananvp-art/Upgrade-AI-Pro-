@@ -82,8 +82,12 @@ async function refreshUniverseScan() {
     // a chart symbol manually. This never places an order.
     if(data.marketSession==='OPEN'&&!userSelectedSymbol&&Array.isArray(data.top3)&&data.top3.length) {
       const best=data.top3[0];
-      const candidateKey=[best.symbol,best.strategy,best.side].join('|');
-      if(best.symbol&&['LONG','SHORT'].includes(best.side)&&candidateKey!==lastAutoTop3CandidateKey) {
+      // Never auto-promote an unscored underlying price setup as the "best"
+      // candidate. Automatic selection requires a completed finite research score;
+      // unscored price candidates remain visible for deliberate manual inspection.
+      const scored=best.qualityScore!==null&&best.qualityScore!==undefined&&Number.isFinite(Number(best.qualityScore));
+      const candidateKey=[best.symbol,best.strategy,best.side,best.qualityScore].join('|');
+      if(scored&&best.symbol&&['LONG','SHORT'].includes(best.side)&&candidateKey!==lastAutoTop3CandidateKey) {
         lastAutoTop3CandidateKey=candidateKey;
         selectCandidateForEntry(best,{automatic:true});
       }
@@ -92,7 +96,7 @@ async function refreshUniverseScan() {
     const lastScanAt=data.scanner?.lastScanAt?new Date(data.scanner.lastScanAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'WAITING';
     status.textContent=(data.universeCount||0)+' F&O · '+(data.scanner?.sliceScannedCount||0)+'/'+(data.scanPerSlice??4)+' THIS SLICE · '+(data.evaluatedCount||0)+' EVALUATED · '+(data.blockedCount||0)+' BLOCKED · SCAN '+Math.round(Number(data.scanIntervalMs||20000)/1000)+'s · LAST '+lastScanAt+' · ROLLING'+(data.marketSession==='CLOSED'?' · MARKET CLOSED · SCANNER PAUSED':'');
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Top 3 show fresh FYERS ticks with completed 5m price setups; 15m trend + 5m price structure drive strategy discovery; research scoring is separate. Option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
+    note.textContent=(data.marketSession==='CLOSED'?'NSE MARKET CLOSED · LIVE SCANNER AND RESEARCH WARMUPS ARE PAUSED UNTIL THE NEXT REGULAR SESSION. ':'')+'Coverage is rolling, not simultaneous. Candidate list shows fresh FYERS ticks with completed 5m price setups; unscored candidates are not ranked or auto-selected. 15m trend + 5m price structure drive strategy discovery; option tick/candles and fixed 2R are checked before an entry is confirmed. Current price setups: '+(data.candidateCount||0)+'.';
     container.append(note);
     const scanner=data.scanner||{};
     const warmup=document.createElement('small');warmup.className='empty-inline';
@@ -103,8 +107,9 @@ async function refreshUniverseScan() {
     for(const item of data.top3||[]) {
       const card=document.createElement('button');card.type='button';card.className='research-card';
       const head=document.createElement('div');head.className='research-card-head';
-      const title=document.createElement('strong');title.textContent='#'+(item.rank||'—')+' '+item.symbol+' · '+item.strategy+' · '+item.side;
-      const score=document.createElement('b');score.textContent=item.qualityScore===null?'PRICE STRUCTURE · OPTION CHECK PENDING':item.qualityScore+'/100 · '+item.grade;
+      const scored=item.qualityScore!==null&&item.qualityScore!==undefined&&Number.isFinite(Number(item.qualityScore));
+      const title=document.createElement('strong');title.textContent=(scored?'#'+(item.rank||'—'):'CANDIDATE '+(item.rank||'—'))+' '+item.symbol+' · '+item.strategy+' · '+item.side;
+      const score=document.createElement('b');score.textContent=scored?item.qualityScore+'/100 · '+item.grade:'UNSCORED PRICE SETUP · OPTION CHECK PENDING';
       head.append(title,score);
       const evidence=document.createElement('small');evidence.textContent=(item.evidence||[]).join(' · ');
       const target=document.createElement('small');target.textContent=item.qualityScore===null?'Risk rule: Entry/SL/Target only after official option verification · RR ≥ 2':'AI target: '+(item.targetR||2)+'R · '+(item.targetRationale||'Minimum 2R');

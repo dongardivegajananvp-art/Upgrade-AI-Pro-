@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { REST_PRIORITY, REST_RECOVERY_REQUIRED_ON_START, canRunRestRecoveryProbe, sortRestQueue, getHistoryRequestWindowWaitMs, getRestRequestWindowWaitMs, findFairRestQueueIndex, getRestQueueMaxAgeMs, getRestTotalWindowLimit, isRestQueueExpired, buildRestEndpointHealth, parseRetryAfterMs, getRateLimitCooldownUntil, getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
-import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getFifteenMinuteCacheValidUntil, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
+import { validateNseSymbol, validateHistorySymbol, normalizeFiveMinuteCandles, normalizeFifteenMinuteCandles, normalizeDailyCandles, buildFyersUrl, getFiveMinuteCacheValidUntil, getFifteenMinuteCacheValidUntil, getIntradayHistoryRange, getFiveMinuteHistoryRange, getFifteenMinuteHistoryRange, getRestDiagnostics, getRestSafetyState, restoreRestSafetyState } from './fyers-rest.js';
 
 test('FYERS REST accepts only a single NSE symbol', () => {
   assert.equal(validateNseSymbol('NSE:SBIN-EQ'), true);
@@ -31,6 +31,28 @@ test('history normalization returns only valid completed NSE-session candles', (
   const candles = normalizeFiveMinuteCandles(rows, now);
   assert.deepEqual(candles.map(c => c.time), [first, first + 300]);
   assert.ok(candles.every(c => c.completed && c.source === 'FYERS_HISTORY'));
+});
+
+test('intraday history requests use epoch range ending before the current incomplete candle', () => {
+  const now=Date.UTC(2026,10,27,4,18,20); // 09:48:20 IST
+  const five=getFiveMinuteHistoryRange(now,20);
+  const fifteen=getFifteenMinuteHistoryRange(now,45);
+  assert.equal(five.dateFormat,'0');
+  assert.equal(five.intervalSeconds,300);
+  assert.equal(five.to,Math.floor(now/300000)*300-1);
+  assert.equal(fifteen.dateFormat,'0');
+  assert.equal(fifteen.intervalSeconds,900);
+  assert.equal(fifteen.to,Math.floor(now/900000)*900-1);
+  assert.equal(five.from,Math.floor((now+19800000)/86400000)*86400-19800-20*86400);
+  assert.equal(fifteen.from,Math.floor((now+19800000)/86400000)*86400-19800-45*86400);
+  assert.ok(five.to < Math.floor(now/300000)*300);
+  assert.ok(fifteen.to < Math.floor(now/900000)*900);
+});
+test('intraday range rejects invalid clocks and uses the selected candle resolution', () => {
+  assert.throws(()=>getIntradayHistoryRange(0,300,20),/valid intraday history timestamp/);
+  const range=getIntradayHistoryRange(Date.UTC(2026,10,27,4,18,20),60,5);
+  assert.equal(range.intervalSeconds,60);
+  assert.equal(range.to,Math.floor(Date.UTC(2026,10,27,4,18,20)/60000)*60-1);
 });
 
 test('FYERS API paths preserve the data and v3 base path', () => {

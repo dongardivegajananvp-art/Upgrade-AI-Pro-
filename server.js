@@ -68,6 +68,7 @@ const consumedOAuthStates = new Set();
 const setupEvaluationFlight = createSingleFlight();
 const activeSetupLedger = new Map();
 const MAX_ACTIVE_SETUP_LEDGER = 2;
+const recentlyClosedSetupByUnderlying = new Map();
 let fnoUniverseLoadPromise = null;
 let fnoUniverseLoadedDate = null;
 let fnoUniverseRetryDate = null;
@@ -461,7 +462,21 @@ function updateActiveSetupLifecycle(market) {
   for (const [id, setup] of activeSetupLedger) {
     if (setup.status !== 'ACTIVE') continue;
     const tick = ticksBySymbol.get(setup.contract);
-    activeSetupLedger.set(id,updateActiveSetupFromTick(setup,tick,Date.now()));
+    const updated=updateActiveSetupFromTick(setup,tick,Date.now());
+    activeSetupLedger.set(id,updated);
+    if(updated.status!=='ACTIVE') {
+      const cached=getCachedResearchHistories().fiveMinute.get(setup.underlying);
+      const lastCompletedCandleTime=Number(setup.setupCandleTime||cached?.candles?.at(-1)?.time||0);
+      recentlyClosedSetupByUnderlying.set(setup.underlying,{
+        setupCandleTime:lastCompletedCandleTime,closedAt:updated.closedAt||new Date().toISOString(),
+        status:updated.status,contract:setup.contract
+      });
+      console.info('[OPPORTUNITY_CYCLE] setup closed; slot released and next scan remains enabled:',JSON.stringify({
+        id,underlying:setup.underlying,contract:setup.contract,status:updated.status,
+        activeCount:[...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').length,
+        setupCandleTime:lastCompletedCandleTime,closedAt:updated.closedAt||null
+      }));
+    }
   }
   const activeContracts = [...new Set([...activeSetupLedger.values()].filter(row => row.status === 'ACTIVE').map(row => row.contract))];
   const activeContractsKey = activeContracts.join('|');
@@ -496,7 +511,9 @@ function normalizeActiveSetup(input) {
   const entryAt = Number.isFinite(Date.parse(input.entryAt)) ? new Date(input.entryAt).toISOString() : new Date().toISOString();
   const id = String(input.id || (contractSymbol + '|' + entryAt));
   return {id,underlying,contract:contractSymbol,strategy:String(input.strategy || 'VERIFIED_STRATEGY'),
-    optionSide:contract.side,entry,stopLoss,target,rr:riskPlan.rr,entryAt,
+    optionSide:contract.side,strike:contract.strike??null,expiry:contract.expiry??null,
+    entry,stopLoss,target,rr:riskPlan.rr,entryAt,
+    setupCandleTime:Number.isFinite(Number(input.setupCandleTime))&&Number(input.setupCandleTime)>0?Number(input.setupCandleTime):null,
     status:'ACTIVE',feedStatus:'WAITING_FOR_TICK',lastObservedPrice:null,lastObservedExchangeTime:null,lastObservedAt:null,
     exitPrice:null,closedAt:null};
 }
@@ -742,10 +759,19 @@ const server = http.createServer(async (req,res) => {
         const snapshot=getFnoUniverseSnapshot();
         const histories=getCachedResearchHistories();
         const market=getMarketData();
+        const activeUnderlyings=[...new Set([...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').map(row=>row.underlying))];
+        const coolingUnderlyings=[];
+        for(const [symbol,closed] of recentlyClosedSetupByUnderlying) {
+          const latestCandleTime=Number(histories.fiveMinute.get(symbol)?.candles?.at(-1)?.time||0);
+          if(latestCandleTime<=Number(closed.setupCandleTime||0)) coolingUnderlyings.push(symbol);
+          else recentlyClosedSetupByUnderlying.delete(symbol);
+        }
+        const excludedUnderlyings=[...new Set([...activeUnderlyings,...coolingUnderlyings])];
         const result=evaluateRollingFnoUniverse({
           universe:snapshot.universe,ticks:snapshot.ticks,
           fiveMinute:histories.fiveMinute,fifteenMinute:histories.fifteenMinute,
-          topGainers:market.fno?.topGainers||[],now:Date.now()
+          topGainers:market.fno?.topGainers||[],now:Date.now(),
+          excludeSymbols:excludedUnderlyings
         });
         const now=Date.now();
         const symbolCoverage=(snapshot.universe||[]).map(item=>{
@@ -779,7 +805,7 @@ const server = http.createServer(async (req,res) => {
         // candidates merely because the active WebSocket slice just rotated and
         // its per-slice diagnostic counter was reset.
         const safeTop3=Array.isArray(result.top3)?result.top3:[];
-        return send(res,200,{...result,status:safeTop3.length?result.status:strategyChecksThisSlice>0?result.status:'NO_TRADE_DATA',top3:safeTop3,candidateCount:safeTop3.length,marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
+        return send(res,200,{...result,status:safeTop3.length?result.status:strategyChecksThisSlice>0?result.status:'NO_TRADE_DATA',top3:safeTop3,candidateCount:safeTop3.length,activeSetupCount:activeUnderlyings.length,availableSetupSlots:Math.max(0,MAX_ACTIVE_SETUP_LEDGER-activeUnderlyings.length),excludedActiveUnderlyings:activeUnderlyings,excludedUntilNextFiveMinuteCandle:coolingUnderlyings,opportunityCycleStatus:activeUnderlyings.length>=MAX_ACTIVE_SETUP_LEDGER?'WAITING_FOR_ACTIVE_SLOT':safeTop3.length?'NEXT_VERIFIED_CANDIDATE_AVAILABLE':'SCANNING_FOR_NEXT_CANDIDATE',marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
           rotationIntervalMs:snapshot.rotationIntervalMs,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:snapshot.scanPerSlice,sliceSize:snapshot.activeSymbols?.length||0,fullCycleMinutes,strategyChecksThisSlice,candleReceivedThisSlice:Number(fnoStrategyScanStats.candleReceivedCount||0),symbolCap:snapshot.symbolCap,
           scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS},coverageSummary,symbolCoverage,
           note:'Twenty-symbol live socket slices rotate each minute. History-backed strategy checks remain within the FYERS REST governor; counters report actual completed checks only. Per-symbol scan/tick coverage is observational only. Missing/stale inputs are BLOCKED; no synthetic data or orders.'});
@@ -954,6 +980,17 @@ const server = http.createServer(async (req,res) => {
     try {
       if (!(await waitForCurrentFnoMaster({ loadPromise:fnoUniverseLoadPromise, isCurrent:isFnoMasterCurrent }))) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Current IST session official FYERS NSE F&O master is not verified'});
       const body = await readJson(req);
+      const activeRows=[...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE');
+      if(activeRows.length>=MAX_ACTIVE_SETUP_LEDGER) return send(res,200,{
+        status:'ACTIVE_SETUP_LIMIT_NO_TRADE',
+        reason:'Two verified setups are already active. The independent F&O scanner continues searching; option confirmation waits until an active slot is released.',
+        activeSetupCount:activeRows.length,availableSetupSlots:0,orders:'DISABLED'
+      });
+      if(activeRows.some(row=>row.underlying===body.underlying||row.contract===body.contract)) return send(res,200,{
+        status:'ACTIVE_SETUP_ALREADY_RETAINED_NO_TRADE',
+        reason:'This underlying or option contract already has an active retained setup.',
+        activeSetupCount:activeRows.length,availableSetupSlots:Math.max(0,MAX_ACTIVE_SETUP_LEDGER-activeRows.length),orders:'DISABLED'
+      });
       const market = getMarketData();
       const freshIndexCount=Object.values(market.indices||{}).filter(tick=>tick?.fresh).length;
       if(freshIndexCount!==3) return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'All three FYERS indices (NIFTY 50, BANK NIFTY and FIN NIFTY) must be fresh; one stale index blocks the setup'});
@@ -1024,7 +1061,7 @@ const server = http.createServer(async (req,res) => {
           strategyLedger:Array.isArray(result.strategyLedger)?result.strategyLedger.map(({strategy,status,reason,side,confirmedAt})=>({strategy,status,reason,side:side||null,confirmedAt:confirmedAt||null})):[],
           durationMs:Date.now()-startedAt
         }));
-        return {...result,underlying:body.underlying,contract:body.contract,source:'FYERS_VERIFIED_DATA'};
+        return {...result,underlying:body.underlying,contract:body.contract,underlyingCandleTime:underlyingHistory.candles.at(-1)?.time||null,source:'FYERS_VERIFIED_DATA'};
       });
       return send(res,200,setup);
     } catch (error) {

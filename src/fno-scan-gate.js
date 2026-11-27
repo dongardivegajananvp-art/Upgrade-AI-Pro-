@@ -8,6 +8,5 @@ export function isFreshFnoTick(tick, now = Date.now(), maxAgeMs = 10_000) {
   const exchangeReceiptDelayMs = receivedAt - exchangeTime * 1000;
   return Number.isFinite(receivedAt) && Number.isFinite(exchangeTime) &&
     receiveAgeMs >= 0 && receiveAgeMs <= Math.max(0, Number(maxAgeMs) || 0) &&
-    exchangeAgeSeconds >= -3 && exchangeAgeSeconds <= 10 &&
-    exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000;
+    exchangeAgeSeconds >= -3 && exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5000;
 }

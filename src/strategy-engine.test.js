@@ -621,6 +621,9 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan with one compl
   assert.equal(result.optionSide,'CE');
   assert.ok(result.rr>=2);
   assertStaleOptionQuoteBlocks(underlyingCandles,'LONG','DAY_HIGH_LOW_BREAK_RETEST');
+  const delayedOption=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:101.7,exchangeTime:now/1000,receivedAt:now},...option,optionTick:{...option.optionTick,exchangeTime:now/1000-5.001,receivedAt:now},now,researchEnabled:false});
+  assert.equal(delayedOption.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(delayedOption.reason,/Fresh FYERS option premium tick/);
 });
 
 test('end-to-end opening-range first-candle breakout passes with one completed option candle',()=>{

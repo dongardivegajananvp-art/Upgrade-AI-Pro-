@@ -610,7 +610,11 @@ const server = http.createServer(async (req,res) => {
         };
         const strategyChecksThisSlice=Number(fnoStrategyScanStats.sliceStrategyCheckCount||0);
         const fullCycleMinutes=snapshot.activeSymbols?.length&&snapshot.scanPerSlice?Math.ceil((snapshot.universe?.length||0)/snapshot.activeSymbols.length)*Math.ceil(snapshot.activeSymbols.length/snapshot.scanPerSlice):null;
-        const safeTop3=strategyChecksThisSlice>0&&Number(result.evaluatedCount||0)>0?result.top3:[];
+        // Candidate generation already requires a fresh underlying tick and a verified
+        // completed-candle nine-strategy confirmation. Do not hide valid rolling
+        // candidates merely because the active WebSocket slice just rotated and
+        // its per-slice diagnostic counter was reset.
+        const safeTop3=Array.isArray(result.top3)?result.top3:[];
         return send(res,200,{...result,status:safeTop3.length?result.status:strategyChecksThisSlice>0?result.status:'NO_TRADE_DATA',top3:safeTop3,candidateCount:safeTop3.length,marketSession:isNseRegularSession(now)?'OPEN':'CLOSED',scannerStatus:isNseRegularSession(now)?fnoStrategyScanStats.status:'OUTSIDE_NSE_SESSION',scannerPauseReason:isNseRegularSession(now)?null:'NSE market session is closed; live F&O scanning and research warmups are paused',activeSymbols:snapshot.activeSymbols,rotationIndex:snapshot.rotationIndex,
           rotationIntervalMs:snapshot.rotationIntervalMs,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS,scanPerSlice:snapshot.scanPerSlice,sliceSize:snapshot.activeSymbols?.length||0,fullCycleMinutes,strategyChecksThisSlice,candleReceivedThisSlice:Number(fnoStrategyScanStats.candleReceivedCount||0),symbolCap:snapshot.symbolCap,
           scanner:{...fnoStrategyScanStats,scanIntervalMs:FNO_SCAN_MIN_INTERVAL_MS},coverageSummary,symbolCoverage,

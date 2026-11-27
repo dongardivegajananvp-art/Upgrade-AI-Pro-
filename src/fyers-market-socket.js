@@ -194,8 +194,7 @@ function isFresh(tick, now = Date.now()) {
   const receiptAge = now - Number(tick.receivedAt);
   const exchangeAge = now / 1000 - Number(tick.exchangeTime);
   const exchangeReceiptDelayMs = Number(tick.receivedAt) - Number(tick.exchangeTime) * 1000;
-  return receiptAge >= 0 && receiptAge <= 10_000 && exchangeAge >= -3 && exchangeAge <= 10 &&
-    exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5_000;
+  return receiptAge >= 0 && receiptAge <= 10_000 && exchangeAge >= -3 && exchangeReceiptDelayMs >= 0 && exchangeReceiptDelayMs <= 5_000;
 }
 function acceptedSymbols() {
   return new Set(desiredSocketSubscriptions());

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { buildFnoCandleObservationSymbols } from './socket-subscription-utils.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, buildSetupEvaluationSubscriptionSymbols, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, buildSetupEvaluationSubscriptionSymbols, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery, buildNextSocketSubscriptionOperation, requeueRejectedSocketSubscriptionOperation } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -54,9 +54,11 @@ const socketSdkRequestedSymbols = new Set();
 let subscriptionOperationSequence = 0;
 const SUBSCRIPTION_BATCH_SIZE = SOCKET_SUBSCRIPTION_BATCH_SIZE;
 const SUBSCRIPTION_BATCH_INTERVAL_MS = SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS;
-let lastSentSubscriptionBatch = [];
+let lastSentSubscriptionOperation = null;
 let pendingSubscriptionSymbols = [];
 const pendingSubscriptionSet = new Set();
+let pendingUnsubscriptionSymbols = [];
+const pendingUnsubscriptionSet = new Set();
 let subscriptionFlushTimer = null;
 let socketRateLimitAttempt = 0;
 let socketRateLimitUntil = 0;
@@ -91,35 +93,55 @@ function pruneSocketSymbolState() {
 }
 
 function scheduleSubscriptionFlush(delay = 0) {
-  if (subscriptionFlushTimer || !pendingSubscriptionSymbols.length) return;
+  if (subscriptionFlushTimer || (!pendingSubscriptionSymbols.length && !pendingUnsubscriptionSymbols.length)) return;
   subscriptionFlushTimer = setTimeout(() => {
     subscriptionFlushTimer = null;
     if (!socket || socketStatus !== 'CONNECTED' || !socketTransportConnected) return;
-    const batch = splitSubscriptionBatches(pendingSubscriptionSymbols, SUBSCRIPTION_BATCH_SIZE)[0] || [];
-    pendingSubscriptionSymbols.splice(0, batch.length);
-    for (const symbol of batch) pendingSubscriptionSet.delete(symbol);
+
+    // Serialize both control operations through one paced queue. Rotation
+    // unsubscribe calls must not bypass the same provider backoff as subscribe.
+    const nextOperation = buildNextSocketSubscriptionOperation(
+      pendingUnsubscriptionSymbols, pendingSubscriptionSymbols, SUBSCRIPTION_BATCH_SIZE
+    );
+    if (!nextOperation) return;
+    const { type: operation, symbols: batch } = nextOperation;
+    const queue = operation === 'unsubscribe' ? pendingUnsubscriptionSymbols : pendingSubscriptionSymbols;
+    queue.splice(0, batch.length);
+    const pendingSet = operation === 'unsubscribe' ? pendingUnsubscriptionSet : pendingSubscriptionSet;
+    for (const symbol of batch) pendingSet.delete(symbol);
+
     try {
-      console.info('[FYERS_DATA] paced subscribe batch:', JSON.stringify({
-        count: batch.length, remaining: pendingSubscriptionSymbols.length,
-        batchSize: SUBSCRIPTION_BATCH_SIZE, intervalMs: SUBSCRIPTION_BATCH_INTERVAL_MS
+      console.info(`[FYERS_DATA] paced ${operation} batch:`, JSON.stringify({
+        count: batch.length,
+        remainingUnsubscribe: pendingUnsubscriptionSymbols.length,
+        remainingSubscribe: pendingSubscriptionSymbols.length,
+        batchSize: SUBSCRIPTION_BATCH_SIZE,
+        intervalMs: SUBSCRIPTION_BATCH_INTERVAL_MS
       }));
-      lastSentSubscriptionBatch = [...batch];
-      socket.subscribe(batch);
-      for (const symbol of batch) socketSdkRequestedSymbols.add(symbol);
+      lastSentSubscriptionOperation = { type: operation, symbols: [...batch], at: Date.now() };
+      if (operation === 'unsubscribe') {
+        if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
+        socket.unsubscribe(batch);
+        for (const symbol of batch) socketSdkRequestedSymbols.delete(symbol);
+      } else {
+        socket.subscribe(batch);
+        for (const symbol of batch) socketSdkRequestedSymbols.add(symbol);
+      }
     } catch (error) {
-      lastSentSubscriptionBatch = [];
-      pendingSubscriptionSymbols = [...batch, ...pendingSubscriptionSymbols];
-      for (const symbol of batch) pendingSubscriptionSet.add(symbol);
+      lastSentSubscriptionOperation = null;
+      queue.unshift(...batch);
+      for (const symbol of batch) pendingSet.add(symbol);
       lastError = safeError(error);
       socketStatus = 'SUBSCRIPTION_UPDATE_ERROR';
-      console.error('[FYERS_DATA] paced subscription batch failed:', lastError);
+      console.error(`[FYERS_DATA] paced ${operation} batch failed:`, lastError);
       return;
     }
-    if (pendingSubscriptionSymbols.length) {
+
+    if (pendingUnsubscriptionSymbols.length || pendingSubscriptionSymbols.length) {
       scheduleSubscriptionFlush(SUBSCRIPTION_BATCH_INTERVAL_MS);
     } else if (canCompleteSocketRateLimitRecovery({
       recoveryPending: resetRateLimitAfterSubscriptionFlush,
-      pendingCount: pendingSubscriptionSymbols.length,
+      pendingCount: pendingSubscriptionSymbols.length + pendingUnsubscriptionSymbols.length,
       socketConnected: socketTransportConnected && socketStatus === 'CONNECTED',
       now: Date.now(),
       cooldownUntil: socketRateLimitUntil
@@ -127,7 +149,7 @@ function scheduleSubscriptionFlush(delay = 0) {
       resetRateLimitAfterSubscriptionFlush = false;
       socketRateLimitUntil = 0;
       socketRateLimitAttempt = 0;
-      console.info('[FYERS_DATA] rate-limit backoff cleared after all paced subscription batches were accepted');
+      console.info('[FYERS_DATA] rate-limit backoff cleared after all paced subscription operations were accepted');
     }
   }, delay);
   subscriptionFlushTimer.unref?.();
@@ -135,28 +157,44 @@ function scheduleSubscriptionFlush(delay = 0) {
 
 function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
   const desired = [...new Set(desiredSymbols)];
-  const known = [...socketSdkRequestedSymbols, ...pendingSubscriptionSet];
-  const { removed, added } = getSocketSubscriptionDelta(known, desired);
+  const known = [
+    ...socketSdkRequestedSymbols,
+    ...pendingSubscriptionSet,
+    ...pendingUnsubscriptionSet
+  ].filter(symbol => !pendingUnsubscriptionSet.has(symbol) || pendingSubscriptionSet.has(symbol));
+  const knownSet = new Set(known);
+  const desiredSet = new Set(desired);
+  const removed = known.filter(symbol => !desiredSet.has(symbol));
+  const added = desired.filter(symbol => !knownSet.has(symbol));
   const operationId = ++subscriptionOperationSequence;
   console.info('[FYERS_DATA] subscription delta:', JSON.stringify({
     operationId, reason, at: new Date().toISOString(),
-    currentCount: socketSdkRequestedSymbols.size, queuedCount: pendingSubscriptionSet.size,
+    currentCount: socketSdkRequestedSymbols.size,
+    queuedSubscribeCount: pendingSubscriptionSet.size,
+    queuedUnsubscribeCount: pendingUnsubscriptionSet.size,
     desiredCount: desired.length, addedCount: added.length, removedCount: removed.length
   }));
+
   if (removed.length) {
     const removedSet = new Set(removed);
     pendingSubscriptionSymbols = pendingSubscriptionSymbols.filter(symbol => !removedSet.has(symbol));
     for (const symbol of removed) pendingSubscriptionSet.delete(symbol);
-    const activeRemoved = removed.filter(symbol => socketSdkRequestedSymbols.has(symbol));
-    if (activeRemoved.length) {
-      if (typeof socket.unsubscribe !== 'function') throw new Error('FYERS SDK unsubscribe is unavailable; subscription update stopped to protect the 100-symbol cap');
-      console.info('[FYERS_DATA] unsubscribe request:', JSON.stringify({ operationId, count: activeRemoved.length }));
-      socket.unsubscribe(activeRemoved);
-      for (const symbol of activeRemoved) socketSdkRequestedSymbols.delete(symbol);
+    for (const symbol of removed) {
+      if (socketSdkRequestedSymbols.has(symbol) && !pendingUnsubscriptionSet.has(symbol)) {
+        pendingUnsubscriptionSymbols.push(symbol);
+        pendingUnsubscriptionSet.add(symbol);
+      }
     }
   }
   if (added.length) {
     for (const symbol of added) {
+      // If an unsubscribe has not yet been sent, cancel it instead of issuing
+      // a needless unsubscribe/subscribe pair for a symbol still desired.
+      if (pendingUnsubscriptionSet.has(symbol)) {
+        pendingUnsubscriptionSet.delete(symbol);
+        pendingUnsubscriptionSymbols = pendingUnsubscriptionSymbols.filter(item => item !== symbol);
+        continue;
+      }
       pendingSubscriptionSymbols.push(symbol);
       pendingSubscriptionSet.add(symbol);
     }
@@ -171,7 +209,7 @@ function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
       }));
     }
   }
-  // Resume any batches paused by a disconnect, even when the desired set did not change.
+  // One serialized scheduler owns both subscribe and unsubscribe operations.
   scheduleSubscriptionFlush();
 }
 
@@ -205,7 +243,7 @@ function scheduleSocketRateLimitRecovery(delayMs = 0) {
       if (currentSubscriptions.length > 100) throw new Error('Subscription count exceeded the Standard plan 100-symbol limit');
       socketStatus = 'CONNECTED';
       resetRateLimitAfterSubscriptionFlush = true;
-      if (!pendingSubscriptionSymbols.length) {
+      if (!pendingSubscriptionSymbols.length && !pendingUnsubscriptionSymbols.length) {
         resetRateLimitAfterSubscriptionFlush = false;
         socketRateLimitUntil = 0;
         socketRateLimitAttempt = 0;
@@ -215,7 +253,8 @@ function scheduleSocketRateLimitRecovery(delayMs = 0) {
       syncSocketSubscriptions(currentSubscriptions, 'rate-limit-backoff-recovery');
       socketHasConnected = true;
       console.info('[FYERS_DATA] rate-limit backoff elapsed; paced subscription reconciliation resumed:', JSON.stringify({
-        pendingCount: pendingSubscriptionSymbols.length,
+        pendingCount: pendingSubscriptionSymbols.length + pendingUnsubscriptionSymbols.length,
+        pendingUnsubscribeCount: pendingUnsubscriptionSymbols.length,
         transportConnected: socketTransportConnected
       }));
     } catch (error) {
@@ -429,9 +468,9 @@ export function setFnoUniverse(items) {
       // Do not replace a slice while its paced subscription queue is still being
       // delivered or while FYERS 1015 backoff is active. Otherwise each 60s
       // rotation discards queued symbols faster than the socket can subscribe.
-      const pendingCount = pendingSubscriptionSet.size;
+      const pendingCount = pendingSubscriptionSet.size + pendingUnsubscriptionSet.size;
       if (!shouldAdvanceFnoRotation({ pendingCount, cooldownActive: Date.now() < socketRateLimitUntil })) {
-        console.info('[FYERS_DATA] F&O rotation held until subscription queue drains:', JSON.stringify({ pendingCount, rateLimitWaitMs: Math.max(0, socketRateLimitUntil - Date.now()) }));
+        console.info('[FYERS_DATA] F&O rotation held until subscription queue drains:', JSON.stringify({ pendingCount, pendingUnsubscribeCount: pendingUnsubscriptionSet.size, rateLimitWaitMs: Math.max(0, socketRateLimitUntil - Date.now()) }));
         return;
       }
       applyFnoRotation(activeFnoSymbols.length > 0 && universe.length > MAX_UNDERLYING_SLOTS);
@@ -607,12 +646,19 @@ export function startMarketSocket() {
         socketRateLimitAttempt += 1;
         const backoffMs = getSocketRateLimitBackoffMs(socketRateLimitAttempt);
         socketRateLimitUntil = Date.now() + backoffMs;
-        const rejectedBatch = [...lastSentSubscriptionBatch];
-        lastSentSubscriptionBatch = [];
-        for (const symbol of rejectedBatch) socketSdkRequestedSymbols.delete(symbol);
-        const retryBatch = rejectedBatch.filter(symbol => !pendingSubscriptionSet.has(symbol));
-        pendingSubscriptionSymbols = [...retryBatch, ...pendingSubscriptionSymbols];
-        for (const symbol of retryBatch) pendingSubscriptionSet.add(symbol);
+        const rejectedOperation = lastSentSubscriptionOperation;
+        lastSentSubscriptionOperation = null;
+        const retryQueues = requeueRejectedSocketSubscriptionOperation(
+          rejectedOperation, pendingUnsubscriptionSymbols, pendingSubscriptionSymbols
+        );
+        pendingUnsubscriptionSymbols = retryQueues.pendingUnsubscribeSymbols;
+        pendingSubscriptionSymbols = retryQueues.pendingSubscribeSymbols;
+        for (const symbol of rejectedOperation?.symbols || []) {
+          if (rejectedOperation.type === 'unsubscribe') socketSdkRequestedSymbols.add(symbol);
+          else if (rejectedOperation.type === 'subscribe') socketSdkRequestedSymbols.delete(symbol);
+        }
+        for (const symbol of pendingUnsubscriptionSymbols) pendingUnsubscriptionSet.add(symbol);
+        for (const symbol of pendingSubscriptionSymbols) pendingSubscriptionSet.add(symbol);
         resetRateLimitAfterSubscriptionFlush = true;
         scheduleSocketRateLimitRecovery(backoffMs);
         console.warn('[FYERS_DATA] rate-limit backoff armed:', JSON.stringify({
@@ -689,7 +735,7 @@ export function getMarketData(now = Date.now()) {
   };
   return {
     socketStatus, lastError, fnoTickCoverage,
-    subscriptionDiagnostics: buildSocketSubscriptionDiagnostics({ desired:desiredSocketSubscriptions(), sentToSdk:[...socketSdkRequestedSymbols], pending:pendingSubscriptionSymbols }),
+    subscriptionDiagnostics: buildSocketSubscriptionDiagnostics({ desired:desiredSocketSubscriptions(), sentToSdk:[...socketSdkRequestedSymbols], pending:[...pendingUnsubscriptionSymbols, ...pendingSubscriptionSymbols] }),
     socketRateLimit: { attempt: socketRateLimitAttempt, retryAt: socketRateLimitUntil > now ? new Date(socketRateLimitUntil).toISOString() : null, backoffActive: now < socketRateLimitUntil },
     socketDiagnostics: {
       connectedAt: socketConnectedAt ? new Date(socketConnectedAt).toISOString() : null,

@@ -182,7 +182,6 @@ function startFnoStrategyScanner() {
     fnoStrategyScanStats.status='RUNNING';
     const scanStartedAt=Date.now();
     fnoStrategyScanNextAllowedAt=scanStartedAt+FNO_SCAN_MIN_INTERVAL_MS;
-    fnoStrategyScanStats.sliceScannedCount++;
     fnoStrategyScanBusy=true;
     fnoSymbolScanLedger.set(symbol,{symbol,status:'SCANNING',attemptedAt:new Date(scanStartedAt).toISOString(),attemptCount:(fnoSymbolScanLedger.get(symbol)?.attemptCount||0)+1});
     try {
@@ -193,6 +192,7 @@ function startFnoStrategyScanner() {
         throw new Error('Fresh FYERS underlying/futures tick is required; history request skipped');
       }
       const history=await getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.SCANNER,'fno-scanner-5m');
+      fnoStrategyScanStats.sliceScannedCount++;
       const websocketObservation=latest.websocketCandles?.get(symbol)||null;
       const tick=scanTick;
       const market=getMarketData();

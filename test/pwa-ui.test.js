@@ -62,11 +62,11 @@ test('early option breakout is rechecked on the live tick, not delayed until the
   assert.match(app, /Number\(optionTick\.price\).*entryTriggerPrice/);
 });
 
-test('entry evaluation respects FYERS one-hour REST cooldown instead of retrying every poll', () => {
+test('entry evaluation respects server cooldown and uses only a one-minute UI fallback', () => {
   assert.match(server, /retryAt:rateLimited&&rest\.cooldownUntil\?rest\.cooldownUntil:null/);
   assert.match(app, /if\(response\.status===429\)/);
   assert.match(app, /Number\(setup\.retryAt\).*Date\.now\(\)/);
-  assert.match(app, /60\*60\*1000/);
+  assert.match(app, /60_000/);
 });
 
 test('entry evaluation retries transient stale ticks and network/server failures without weakening trade gates', () => {

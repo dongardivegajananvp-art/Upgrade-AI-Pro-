@@ -199,15 +199,21 @@ function syncSocketSubscriptions(desiredSymbols, reason = 'unspecified') {
       pendingSubscriptionSet.add(symbol);
     }
   }
-  if (selectedOptionSymbol && pendingSubscriptionSet.has(selectedOptionSymbol)) {
-    const before = pendingSubscriptionSymbols.indexOf(selectedOptionSymbol);
-    pendingSubscriptionSymbols = prioritizeSubscriptionQueue(pendingSubscriptionSymbols, selectedOptionSymbol);
-    if (before > 0) {
-      console.info('[FYERS_DATA] selected option subscription prioritized:', JSON.stringify({
-        symbol: selectedOptionSymbol, previousQueuePosition: before + 1, nextQueuePosition: 1,
-        pendingCount: pendingSubscriptionSymbols.length
-      }));
-    }
+  const criticalSymbols = [
+    selectedOptionSymbol,
+    ...activeTradeOptionSymbols,
+    ...buildSetupEvaluationSubscriptionSymbols(setupEvaluationPins),
+    selectedUnderlyingSymbol
+  ].filter(Boolean);
+  const beforePriority = [...pendingSubscriptionSymbols];
+  pendingSubscriptionSymbols = prioritizeSubscriptionQueue(pendingSubscriptionSymbols, criticalSymbols);
+  const movedCritical = criticalSymbols.filter(symbol => beforePriority.includes(symbol) &&
+    pendingSubscriptionSymbols.indexOf(symbol) !== beforePriority.indexOf(symbol));
+  if (movedCritical.length) {
+    console.info('[FYERS_DATA] critical option/underlying subscriptions prioritized:', JSON.stringify({
+      symbols: movedCritical,
+      pendingCount: pendingSubscriptionSymbols.length
+    }));
   }
   // One serialized scheduler owns both subscribe and unsubscribe operations.
   scheduleSubscriptionFlush();

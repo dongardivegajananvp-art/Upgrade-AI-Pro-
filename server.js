@@ -73,6 +73,7 @@ let fnoUniverseRetryDate = null;
 let fnoUniverseLoadRetryAt = 0;
 let fnoStrategyScanTimer = null;
 let activeSetupMonitorTimer = null;
+let fyersRefreshRetryAt = 0;
 let lastPinnedActiveSetupContractsKey = null;
 let fnoStrategyScanBusy = false;
 let fnoStrategyScanCursor = 0;
@@ -426,7 +427,7 @@ const server = http.createServer(async (req,res) => {
   let hasFyersSession=Boolean(requestCookies.fyers_session && restoreSessionCookie(requestCookies.fyers_session,{appId,appSecret}));
   const hasRefreshSession=Boolean(requestCookies.fyers_refresh && restoreRefreshSessionCookie(requestCookies.fyers_refresh,{appId,appSecret}));
   let refreshedThisRequest=false;
-  if(hasRefreshSession && process.env.FYERS_PIN?.trim()) {
+  if(hasRefreshSession && process.env.FYERS_PIN?.trim() && Date.now()>=fyersRefreshRetryAt) {
     const auth=getAuthStatus();
     const due=!auth.tokenStored || Boolean(auth.tokenReceivedAt);
     // refreshAccessToken itself enforces a five-minute expiry safety window and single-flight guard.
@@ -435,11 +436,14 @@ const server = http.createServer(async (req,res) => {
         const result=await refreshAccessToken({appId,appSecret,pin:process.env.FYERS_PIN});
         refreshedThisRequest=Boolean(result.refreshed);
         if(refreshedThisRequest) {
+          fyersRefreshRetryAt=0;
           hasFyersSession=true;
           console.info('[FYERS_OAUTH] access token refreshed from encrypted browser refresh session; token value withheld');
         }
       } catch(error) {
-        console.warn('[FYERS_OAUTH] automatic refresh unavailable; OAuth reconnect required:',String(error?.message||error).slice(0,180));
+        const message=String(error?.message||error);
+        if(!/already in progress/.test(message)) fyersRefreshRetryAt=Date.now()+5*60*1000;
+        console.warn('[FYERS_OAUTH] automatic refresh unavailable; OAuth reconnect required:',message.slice(0,180));
       }
     }
   }

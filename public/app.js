@@ -1379,7 +1379,7 @@ async function evaluateSelectedSetup() {
   setupEvaluationRunning = true;
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;
   const state=document.querySelector('#setup-state');
-  state.textContent='VERIFYING 10 STRATEGIES · FYERS DATA';
+  state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
   const researchStatus=document.querySelector('#research-status');
   researchStatus.textContent=(evaluatedSymbol.replace(/^(NSE|BSE):/,'').replace(/-EQ$/,'')+' · NINE-STRATEGY RESEARCH RUNNING');
   const researchResults=document.querySelector('#research-results');

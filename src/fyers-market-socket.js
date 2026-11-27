@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { buildFnoCandleObservationSymbols } from './socket-subscription-utils.js';
 import { getAccessTokenForServer } from './fyers-auth.js';
 import { buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE, getFnoScanBatchSize, getNextFnoRotationIndex } from './rolling-fno-scanner.js';
-import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery } from './socket-subscription-utils.js';
+import { getSocketSubscriptionDelta, splitSubscriptionBatches, buildSessionSocketSubscriptions, buildSocketSubscriptionDiagnostics, pruneSymbolMap, buildSetupEvaluationSubscriptionSymbols, isGenericSubscriptionAck, prioritizeSubscriptionQueue, resolveSelectedOptionOnUnderlyingChange, connectWithAutoReconnect, formatSocketCloseDetail, SOCKET_SUBSCRIPTION_BATCH_SIZE, SOCKET_SUBSCRIPTION_BATCH_INTERVAL_MS, shouldAdvanceFnoRotation, canResumeSocketSubscriptionRecovery } from './socket-subscription-utils.js';
 import { getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery } from './rest-scheduler-utils.js';
 import { createFnoWebsocketCandleBuilder } from './fno-websocket-candles.js';
 import { isNseRegularSession } from './nse-session.js';
@@ -31,6 +31,7 @@ let rotationIndex = 0;
 let rotationTimer = null;
 let selectedOptionSymbol = null;
 let activeTradeOptionSymbols = [];
+const setupEvaluationPins = new Map();
 let optionSubscriptionStatus = 'NOT_SELECTED';
 let optionSubscriptionError = null;
 let optionSubscriptionRequestedAt = null;
@@ -80,10 +81,11 @@ function sessionFeedReady(now = Date.now()) {
 
 function desiredSocketSubscriptions(now = Date.now()) {
   const sessionOpen=isNseRegularSession(now);
-  return [...new Set([...buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol], selectedOptionSymbol, sessionOpen), ...(sessionOpen ? activeTradeOptionSymbols : [])])];
+  const setupSymbols=buildSetupEvaluationSubscriptionSymbols(setupEvaluationPins);
+  return [...new Set([...buildSessionSocketSubscriptions(INDEX_SYMBOLS, [...activeFnoSymbols, ...pinnedTopGainerSymbols, selectedUnderlyingSymbol, ...setupSymbols], selectedOptionSymbol, sessionOpen), ...(sessionOpen ? activeTradeOptionSymbols : [])])];
 }
 function pruneSocketSymbolState() {
-  const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol, ...activeTradeOptionSymbols].filter(Boolean);
+  const allowed = [...INDEX_SYMBOLS, ...universe.map(item => item.symbol), selectedOptionSymbol, ...activeTradeOptionSymbols, ...buildSetupEvaluationSubscriptionSymbols(setupEvaluationPins)].filter(Boolean);
   pruneSymbolMap(ticks, allowed, 300);
   pruneSymbolMap(tickTelemetryLoggedAt, allowed, 300);
 }
@@ -458,6 +460,39 @@ export function setSelectedUnderlyingSymbol(symbol) {
   applyFnoRotation();
   return { status: next ? 'UNDERLYING_PINNED_TO_SOCKET_SLICE' : 'UNDERLYING_CLEARED', symbol: next };
 }
+export function pinSetupEvaluationSymbols(key, symbols = []) {
+  const id=typeof key==='string'?key.trim():'';
+  const next=[...new Set((Array.isArray(symbols)?symbols:[]).filter(symbol=>typeof symbol==='string'&&/^NSE:[A-Z0-9&._-]+$/.test(symbol)))];
+  if(!id||next.length!==2) return {status:'REJECTED',reason:'A setup pin requires one verified NSE underlying and one verified NSE option contract'};
+  const current=setupEvaluationPins.get(id);
+  if(current&&current.symbols.some((symbol,index)=>symbol!==next[index])) return {status:'REJECTED',reason:'Setup pin key is already bound to different symbols'};
+  if(!current&&setupEvaluationPins.size>=2) return {status:'REJECTED',reason:'At most two concurrent setup evaluations may pin live feed symbols'};
+  setupEvaluationPins.set(id,{symbols:next,refCount:(current?.refCount||0)+1});
+  pruneSocketSymbolState();
+  try {
+    if(socket&&socketStatus==='CONNECTED') syncSocketSubscriptions(desiredSocketSubscriptions(),'setup-evaluation-feed-pins');
+  } catch(error) {
+    if(current) setupEvaluationPins.set(id,current); else setupEvaluationPins.delete(id);
+    pruneSocketSymbolState();
+    return {status:'SUBSCRIPTION_UPDATE_ERROR',reason:safeError(error)};
+  }
+  console.info('[FYERS_DATA] setup evaluation feed symbols pinned:',JSON.stringify({key:id,symbols:next,refCount:setupEvaluationPins.get(id).refCount}));
+  return {status:'SETUP_EVALUATION_SYMBOLS_PINNED',symbols:next};
+}
+export function releaseSetupEvaluationSymbols(key) {
+  const id=typeof key==='string'?key.trim():'';
+  const current=setupEvaluationPins.get(id);
+  if(!current) return {status:'UNCHANGED'};
+  if(current.refCount>1) setupEvaluationPins.set(id,{...current,refCount:current.refCount-1});
+  else setupEvaluationPins.delete(id);
+  pruneSocketSymbolState();
+  if(socket&&socketStatus==='CONNECTED') {
+    try { syncSocketSubscriptions(desiredSocketSubscriptions(),'setup-evaluation-feed-release'); }
+    catch(error) { console.warn('[FYERS_DATA] setup evaluation feed pin release sync failed:',safeError(error)); }
+  }
+  console.info('[FYERS_DATA] setup evaluation feed symbols released:',JSON.stringify({key:id,remainingRefs:setupEvaluationPins.get(id)?.refCount||0}));
+  return {status:'SETUP_EVALUATION_SYMBOLS_RELEASED'};
+}
 export function setActiveTradeOptionSymbols(symbols = []) {
   if (!Array.isArray(symbols) || symbols.length > 2) return { status:'REJECTED', reason:'At most two active option contracts may be pinned' };
   const next = [...new Set(symbols.filter(symbol => typeof symbol === 'string' && /^NSE:[A-Z0-9&._-]+$/.test(symbol)))];
@@ -614,6 +649,10 @@ export function startMarketSocket() {
     console.error('[FYERS_DATA] socket start failed:', lastError);
     return { status: socketStatus, reason: lastError };
   }
+}
+export function getMarketTick(symbol, now = Date.now()) {
+  const tick=typeof symbol==='string'?ticks.get(symbol)||null:null;
+  return tick?{...tick,fresh:isFresh(tick,now)}:null;
 }
 export function getMarketData(now = Date.now()) {
   const indices = {};

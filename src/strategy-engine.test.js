@@ -85,7 +85,7 @@ test('multi-timeframe research refuses to invent a score when 15m history is inc
 });
 
 
-test('diagnostic ledger reports all ten strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
+test('diagnostic ledger reports all nine strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
   const now=1800000000000;
   const result=detectNineStrategySetup({underlyingCandles:[],underlyingTick:null,now});
   assert.equal(result.strategyLedger.length,9);

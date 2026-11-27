@@ -60,7 +60,7 @@ test('history-backed scanner uses two guarded REST background slots per minute',
 
 
 test('WebSocket rotates twenty new symbols per minute while two REST scans remain budgeted',()=>{
-  assert.equal(FNO_SCAN_PER_SLICE,3);
+  assert.equal(FNO_SCAN_PER_SLICE,2);
   assert.equal(FNO_SOCKET_ROTATION_ADVANCE,20);
   const visited=new Set();
   let start=0,rotations=0;

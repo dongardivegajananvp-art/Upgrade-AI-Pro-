@@ -23,7 +23,7 @@ test('two active setups hold option handoff while scanner capacity remains bound
 });
 
 test('an exited underlying stays excluded until a newer completed five-minute candle arrives',()=>{
-  const recentlyClosed=new Map([['NSE:AAA-EQ',{setupCandleTime:1800000000}]]);
+  const recentlyClosed=new Map([['NSE:AAA-EQ',{closedCandleTime:1800000000}]]);
   const waiting=getOpportunityCycleState({
     recentlyClosed,latestCandleTimes:new Map([['NSE:AAA-EQ',1800000000]])
   });

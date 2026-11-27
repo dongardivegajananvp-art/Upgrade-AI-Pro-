@@ -23,7 +23,7 @@ function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, co
 }
 
 export function analyzeEarlyWatch({candles=[],fifteenMinuteCandles=[],tick,now=Date.now()}={}) {
-  const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&now/1000-Number(tick.exchangeTime)>=-3);
+  const fresh=Boolean(tick&&Number.isFinite(Number(tick.price))&&Number(tick.price)>0&&Number.isFinite(Number(tick.exchangeTime))&&Number.isFinite(Number(tick.receivedAt))&&now-Number(tick.receivedAt)>=0&&now-Number(tick.receivedAt)<=10000&&now/1000-Number(tick.exchangeTime)>=-3&&Number(tick.receivedAt)-Number(tick.exchangeTime)*1000>=0&&Number(tick.receivedAt)-Number(tick.exchangeTime)*1000<=5000);
   const validFive=Array.isArray(candles)&&candles.length>=50&&contiguousWindow(candles,50);
   const validFifteen=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
   if(!fresh||!validFive||!validFifteen)return{status:'NO_WATCH',reason:'Fresh FYERS tick plus contiguous, current 15-minute and 5-minute candle windows are required'};

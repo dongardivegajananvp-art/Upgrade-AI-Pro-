@@ -171,8 +171,8 @@ async function drainRestQueue() {
           break;
         }
       }
-      // A Cloudflare 1015 was observed after 11 /data/history calls in one
-      // minute. Cap this endpoint at 8 per rolling minute, while allowing
+      // A Cloudflare 1015 was observed after bursts of /data/history calls. Keep the
+      // history endpoint's absolute ceiling below the observed edge threshold, while allowing
       // higher/lower-priority non-history REST work to proceed independently.
       // Cloudflare 1015 was observed on mixed traffic (history, option-chain,
       // positions and orderbook) at eight upstream requests/minute. Guard the
@@ -202,13 +202,13 @@ async function drainRestQueue() {
         const waits = restQueue.map(job => {
           const totalWait = getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), getRestTotalWindowLimit(job.priority));
           const backgroundWait = isRestBackgroundPriority(job.priority)
-            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 3, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
+            ? getRestRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 2, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
             : 0;
           const historyWait = job.url.pathname === '/history'
             ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 8)
             : 0;
           const historyBackgroundWait = job.url.pathname === '/history' && isRestBackgroundPriority(job.priority)
-            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 4, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
+            ? getHistoryRequestWindowWaitMs(recentUpstreamRequests, Date.now(), 2, 60_000, Number.NEGATIVE_INFINITY, REST_PRIORITY.CHART - 1, [REST_PRIORITY.ACCOUNT])
             : 0;
           return Math.max(totalWait, backgroundWait, historyWait, historyBackgroundWait);
         }).filter(value => value > 0);

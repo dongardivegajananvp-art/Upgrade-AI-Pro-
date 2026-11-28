@@ -163,16 +163,10 @@ function startIndexStrategyScanner() {
         indexStrategyScannerStatus='RUNNING';
         return;
       }
-      let fifteenMinuteHistory={candles:[]};
-      let fifteenMinuteHistoryError=null;
-      try {
-        // 15m EMA context is slower-changing research data, not a time-critical 5m scan.
-        // Give it the CONTEXT queue class/TTL so it can wait safely behind the
-        // strict shared FYERS budget instead of expiring as a 10s SCANNER job.
-        fifteenMinuteHistory=await getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'index-nine-strategy-15m');
-      } catch(error) {
-        fifteenMinuteHistoryError=String(error?.message||'15-minute index context unavailable').slice(0,160);
-      }
+      // This scanner runs with researchEnabled:false and Strategy 3 now uses
+      // daily EMA context. A 15-minute history request here is unused, so do
+      // not spend a scarce FYERS REST slot on it.
+      const fifteenMinuteHistory={candles:[]};
       // Strategy 3 uses daily trend, not 15m trend. Request daily context only
       // after the verified 5m pullback/resume prefilter passes.
       let dailyHistory={candles:[]};
@@ -204,9 +198,9 @@ function startIndexStrategyScanner() {
         symbol,tick:evaluationTick,history,result,now:evaluationAt,
         attemptCount:Number(previous.attemptCount||0)+1
       });
-      record.fifteenMinuteCandleCount=Array.isArray(fifteenMinuteHistory.candles)?fifteenMinuteHistory.candles.length:0;
-      record.fifteenMinuteHistoryStatus=record.fifteenMinuteCandleCount>=50?'FYERS_15M_CONTEXT_AVAILABLE':'BLOCKED';
-      record.fifteenMinuteHistoryReason=fifteenMinuteHistoryError;
+      record.fifteenMinuteCandleCount=0;
+      record.fifteenMinuteHistoryStatus='NOT_REQUIRED_STRATEGY3_USES_DAILY';
+      record.fifteenMinuteHistoryReason=null;
       record.dailyCandleCount=Array.isArray(dailyHistory.candles)?dailyHistory.candles.length:0;
       record.dailyHistoryStatus=record.dailyCandleCount>=50?'FYERS_DAILY_CONTEXT_AVAILABLE':needsDailyTrendPullbackHistory(history.candles,evaluationTick.exchangeTime)?'BLOCKED':'NOT_REQUIRED_5M_PREFILTER';
       record.dailyHistoryReason=dailyHistoryError;

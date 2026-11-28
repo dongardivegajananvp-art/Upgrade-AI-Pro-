@@ -48,7 +48,7 @@ function sessionWindowIsContinuous(rows) {
 
 /**
  * Replays completed FYERS 5-minute underlying candles through the exact
- * nine-strategy detector. This is signal research only: it intentionally does
+ * ten-strategy detector. This is signal research only: it intentionally does
  * not invent option quotes, fills, slippage, contract history, or P&L.
  */
 export function runHistoricalSignalReplay({

@@ -6,6 +6,7 @@ import {
   detectContinuation,
   detectTopGainerMomentum,
   detectDayHighLowRetest,
+  detectDayLowReversal,
   detectFlagPriceStructure,
   detectOpeningRange,
   detectDailyTrendPullback
@@ -31,6 +32,22 @@ test('day-low breakdown retest confirms SHORT only after close-through and retes
   ];
   assert.equal(detectDayHighLowRetest(rows)?.side, 'SHORT');
   assert.equal(detectDayHighLowRetest(rows.slice(0, 3)), null);
+});
+
+test('Day-Low reversal confirms LONG only after an established session low holds and the rejection high breaks', () => {
+  const start = Date.parse('2026-11-20T03:45:00Z') / 1000;
+  const rows = [
+    {time:start,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+300,open:99,high:100,low:98,close:99,volume:110},
+    {time:start+600,open:98.9,high:99.6,low:97.95,close:99.4,volume:150},
+    {time:start+900,open:99.4,high:100.2,low:98.2,close:100,volume:170}
+  ];
+  const result = detectDayLowReversal(rows);
+  assert.equal(result?.side, 'LONG');
+  assert.equal(result?.strategy, 'DAY_LOW_REVERSAL_BREAKOUT');
+  assert.equal(result?.dayLowLevel, 98);
+  assert.equal(detectDayLowReversal(rows.map((c,i)=>i===3?{...c,low:97.8}:c)), null);
+  assert.equal(detectDayLowReversal(rows.map((c,i)=>i===2?{...c,low:97.7}:c)), null, 'excessive support penetration must fail');
 });
 
 test('opening-range first-candle breakdown confirms SHORT and does not invent a signal without a close below range', () => {

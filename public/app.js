@@ -219,14 +219,14 @@ async function refreshIndexStrategyScan() {
       const candle=document.createElement('div');
       const candleTime=row.lastCompletedCandleTime?new Date(Number(row.lastCompletedCandleTime)*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false})+' IST':'—';
       const scannedAt=row.lastScanAt?new Date(row.lastScanAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'WAITING';
-      candle.textContent='COMPLETED 5M CANDLE '+candleTime+' · SCANNED '+scannedAt+' · CHECKS '+(row.strategyCheckCount||0)+'/9 · 15M CONTEXT '+(row.fifteenMinuteHistoryStatus||'WAITING')+' ('+(row.fifteenMinuteCandleCount||0)+')';
+      candle.textContent='COMPLETED 5M CANDLE '+candleTime+' · SCANNED '+scannedAt+' · CHECKS '+(row.strategyCheckCount||0)+'/10 · DAILY CONTEXT '+(row.dailyHistoryStatus||'WAITING')+' ('+(row.dailyCandleCount||0)+')';
       const reason=document.createElement('small');
       reason.className='empty-inline';
       reason.textContent=row.reason||'Waiting for next verified completed 5-minute candle';
       card.append(title,result,detail,candle,reason);
       const details=document.createElement('details');
       const summary=document.createElement('summary');
-      summary.textContent='NINE-STRATEGY LEDGER · '+(row.strategyLedger||[]).length+' RULES';
+      summary.textContent='TEN-STRATEGY LEDGER · '+(row.strategyLedger||[]).length+' RULES';
       details.append(summary);
       for(const entry of row.strategyLedger||[]) {
         const line=document.createElement('div');
@@ -252,7 +252,7 @@ async function refreshIndexStrategyScan() {
     note.textContent='UNDERLYING SCAN ONLY · '+(data.scanReady?'3/3 FRESH INDEX FEED VERIFIED':'WAITING FOR 3/3 FRESH INDEX FEED')+' · OPTION CE/PE TICK + COMPLETED OPTION CANDLE REQUIRED BEFORE ANY TRADE · ORDERS DISABLED';
     container.append(note);
   } catch(error) {
-    status.textContent='INDEX NINE-STRATEGY SCAN UNAVAILABLE';
+    status.textContent='INDEX TEN-STRATEGY SCAN UNAVAILABLE';
     container.textContent=String(error.message||'Index strategy scanner unavailable');
   } finally {
     indexScanRefreshRunning=false;
@@ -789,7 +789,7 @@ async function selectIndexSymbol(symbol) {
   document.querySelector('#expiry-select').replaceChildren(new Option('—',''));
   document.querySelector('#strike-select').replaceChildren(new Option('—',''));
   document.querySelector('#research-status').textContent='INDEX VIEW · STOCK SETUP RESEARCH NOT RUN';
-  document.querySelector('#research-results').textContent='Select an NSE F&O gainer to run the nine-strategy research engine.';
+  document.querySelector('#research-results').textContent='Select an NSE F&O gainer to run the ten-strategy research engine.';
   renderLiveCandleSummary(null);
   try {
     await clearSelectedOption();
@@ -1487,7 +1487,7 @@ function renderResearchResults(setup) {
   if(!ranking.length) {
     status.textContent=setup?.research?.status==='UNAVAILABLE'?'RESEARCH DATA INCOMPLETE':'NO VERIFIED RESEARCH RANKING';
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
+    note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all ten-strategy and verified-data gates; no score is fabricated.';
     container.append(note);
   }
   if(ranking.length) status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';
@@ -1505,7 +1505,7 @@ function renderResearchResults(setup) {
   }
   const ledger=Array.isArray(setup?.strategyLedger)?setup.strategyLedger:[];
   if(ledger.length) {
-    const heading=document.createElement('strong');heading.textContent='NINE-STRATEGY DIAGNOSTIC LEDGER';container.append(heading);
+    const heading=document.createElement('strong');heading.textContent='TEN-STRATEGY DIAGNOSTIC LEDGER';container.append(heading);
     for(const item of ledger) {
       const row=document.createElement('div');row.className='strategy-ledger-row';
       const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
@@ -1547,9 +1547,9 @@ async function evaluateSelectedSetup() {
   setupEvaluationRunning = true;
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;
   const state=document.querySelector('#setup-state');
-  state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
+  state.textContent='VERIFYING 10 STRATEGIES · FYERS DATA';
   const researchStatus=document.querySelector('#research-status');
-  researchStatus.textContent=(evaluatedSymbol.replace(/^(NSE|BSE):/,'').replace(/-EQ$/,'')+' · NINE-STRATEGY RESEARCH RUNNING');
+  researchStatus.textContent=(evaluatedSymbol.replace(/^(NSE|BSE):/,'').replace(/-EQ$/,'')+' · TEN-STRATEGY RESEARCH RUNNING');
   const researchResults=document.querySelector('#research-results');
   researchResults.replaceChildren();
   const researchNote=document.createElement('div');

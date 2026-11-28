@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE,
-  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS, getFnoScanSliceKey, shouldResetFnoScanCursor
+  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS, getFnoScanSliceKey, shouldResetFnoScanCursor, buildFnoScanCandidates, isRetryableFnoScanError
 } from './rolling-fno-scanner.js';
 
 const universe=Array.from({length:218},(_,i)=>({symbol:`NSE:STOCK${String(i).padStart(3,'0')}-EQ`}));
@@ -126,4 +126,26 @@ test('scanner cursor resets when active slice membership changes without a rotat
   assert.equal(shouldResetFnoScanCursor(4,4,previousKey,getFnoScanSliceKey(next)),true);
   assert.equal(shouldResetFnoScanCursor(4,4,previousKey,getFnoScanSliceKey(previous)),false);
   assert.equal(shouldResetFnoScanCursor(4,5,previousKey,previousKey),true);
+});
+
+
+test('Top-5 priority is bounded and rotating F&O symbols retain a scan slot',()=>{
+ const active=['NSE:A-EQ','NSE:B-EQ','NSE:C-EQ'],rows=buildFnoScanCandidates(active,['NSE:G1-EQ','NSE:G2-EQ']);
+ assert.equal(rows[0],'NSE:G1-EQ');assert.deepEqual(rows.slice(1,4),active);
+});
+test('stale tick after history wait is retryable while malformed history is not',()=>{
+ assert.equal(isRetryableFnoScanError('Fresh FYERS underlying tick became stale after history wait; scan result discarded'),true);
+ assert.equal(isRetryableFnoScanError('malformed OHLCV'),false);
+ assert.equal(isRetryableFnoScanError('Cloudflare 1015'),true);
+});
+test('218-symbol scheduler simulation with changing Top-5 eventually covers every rotating symbol',()=>{
+ const visited=new Set(),attempts=new Map(),total=218;let rotation=0,cycles=0,minute=0;
+ while(visited.size<total&&minute<2500){
+  const active=buildFnoRotationSlice(universe,rotation,20),gainer=universe[(minute*17)%total].symbol;
+  const candidates=buildFnoScanCandidates(active,[gainer]),chosen=[];
+  for(const symbol of candidates){if(chosen.length>=2)break;if(chosen.includes(symbol))continue;if(symbol===gainer){chosen.push(symbol);continue;}if((attempts.get(symbol)||0)===0){chosen.push(symbol);break;}}
+  for(const symbol of chosen){if(symbol!==gainer)visited.add(symbol);attempts.set(symbol,(attempts.get(symbol)||0)+1);}
+  minute++;rotation=getNextFnoRotationIndex(total,rotation,FNO_SOCKET_ROTATION_ADVANCE);if(rotation===0)cycles++;
+ }
+ assert.equal(visited.size,total);assert.ok(minute<=total*11);assert.ok(cycles>=10);
 });

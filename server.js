@@ -7,15 +7,16 @@ import { createLoginUrl, consumeLoginState, exchangeAuthCode, getAuthStatus, cre
 import { startMarketSocket, getMarketData, getMarketTick, getFnoUniverseSnapshot, setFnoUniverse, setSelectedOptionSymbol, setSelectedUnderlyingSymbol, setActiveTradeOptionSymbols, pinSetupEvaluationSymbols, releaseSetupEvaluationSymbols } from './src/fyers-market-socket.js';
 import { loadFnoEquityUniverse, getVerifiedOptionContract, getNseSessionDate } from './src/fyers-symbol-master.js';
 import { chooseDirectionalOption, normalizeExpiryTimestamp, matchesRequestedExpiry, verifyOptionContractUnderlying } from './src/option-selection.js';
-import { evaluateNineStrategies, detectNineStrategySetup } from './src/strategy-engine.js';
+import { evaluateNineStrategies, detectNineStrategySetup, needsDailyTrendPullbackHistory } from './src/strategy-engine.js';
 import { REST_PRIORITY } from './src/rest-scheduler-utils.js';
-import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
+import { getFiveMinuteHistory, getFiveMinuteSessionHistory, getFifteenMinuteHistory, getDailyHistory, getFyersQuotes, getFyersOptionChain, getFyersPositions, getFyersOrderbook, getRestDiagnostics, getRestDispatchReadiness, getRestSafetyState, restoreRestSafetyState, getCachedResearchHistories, validateNseSymbol } from './src/fyers-rest.js';
 import { evaluateRollingFnoUniverse } from './src/rolling-fno-strategy-engine.js';
 import { createResearchWarmupQueue } from './src/research-warmup-queue.js';
-import { isEligibleForResearchWarmup } from './src/research-warmup-eligibility.js';
+
 import { SCANNER_POLL_INTERVAL_MS, FNO_SCAN_MIN_INTERVAL_MS } from './src/scanner-scheduler.js';
 import { buildHealthStatus } from './src/health-status.js';
-import { getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor } from './src/rolling-fno-scanner.js';
+
+import { buildFnoScanCandidates, getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor, isRetryableFnoScanError } from './src/rolling-fno-scanner.js';
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { validateFixedRiskPlan, updateActiveSetupFromTick } from './src/active-setup-lifecycle.js';
 import { planActiveSetupRestore } from './src/active-setup-restore.js';
@@ -272,7 +273,7 @@ function startFnoStrategyScanner() {
     const freshTopGainers=(sessionMarket.fno?.topGainers||[])
       .filter(item=>item?.fresh&&snapshot.ticks.has(item.symbol))
       .map(item=>item.symbol);
-    const scanCandidates=[...new Set([...freshTopGainers,...active])];
+    const scanCandidates=buildFnoScanCandidates(active,freshTopGainers);
     const scanLimit=Math.min(snapshot.scanPerSlice || 12,scanCandidates.length);
     // Complete the new-symbol scan batch first; use the remaining slice time for
     // 15m context refreshes so research preparation cannot starve F&O coverage.
@@ -285,13 +286,13 @@ function startFnoStrategyScanner() {
       if (!warmupSymbol) return;
       fnoStrategyScanBusy=true;
       fnoStrategyScanStats.warmupSymbol=warmupSymbol;
-      fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_15M_5M_CONTEXT';
+      fnoStrategyScanStats.warmupStatus='LOADING_VERIFIED_DAILY_CONTEXT';
       try {
-        await getFifteenMinuteHistory(warmupSymbol,Date.now(),REST_PRIORITY.WARMUP,'scanner-warmup-15m');
+        await getDailyHistory(warmupSymbol,Date.now(),REST_PRIORITY.WARMUP,'scanner-warmup-daily');
         if (!fnoResearchWarmupQueue.complete(warmupSymbol)) {
           throw new Error('Research warmup queue completion state was not registered');
         }
-        fnoStrategyScanStats.warmupStatus='VERIFIED_15M_5M_CONTEXT_CACHED';
+        fnoStrategyScanStats.warmupStatus='VERIFIED_DAILY_CONTEXT_CACHED';
         fnoStrategyScanStats.warmupLastCompletedSymbol=warmupSymbol;
         fnoStrategyScanStats.warmupLastFailure=null;
         fnoStrategyScanStats.warmupLastRetryAt=null;
@@ -361,8 +362,9 @@ function startFnoStrategyScanner() {
       const websocketObservation=latest.websocketCandles?.get(symbol)||null;
       const tick=scanTick;
       const market=getMarketData();
+      const cachedDaily=getCachedResearchHistories().daily.get(symbol);
       const research=detectNineStrategySetup({
-        underlyingCandles:history.candles,underlyingTick:tick,
+        underlyingCandles:history.candles,underlyingTick:tick,dailyCandles:cachedDaily?.candles||[],
         isTopGainer:(market.fno?.topGainers||[]).some(item=>item.symbol===symbol),
         researchEnabled:false,now:Date.now()
       });
@@ -385,11 +387,9 @@ function startFnoStrategyScanner() {
         source:history.source||'FYERS_HISTORY',strategyLedger:research.strategyLedger||[],
         websocketObservation:{status:websocketObservation?.status||'NO_OBSERVATIONS',completedCount:websocketObservation?.completedCandles?.length||0,contiguousCompletedCount:websocketObservation?.contiguousCompletedCount||0,volumeVerified:Boolean(websocketObservation?.volumeVerified),actionable:Boolean(websocketObservation?.actionable)}
       });
-      // Warm daily/15m context for every symbol with a valid contiguous 50-candle
-      // 5m base. Do not gate warmup on an already-confirmed 5m setup: that made
-      // DAILY_TREND_5M_PULLBACK impossible to discover because it needs daily
-      // history before it can become a confirmed candidate.
-      if(isEligibleForResearchWarmup(history.candles)) {
+      // Fetch daily context only when verified 5m structure shows an EMA20
+      // pullback touch followed by a resume candle; do not warm every symbol.
+      if(needsDailyTrendPullbackHistory(history.candles,scanTick.exchangeTime)) {
         const queued=fnoResearchWarmupQueue.enqueue(symbol);
         fnoStrategyScanStats.warmupQueueDepth=fnoResearchWarmupQueue.size;
         if(queued) {
@@ -402,7 +402,7 @@ function startFnoStrategyScanner() {
       }
     } catch(error) {
       const errorMessage=String(error.message||'F&O history scan failed');
-      const retryable=/queued request expired|queue capacity|queue is full|cooldown active|recovery probe required|429/i.test(errorMessage);
+      const retryable=isRetryableFnoScanError(errorMessage);
       if(retryable) {
         fnoStrategyScanRetrySymbol=symbol;
         const retryDiagnostics=getRestDiagnostics();
@@ -1041,21 +1041,18 @@ const server = http.createServer(async (req,res) => {
         // Each history accessor reuses its verified in-memory cache / single-flight.
         const underlyingHistory = await getFiveMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-5m');
         const optionHistory = await getFiveMinuteHistory(body.contract,Date.now(),REST_PRIORITY.ENTRY,'setup-option-5m');
-        // The strategy context is now 15m trend + 5m price structure.
-        // Daily candles are not fetched or used by the nine-strategy engine.
-        // Fetch 15m history through the same paced ENTRY scheduler; its cache
-        // expires at the next completed 15m bar and rejects stale exchange time.
-        const fifteenMinuteHistory = await getFifteenMinuteHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-15m');
+        // Strategy 3 is Daily EMA20/EMA50 trend + 5m pullback/resume.
+        // Load completed FYERS daily candles through the same paced ENTRY scheduler.
+        const dailyHistory = await getDailyHistory(body.underlying,Date.now(),REST_PRIORITY.ENTRY,'setup-underlying-daily');
         console.info('[SETUP_EVAL] histories_verified:',JSON.stringify({
           underlying:body.underlying,contract:body.contract,
           underlying5mCount:underlyingHistory.candles.length,
-          underlying15mCount:fifteenMinuteHistory.candles.length,
-          fifteenMinuteLastCompletedCandleTime:fifteenMinuteHistory.lastCompletedCandleTime,
-          fifteenMinuteAgeSeconds:fifteenMinuteHistory.ageSeconds,
+          underlyingDailyCount:dailyHistory.candles.length,
+          dailyLastCompletedCandleTime:dailyHistory.candles.at(-1)?.time||null,
           option5mCount:optionHistory.candles.length,
           optionLastCompletedCandleTime:optionHistory.candles.at(-1)?.time||null,
-          strategyContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE',
-          sources:[underlyingHistory.source,fifteenMinuteHistory.source,optionHistory.source]
+          strategyContext:'DAILY_TREND_PLUS_5M_PULLBACK_RESUME',
+          sources:[underlyingHistory.source,dailyHistory.source,optionHistory.source]
         }));
         // Re-read after REST work: never let history latency silently weaken the
         // strict 10-second underlying/option WebSocket freshness gates.
@@ -1069,7 +1066,7 @@ const server = http.createServer(async (req,res) => {
         const result = evaluateNineStrategies({
           underlyingCandles:underlyingHistory.candles,underlyingTick:latestUnderlying,
           optionCandles:optionHistory.candles,optionTick:latestOption,contract,
-          dailyCandles:[],fifteenMinuteCandles:fifteenMinuteHistory.candles,
+          dailyCandles:dailyHistory.candles,fifteenMinuteCandles:[],
           isTopGainer,researchEnabled:false,now:Date.now()
         });
         console.info('[SETUP_EVAL] completed:',JSON.stringify({

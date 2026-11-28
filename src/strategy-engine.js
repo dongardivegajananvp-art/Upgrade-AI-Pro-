@@ -62,7 +62,7 @@ const MAX_ACTIVE_TRADES = 2;
 const STRATEGIES = Object.freeze([
   'EMA20_EMA50_TREND',
   'TOP_GAINER_MOMENTUM_BREAKOUT',
-  'FIFTEEN_MIN_TREND_5M_PULLBACK',
+  'DAILY_TREND_5M_PULLBACK',
   'DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
   'BULLISH_CONTINUATION',
@@ -72,7 +72,7 @@ const STRATEGIES = Object.freeze([
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
-  'TOP_GAINER_MOMENTUM_BREAKOUT','FIFTEEN_MIN_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
+  'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
@@ -87,6 +87,15 @@ function hasFreshCompletedFifteenMinuteHistory(rows, now = Date.now(), requiredC
   const latest=recent.at(-1);
   const age=Number(now)/1000-(Number(latest.time)+900);
   return Number.isFinite(age)&&age>=-3&&age<=maxAgeSeconds;
+}
+function hasFreshCompletedDailyHistory(rows, now = Date.now(), requiredCount = 50, maxAgeDays = 4) {
+ if(!Array.isArray(rows)||rows.length<requiredCount||rows.some(row=>!validOhlcv(row)))return false;
+ const recent=rows.slice(-requiredCount),days=recent.map(row=>istDayKey(number(row.time)));
+ if(days.some((day,i)=>!day||(i>0&&day<=days[i-1])))return false;
+ const epoch=day=>Date.parse(day+'T00:00:00Z');
+ for(let i=1;i<days.length;i++){const gap=(epoch(days[i])-epoch(days[i-1]))/86400000;if(!Number.isFinite(gap)||gap<1||gap>4)return false;}
+ const today=istDayKey(number(now)/1000),latest=days.at(-1),age=(epoch(today)-epoch(latest))/86400000;
+ return latest<today&&Number.isFinite(age)&&age>=1&&age<=maxAgeDays;
 }
 function ema(values, period) {
   if (values.length < period) return NaN;
@@ -355,16 +364,22 @@ export function detectTopGainerMomentum(rows, isTopGainer=false) {
     ? candidate(STRATEGIES[1],'LONG',number(prior.high),last)
     : null;
 }
-export function detectFifteenMinuteTrendPullback(rows, fifteenMinuteCandles=[], now=Date.now()) {
-  if(!Array.isArray(rows)||rows.length<50||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return null;
-  const fifteenCloses=fifteenMinuteCandles.filter(validOhlcv).map(c=>number(c.close));
-  if(fifteenCloses.length<50)return null;
-  const m15_20=ema(fifteenCloses,20),m15_50=ema(fifteenCloses,50);
-  const closes=rows.map(c=>number(c.close)),e20=ema(closes,20),e50=ema(closes,50);
-  const last=rows.at(-1),p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
-  if(m15_20>m15_50&&e20>e50&&touch&&number(last.close)>number(p.high))return candidate(STRATEGIES[2],'LONG',number(p.high),last);
-  if(m15_20<m15_50&&e20<e50&&touch&&number(last.close)<number(p.low))return candidate(STRATEGIES[2],'SHORT',number(p.low),last);
-  return null;
+export function detectDailyTrendPullback(rows, dailyCandles=[], now=Date.now()) {
+ if(!Array.isArray(rows)||rows.length<50||!contiguousWindow(rows,50)||!hasFreshCompletedDailyHistory(dailyCandles,now,50,4))return null;
+ const dailyCloses=dailyCandles.slice(-50).map(c=>number(c.close)),daily20=ema(dailyCloses,20),daily50=ema(dailyCloses,50),dailyLast=dailyCloses.at(-1);
+ const five20=ema(rows.map(c=>number(c.close)),20),last=rows.at(-1),pullback=rows.at(-2);
+ const touch=number(pullback.low)<=five20*1.003&&number(pullback.high)>=five20*0.997;
+ if(dailyLast>daily20&&daily20>daily50&&touch&&number(last.close)>number(pullback.high)&&number(last.close)>five20)return candidate(STRATEGIES[2],'LONG',number(pullback.high),last,{trendSource:'DAILY_EMA20_EMA50'});
+ if(dailyLast<daily20&&daily20<daily50&&touch&&number(last.close)<number(pullback.low)&&number(last.close)<five20)return candidate(STRATEGIES[2],'SHORT',number(pullback.low),last,{trendSource:'DAILY_EMA20_EMA50'});
+ return null;
+}
+export function needsDailyTrendPullbackHistory(candles=[],exchangeTime) {
+ const w=getCompletedCandleWindow(candles,exchangeTime,600,50);
+ if(!w.fresh||!w.contiguous||w.completed.length<50)return false;
+ const rows=w.completed.slice(-50),e20=ema(rows.map(c=>number(c.close)),20),p=rows.at(-2),last=rows.at(-1);
+ if(!Number.isFinite(e20))return false;
+ const touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
+ return Boolean(touch&&((number(last.close)>number(p.high)&&number(last.close)>e20)||(number(last.close)<number(p.low)&&number(last.close)<e20)));
 }
 
 export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600, historicalAsOf=null }) {
@@ -415,11 +430,11 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
-  const fifteenValid=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
+  const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now,50,4);
   // Execute in specificity order. Once one strategy passes its own trigger,
   // this symbol moves to option/Entry verification without waiting for the rest.
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
-  consider('FIFTEEN_MIN_TREND_5M_PULLBACK',w50&&fifteenValid,()=>detectFifteenMinuteTrendPullback(rows,fifteenMinuteCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 fresh, contiguous completed FYERS 15-minute candles','15-minute and 5-minute EMA20/EMA50 alignment, 5-minute EMA20 pullback touch, and next-candle resume close did not all confirm');
+  consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':!dailyValid?'Requires 50 fresh completed FYERS daily candles; daily history is missing, stale or invalid':'Requires fresh daily EMA20/EMA50 trend, 5-minute EMA20 pullback touch and next-candle resume close','Daily EMA20/EMA50 trend, 5-minute EMA20 pullback touch and next completed candle resume did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No current-session day-high/day-low break followed by a retest and close reclaim/rejection was confirmed');

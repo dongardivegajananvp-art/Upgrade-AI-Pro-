@@ -118,3 +118,15 @@ export function getFnoScanSliceKey(activeSymbols) {
 export function shouldResetFnoScanCursor(previousRotation, nextRotation, previousSliceKey, nextSliceKey) {
   return previousRotation !== nextRotation || previousSliceKey !== nextSliceKey;
 }
+
+
+export function buildFnoScanCandidates(activeSymbols=[],topGainerSymbols=[]) {
+ const active=[...new Set((Array.isArray(activeSymbols)?activeSymbols:[]).filter(Boolean))];
+ const gainers=[...new Set((Array.isArray(topGainerSymbols)?topGainerSymbols:[]).filter(Boolean))];
+ const priority=gainers.find(x=>!active.includes(x))||gainers[0]||null;
+ return [...(priority?[priority]:[]),...active,...gainers.filter(x=>x!==priority&&!active.includes(x))];
+}
+export function isRetryableFnoScanError(error) {
+ const message=String(error?.message||error||'');
+ return /queued request expired|queue capacity|queue is full|cooldown active|recovery probe required|429|tick became stale|fresh .* tick is required after history wait/i.test(message);
+}

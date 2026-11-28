@@ -107,9 +107,11 @@ export async function loadFnoEquityUniverse(now = Date.now()) {
   return { ...result, cached: false };
 }
 export function verifyOptionContractRow(row, symbol, now = Date.now()) {
-  if (!row || String(row.symTicker || row.__masterKey || '') !== String(symbol || '') ||
-      !['CE', 'PE'].includes(String(row.optType || '').toUpperCase())) {
-    throw new Error('Option contract is not present in the official FYERS NSE F&O symbol master');
+  const officialSymbol=String(row?.symTicker || row?.__masterKey || '');
+  const officialSide=String(row?.optType || '').toUpperCase();
+  if (!row || officialSymbol !== String(symbol || '') ||
+      !['CE', 'PE'].includes(officialSide) || !officialSymbol.endsWith(officialSide)) {
+    throw new Error('Option contract symbol and CE/PE identity do not match the official FYERS NSE F&O symbol master');
   }
   if (row.tradeStatus !== undefined && Number(row.tradeStatus) !== 1) throw new Error('Option contract is inactive in the official FYERS master');
   const expiry = expiryEpoch(row.expiryDate);

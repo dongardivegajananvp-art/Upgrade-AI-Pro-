@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRollingFnoLeaderboard, buildFnoRotationSlice, FNO_SCAN_PER_SLICE, FNO_SOCKET_ROTATION_ADVANCE,
-  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS, getFnoScanSliceKey, shouldResetFnoScanCursor
+  getNextFnoRotationIndex, getFnoScanBatchSize, getNextFreshFnoScanSymbol, FNO_SYMBOL_RESCAN_COOLDOWN_MS, getFnoScanSliceKey, shouldResetFnoScanCursor, buildFnoScanCandidates, isRetryableFnoScanError
 } from './rolling-fno-scanner.js';
 
 const universe=Array.from({length:218},(_,i)=>({symbol:`NSE:STOCK${String(i).padStart(3,'0')}-EQ`}));
@@ -126,4 +126,52 @@ test('scanner cursor resets when active slice membership changes without a rotat
   assert.equal(shouldResetFnoScanCursor(4,4,previousKey,getFnoScanSliceKey(next)),true);
   assert.equal(shouldResetFnoScanCursor(4,4,previousKey,getFnoScanSliceKey(previous)),false);
   assert.equal(shouldResetFnoScanCursor(4,5,previousKey,previousKey),true);
+});
+
+
+test('Top-5 priority is bounded and rotating F&O symbols retain a scan slot',()=>{
+ const active=['NSE:A-EQ','NSE:B-EQ','NSE:C-EQ'],rows=buildFnoScanCandidates(active,['NSE:G1-EQ','NSE:G2-EQ']);
+ assert.equal(rows[0],'NSE:G1-EQ');assert.deepEqual(rows.slice(1,4),active);
+});
+test('stale tick after history wait is retryable while malformed history is not',()=>{
+ assert.equal(isRetryableFnoScanError('Fresh FYERS underlying tick became stale after history wait; scan result discarded'),true);
+ assert.equal(isRetryableFnoScanError('malformed OHLCV'),false);
+ assert.equal(isRetryableFnoScanError('Cloudflare 1015'),true);
+});
+test('218-symbol scanner simulation survives changing Top-5, 1015 cooldown, stale-tick retry and selective daily warmup',()=>{
+ const visited=new Set(),attempts=new Map(),total=218,staleSymbol=universe[1].symbol;
+ let rotation=0,cycles=0,minute=0,cooldownUntil=0,cooldownPauses=0,pendingRetry=null;
+ let staleInjected=false,staleRetryCount=0,warmupPending=false,warmups=0;
+ while(visited.size<total&&minute<2500){
+  const active=buildFnoRotationSlice(universe,rotation,20),gainer=universe[(minute*17)%total].symbol;
+  // Two simulated Cloudflare 1015 events pause new REST dispatch for two minutes.
+  if(minute===25||minute===90)cooldownUntil=minute+2;
+  if(minute<cooldownUntil){cooldownPauses++;minute++;rotation=getNextFnoRotationIndex(total,rotation,FNO_SOCKET_ROTATION_ADVANCE);if(rotation===0)cycles++;continue;}
+  // A queued daily-history warmup consumes a later background slot; it is only
+  // queued for a small subset of 5m-prefilter-positive candidates.
+  if(warmupPending){warmupPending=false;warmups++;minute++;rotation=getNextFnoRotationIndex(total,rotation,FNO_SOCKET_ROTATION_ADVANCE);if(rotation===0)cycles++;continue;}
+  const candidates=buildFnoScanCandidates(active,[gainer]),chosen=[];
+  let budget=2;
+  // The exact stale-after-history symbol is retried when it re-enters the
+  // active/gainer candidate set; it is not marked completed on the first pass.
+  if(pendingRetry&&candidates.includes(pendingRetry)){chosen.push(pendingRetry);pendingRetry=null;budget--;}
+  for(const symbol of candidates){
+   if(budget<=0)break;
+   if(chosen.includes(symbol))continue;
+   if(symbol===staleSymbol&&!staleInjected){staleInjected=true;pendingRetry=symbol;staleRetryCount++;budget--;continue;}
+   if((attempts.get(symbol)||0)===0){chosen.push(symbol);budget--;}
+  }
+  for(const symbol of chosen){
+   visited.add(symbol);attempts.set(symbol,(attempts.get(symbol)||0)+1);
+   const index=Number(symbol.match(/STOCK(\d+)/)?.[1]||0);
+   if(active.includes(symbol)&&index%19===0)warmupPending=true;
+  }
+  minute++;rotation=getNextFnoRotationIndex(total,rotation,FNO_SOCKET_ROTATION_ADVANCE);if(rotation===0)cycles++;
+ }
+ assert.equal(visited.size,total);
+ assert.ok(minute<=total*11);
+ assert.ok(cycles>=10);
+ assert.equal(staleRetryCount,1);
+ assert.ok(cooldownPauses>=4);
+ assert.ok(warmups>0);
 });

@@ -317,7 +317,7 @@ test('research context warms fresh 15m history without requesting daily candles'
   const flow = server.slice(start, end);
   assert.match(flow, /getFifteenMinuteHistory/);
   assert.doesNotMatch(flow, /getDailyHistory/);
-  assert.match(flow, /entryContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE'/);
+  assert.match(flow, /researchContext:'15M_5M_RESEARCH_ONLY_NOT_STRATEGY_3'/);
 });
 
 test('index chart selection does not request equity-only research context', () => {
@@ -325,18 +325,21 @@ test('index chart selection does not request equity-only research context', () =
   assert.match(app, /researchContextReadySymbol = symbol;[\s\S]*?return;/);
 });
 
-test('live setup loads 15m and 5m context without daily-history dependency', () => {
+test('live setup and rolling research receive verified daily strategy context', () => {
   const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
   const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);
   const flow = server.slice(start, end);
   const underlying = flow.indexOf("const underlyingHistory = await getFiveMinuteHistory");
   const option = flow.indexOf("const optionHistory = await getFiveMinuteHistory");
-  const fifteen = flow.indexOf("const fifteenMinuteHistory = await getFifteenMinuteHistory");
-  assert.ok(underlying >= 0 && option > underlying && fifteen > option, '5m underlying, option and 15m trend histories are sequential');
-  assert.doesNotMatch(flow, /getDailyHistory/);
-  assert.match(flow, /fifteenMinuteCandles:fifteenMinuteHistory\.candles/);
+  const daily = flow.indexOf("const dailyHistory = await getDailyHistory");
+  assert.ok(underlying >= 0 && option > underlying && daily > option, '5m underlying, option and daily trend histories are sequential');
+  assert.match(flow, /getDailyHistory/);
+  assert.match(flow, /dailyCandles:dailyHistory\.candles/);
   assert.doesNotMatch(flow, /Promise\.all\(/, 'entry history reads are not queued as a burst');
   assert.match(flow, /REST_PRIORITY\.ENTRY/, 'entry reads retain ENTRY priority');
+  assert.match(server, /needsDailyTrendPullbackHistory\(history\.candles,scanTick\.exchangeTime\)/);
+  assert.match(server, /daily:histories\.daily,fifteenMinute:histories\.fifteenMinute/);
+  assert.match(server, /dailyCandles:histories\.daily\.get\(item\.symbol\)\?\.candles/);
 });
 
 test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {

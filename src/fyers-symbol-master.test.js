@@ -29,6 +29,14 @@ test('keeps contracts expiring today valid through the IST expiry day', () => {
 });
 
 
+test('rejects official master rows whose ticker suffix conflicts with CE/PE metadata', () => {
+  const now=Date.parse('2026-11-19T09:00:00+05:30');
+  const expiry=String(Math.floor((now+7*86400000)/1000));
+  const row={symTicker:'NSE:SBIN26NOV1000CE',optType:'PE',underSym:'SBIN',expiryDate:expiry,
+    minLotSize:750,tickSize:0.05,strikePrice:1000,fyToken:'12345',tradeStatus:1};
+  assert.throws(()=>verifyOptionContractRow(row,row.symTicker,now),/symbol and CE\/PE identity/i);
+});
+
 test('verifies option underlying, expiry, side, strike, lot size, tick size and FY token from official master', () => {
   const now=Date.UTC(2026,10,19,4,0);
   const expiry=String(Math.floor((now+7*86400000)/1000));

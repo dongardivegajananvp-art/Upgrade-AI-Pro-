@@ -29,7 +29,7 @@ test('rolling scanner surfaces a fresh 5m price setup without daily/15m research
   const start=Date.parse('2026-11-26T03:45:00Z')/1000;
   const candles=Array.from({length:50},(_,i)=>{
     const open=100+i,close=open+1;
-    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:0};
+    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:i===49?150:100};
   });
   const tick={symbol,price:151,exchangeTime:now/1000-1,receivedAt:now};
   const result=evaluateRollingFnoUniverse({
@@ -56,7 +56,7 @@ test('next opportunity queue prefers a fresh Top-5 gainer without inventing a qu
   const start=Date.parse('2026-11-26T03:45:00Z')/1000;
   const candles=Array.from({length:50},(_,i)=>{
     const open=100+i,close=open+1;
-    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:0};
+    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:i===49?150:100};
   });
   const symbols=['NSE:AAA-EQ','NSE:BBB-EQ'];
   const ticks=new Map(symbols.map(symbol=>[symbol,{symbol,price:151,exchangeTime:now/1000-1,receivedAt:now}]));
@@ -67,4 +67,14 @@ test('next opportunity queue prefers a fresh Top-5 gainer without inventing a qu
   });
   assert.equal(result.top3[0].symbol,'NSE:BBB-EQ');
   assert.equal(result.top3[0].qualityScore,null);
+});
+
+
+test('rolling scanner passes cached daily history into Strategy 3 ledger',()=>{
+ const now=Date.parse('2026-11-26T08:00:30Z'),symbol='NSE:AAA-EQ',start=Date.parse('2026-11-26T03:45:00Z')/1000;
+ const five=Array.from({length:50},(_,i)=>{const c=100+i;return{time:start+i*300,open:c-.2,high:c+.5,low:c-.5,close:c,volume:1000};});
+ const daily=Array.from({length:60},(_,i)=>{const c=100+i;return{time:Date.parse('2026-09-01T00:00:00Z')/1000+i*86400,open:c-.2,high:c+.5,low:c-.5,close:c,volume:1000};});
+ const tick={symbol,price:151,exchangeTime:now/1000-1,receivedAt:now};
+ const result=evaluateRollingFnoUniverse({universe:[{symbol}],ticks:new Map([[symbol,tick]]),fiveMinute:new Map([[symbol,{candles:five}]]),daily:new Map([[symbol,{candles:daily}]]),now});
+ assert.ok(result.evaluations[0].strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'));
 });

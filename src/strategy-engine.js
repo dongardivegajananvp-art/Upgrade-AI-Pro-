@@ -62,7 +62,7 @@ const MAX_ACTIVE_TRADES = 2;
 const STRATEGIES = Object.freeze([
   'EMA20_EMA50_TREND',
   'TOP_GAINER_MOMENTUM_BREAKOUT',
-  'FIFTEEN_MIN_TREND_5M_PULLBACK',
+  'DAILY_TREND_5M_PULLBACK',
   'DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
   'BULLISH_CONTINUATION',
@@ -72,7 +72,7 @@ const STRATEGIES = Object.freeze([
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
-  'TOP_GAINER_MOMENTUM_BREAKOUT','FIFTEEN_MIN_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
+  'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
@@ -87,6 +87,15 @@ function hasFreshCompletedFifteenMinuteHistory(rows, now = Date.now(), requiredC
   const latest=recent.at(-1);
   const age=Number(now)/1000-(Number(latest.time)+900);
   return Number.isFinite(age)&&age>=-3&&age<=maxAgeSeconds;
+}
+function hasFreshCompletedDailyHistory(rows, now = Date.now(), requiredCount = 50, maxAgeDays = 4) {
+ if(!Array.isArray(rows)||rows.length<requiredCount||rows.some(row=>!validOhlcv(row)))return false;
+ const recent=rows.slice(-requiredCount),days=recent.map(row=>istDayKey(number(row.time)));
+ if(days.some((day,i)=>!day||(i>0&&day<=days[i-1])))return false;
+ const epoch=day=>Date.parse(day+'T00:00:00Z');
+ for(let i=1;i<days.length;i++){const gap=(epoch(days[i])-epoch(days[i-1]))/86400000;if(!Number.isFinite(gap)||gap<1||gap>4)return false;}
+ const today=istDayKey(number(now)/1000),latest=days.at(-1),age=(epoch(today)-epoch(latest))/86400000;
+ return latest<today&&Number.isFinite(age)&&age>=1&&age<=maxAgeDays;
 }
 function ema(values, period) {
   if (values.length < period) return NaN;
@@ -155,15 +164,14 @@ function pivotLow(rows, i, width=2) {
   for(let j=Math.max(0,i-width);j<=Math.min(rows.length-1,i+width);j++) if(j!==i&&number(rows[j].low)<=value)return false;
   return true;
 }
-// This is a shared entry-quality condition across the strategy set. For retest setups, validate the original level-crossing
-// candle; for trend/pullback setups without a fresh level cross, validate trigger candle.
+// Opening Range Breakout only: validate the opening-range trigger candle.
+// For retest setups, validate the original level-crossing candle rather than the retest candle.
 export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
   if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) return { ok:false, reason:'Verified completed 5-minute candles and strategy direction are required' };
   const signalIndex=signalTime==null?rows.length-1:rows.findIndex(c=>number(c.time)===number(signalTime));
   if(signalIndex<0)return{ok:false,reason:'The strategy trigger candle is missing from verified history'};
   let triggerIndex=signalIndex,levelCrossFound=false;
   // Retest patterns retain their original level-cross -> retest sequence.
-  // No candle-body, buying/selling-pressure, or volume threshold is applied.
   if(requireLevelCross&&finite(breakoutLevel)){
     for(let i=signalIndex;i>=1;i--){
       const crossed=side==='LONG'
@@ -175,9 +183,42 @@ export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, s
   if(requireLevelCross&&!levelCrossFound)return{ok:false,reason:'Original completed-candle level break could not be verified; retest candle cannot substitute'};
   const candle=rows[triggerIndex];
   if(!validOhlcv(candle))return{ok:false,reason:'Strategy trigger candle OHLC is missing or invalid'};
-  return{ok:true,reason:'Strategy trigger candle and required price-level sequence verified',
-    candleTime:number(candle.time),breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
-    retestSequenceVerified:Boolean(requireLevelCross)};
+  const open=number(candle.open),high=number(candle.high),low=number(candle.low),close=number(candle.close);
+  const range=high-low,body=Math.abs(close-open),bodyStrength=range>0?body/range:0;
+  if(!(range>0)||!Number.isFinite(bodyStrength)||bodyStrength<0.50)
+    return{ok:false,reason:'Strategy trigger candle body strength must be at least 50% of its range',candleTime:number(candle.time),bodyStrength};
+  const closePosition=(close-low)/range;
+  if(side==='LONG'?(close<=open||closePosition<0.65):(close>=open||closePosition>0.35))
+    return{ok:false,reason:side==='LONG'?'BUY trigger candle must close in its upper 35% with bullish body':'SELL trigger candle must close in its lower 35% with bearish body',candleTime:number(candle.time),bodyStrength,closePosition};
+  const triggerTime=number(candle.time),triggerDay=istDayKey(triggerTime);
+  const triggerMinute=(()=>{const d=new Date((triggerTime+19800)*1000);return d.getUTCHours()*60+d.getUTCMinutes();})();
+  const priorSession=[];
+  for(let i=0;i<triggerIndex;i++){
+    const row=rows[i],time=number(row?.time);
+    if(!Number.isFinite(time)||istDayKey(time)!==triggerDay)continue;
+    const d=new Date((time+19800)*1000),minute=d.getUTCHours()*60+d.getUTCMinutes();
+    if(minute<555||minute>=930||time>=triggerTime)continue;
+    priorSession.push(row);
+  }
+  // Use every available consecutive valid same-session candle before the
+  // breakout, with no fixed 20-candle cap or warm-up period.
+  const reference=[];
+  for(let i=priorSession.length-1;i>=0;i--){
+    const row=priorSession[i],previous=reference[0];
+    if(!validOhlcv(row)||!finite(row.volume)||number(row.volume)<=0)break;
+    if(previous&&number(previous.time)-number(row.time)!==INTERVAL_SECONDS)break;
+    reference.unshift(row);
+  }
+  if(!reference.length)return{ok:false,reason:'A valid prior same-session volume reference is required; NO TRADE',candleTime:triggerTime,bodyStrength,closePosition};
+  const referenceVolume=reference.reduce((sum,row)=>sum+number(row.volume),0)/reference.length;
+  const triggerVolume=number(candle.volume);
+  const requiredVolume=referenceVolume*1.25;
+  if(!finite(triggerVolume)||triggerVolume<requiredVolume)
+    return{ok:false,reason:'Breakout/breakdown volume must be at least 1.25x the average of all available consecutive valid prior same-session candles',candleTime:triggerTime,bodyStrength,closePosition,triggerVolume:Number.isFinite(triggerVolume)?triggerVolume:null,referenceCandleCount:reference.length,referenceVolume,requiredVolume};
+  return{ok:true,reason:'Strategy trigger candle passed body, close-location and 1.25x same-session relative-volume gates',
+    candleTime:triggerTime,breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
+    retestSequenceVerified:Boolean(requireLevelCross),bodyStrength,closePosition,triggerVolume,
+    referenceCandleCount:reference.length,referenceVolume,volumeRatio:triggerVolume/referenceVolume};
 }
 
 function candidate(strategy, side, level, candle, details={}) {
@@ -355,16 +396,22 @@ export function detectTopGainerMomentum(rows, isTopGainer=false) {
     ? candidate(STRATEGIES[1],'LONG',number(prior.high),last)
     : null;
 }
-export function detectFifteenMinuteTrendPullback(rows, fifteenMinuteCandles=[], now=Date.now()) {
-  if(!Array.isArray(rows)||rows.length<50||!hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800))return null;
-  const fifteenCloses=fifteenMinuteCandles.filter(validOhlcv).map(c=>number(c.close));
-  if(fifteenCloses.length<50)return null;
-  const m15_20=ema(fifteenCloses,20),m15_50=ema(fifteenCloses,50);
-  const closes=rows.map(c=>number(c.close)),e20=ema(closes,20),e50=ema(closes,50);
-  const last=rows.at(-1),p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
-  if(m15_20>m15_50&&e20>e50&&touch&&number(last.close)>number(p.high))return candidate(STRATEGIES[2],'LONG',number(p.high),last);
-  if(m15_20<m15_50&&e20<e50&&touch&&number(last.close)<number(p.low))return candidate(STRATEGIES[2],'SHORT',number(p.low),last);
-  return null;
+export function detectDailyTrendPullback(rows, dailyCandles=[], now=Date.now()) {
+ if(!Array.isArray(rows)||rows.length<50||!contiguousWindow(rows,50)||!hasFreshCompletedDailyHistory(dailyCandles,now,50,4))return null;
+ const dailyCloses=dailyCandles.slice(-50).map(c=>number(c.close)),daily20=ema(dailyCloses,20),daily50=ema(dailyCloses,50),dailyLast=dailyCloses.at(-1);
+ const five20=ema(rows.map(c=>number(c.close)),20),last=rows.at(-1),pullback=rows.at(-2);
+ const touch=number(pullback.low)<=five20*1.003&&number(pullback.high)>=five20*0.997;
+ if(dailyLast>daily20&&daily20>daily50&&touch&&number(last.close)>number(pullback.high)&&number(last.close)>five20)return candidate(STRATEGIES[2],'LONG',number(pullback.high),last,{trendSource:'DAILY_EMA20_EMA50'});
+ if(dailyLast<daily20&&daily20<daily50&&touch&&number(last.close)<number(pullback.low)&&number(last.close)<five20)return candidate(STRATEGIES[2],'SHORT',number(pullback.low),last,{trendSource:'DAILY_EMA20_EMA50'});
+ return null;
+}
+export function needsDailyTrendPullbackHistory(candles=[],exchangeTime) {
+ const w=getCompletedCandleWindow(candles,exchangeTime,600,50);
+ if(!w.fresh||!w.contiguous||w.completed.length<50)return false;
+ const rows=w.completed.slice(-50),e20=ema(rows.map(c=>number(c.close)),20),p=rows.at(-2),last=rows.at(-1);
+ if(!Number.isFinite(e20))return false;
+ const touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
+ return Boolean(touch&&((number(last.close)>number(p.high)&&number(last.close)>e20)||(number(last.close)<number(p.low)&&number(last.close)<e20)));
 }
 
 export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], fifteenMinuteCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600, historicalAsOf=null }) {
@@ -398,14 +445,17 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
       strategyLedger.push({strategy:name,status:'REJECTED',reason:rejectedReason});
       return;
     }
-    const requireOriginalCross=['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(result.strategy);
-    const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,requireOriginalCross);
-    if(!confirmation.ok){
-      triggerRejected.push({strategy:result.strategy,reason:confirmation.reason});
-      strategyLedger.push({strategy:name,status:'REJECTED',reason:confirmation.reason});
-      return;
+    // The stricter body/close-location/relative-volume filter belongs only to
+    // the morning Opening Range Breakout strategy; never impose it on the other eight.
+    if(result.strategy==='OPENING_RANGE_BREAKOUT'){
+      const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,false);
+      if(!confirmation.ok){
+        triggerRejected.push({strategy:result.strategy,reason:confirmation.reason});
+        strategyLedger.push({strategy:name,status:'REJECTED',reason:confirmation.reason});
+        return;
+      }
+      result.triggerConfirmation=confirmation;
     }
-    result.triggerConfirmation=confirmation;
     candidates.push(result);
     strategyLedger.push({strategy:name,status:'DETECTED',reason:'First valid strategy passed its own completed-candle trigger; Entry verification starts immediately',side:result.side,confirmedAt:result.confirmedAt});
   };
@@ -415,11 +465,11 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const w48=contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute);
   const w30=contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute);
   const w2=contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute);
-  const fifteenValid=hasFreshCompletedFifteenMinuteHistory(fifteenMinuteCandles,now,50,1800);
+  const dailyValid=hasFreshCompletedDailyHistory(dailyCandles,now,50,4);
   // Execute in specificity order. Once one strategy passes its own trigger,
   // this symbol moves to option/Entry verification without waiting for the rest.
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&w2,()=>detectTopGainerMomentum(rows,isTopGainer),!isTopGainer?'Symbol is not in the verified current rolling Top Gainers set':'Requires two contiguous completed 5-minute candles (prior candle plus trigger candle)','Latest completed 5-minute close did not break the previous completed candle high');
-  consider('FIFTEEN_MIN_TREND_5M_PULLBACK',w50&&fifteenValid,()=>detectFifteenMinuteTrendPullback(rows,fifteenMinuteCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':'Requires 50 fresh, contiguous completed FYERS 15-minute candles','15-minute and 5-minute EMA20/EMA50 alignment, 5-minute EMA20 pullback touch, and next-candle resume close did not all confirm');
+  consider('DAILY_TREND_5M_PULLBACK',w50&&dailyValid,()=>detectDailyTrendPullback(rows,dailyCandles,now),!w50?'Requires 50 contiguous completed 5-minute candles':!dailyValid?'Requires 50 fresh completed FYERS daily candles; daily history is missing, stale or invalid':'Requires fresh daily EMA20/EMA50 trend, 5-minute EMA20 pullback touch and next-candle resume close','Daily EMA20/EMA50 trend, 5-minute EMA20 pullback touch and next completed candle resume did not all confirm');
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No current-session day-high/day-low break followed by a retest and close reclaim/rejection was confirmed');
@@ -466,15 +516,18 @@ export function validateStrategyOptionContract({strategy,underlyingSide,underlyi
     return {ok:false,reason:'Verified active CE/PE contract and tick size are required'};
   const expectedSide=underlyingSide==='LONG'?'CE':'PE';
   if(contract.side!==expectedSide)return {ok:false,reason:'Selected option side does not match the confirmed underlying direction'};
-  const expectedUnderlying=String(underlyingSymbol||'').trim().toUpperCase().replace(/^NSE:/,'').replace(/-(EQ|FUT|INDEX)$/,'');
+  const underlyingMatch=String(underlyingSymbol||'').trim().toUpperCase().match(/^NSE:([A-Z0-9&._-]+)-EQ$/);
+  const expectedUnderlying=underlyingMatch?.[1]||'';
   if(!expectedUnderlying||String(contract.underlying||'').trim().toUpperCase()!==expectedUnderlying)
     return {ok:false,reason:'Official option contract underlying does not match the selected NSE underlying'};
+  const expiryDay=finite(contract.expiry)?istDayKey(number(contract.expiry)):'';
+  const today=istDayKey(number(now)/1000);
   if(typeof contract.symbol!=='string'||!/^NSE:/.test(contract.symbol)||
-     !finite(contract.expiry)||number(contract.expiry)<=number(now)/1000||
+     !contract.symbol.endsWith(expectedSide)||!expiryDay||expiryDay<today||
      !finite(contract.strike)||number(contract.strike)<=0||
      !finite(contract.lotSize)||number(contract.lotSize)<=0||
      typeof contract.fyToken!=='string'||!contract.fyToken.trim())
-    return {ok:false,reason:'Official NSE contract identity, future expiry, strike, lot size and FY token are required'};
+    return {ok:false,reason:'Official NSE contract identity, active expiry day, strike, lot size and FY token are required'};
   return {ok:true,expectedSide,underlying:expectedUnderlying};
 }
 
@@ -492,10 +545,20 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const chosen=setup;
   const contractGate=validateStrategyOptionContract({strategy:chosen.strategy,underlyingSide:chosen.side,underlyingSymbol:underlyingTick?.symbol,contract,now});
   if(!contractGate.ok)return blockDetected(contractGate.reason);
+  if(optionTick.symbol!==contract.symbol)return blockDetected('Fresh option tick symbol does not match the verified official contract');
+  if(underlyingTick.symbol!=='NSE:'+contractGate.underlying+'-EQ')return blockDetected('Underlying tick symbol does not match the verified official NSE underlying');
   const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds,null,1);
   if(o.error)return blockDetected(o.error);
   if(!contiguousWindow(o.rows,1,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs one fresh completed 5-minute candle');
   const confirmation=o.rows.at(-1),tickSize=number(contract.tickSize);
+  const optionCandleTime=number(confirmation.time);
+  const optionCandleIst=new Date((optionCandleTime+19800)*1000);
+  const optionCandleMinute=optionCandleIst.getUTCHours()*60+optionCandleIst.getUTCMinutes();
+  const currentOptionBucket=Math.floor(number(optionTick.exchangeTime)/300)*300;
+  if(!Number.isFinite(optionCandleTime)||optionCandleTime%300!==0||
+     optionCandleMinute<sessionStartMinute||optionCandleMinute>=sessionCloseMinute||
+     optionCandleTime>=currentOptionBucket)
+    return blockDetected('Option premium candle must be a completed, session-aligned FYERS 5-minute candle');
   if(number(confirmation.close)<=number(confirmation.open))
     return blockDetected('The latest completed option 5-minute candle must close bullish');
   const premiumLevel=number(confirmation.high);

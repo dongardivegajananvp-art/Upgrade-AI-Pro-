@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectFifteenMinuteTrendPullback } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback, needsDailyTrendPullbackHistory } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
   assert.deepEqual(STRATEGIES, [
-    'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','FIFTEEN_MIN_TREND_5M_PULLBACK',
+    'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK',
     'DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION',
     'BEARISH_CONTINUATION','FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT'
   ]);
@@ -33,6 +33,11 @@ test('duplicate active underlying or option contract is rejected', () => {
 });
 
 
+function makeDailyCandles(now,direction='LONG',count=60){
+ const d=new Date(now);d.setUTCHours(0,0,0,0);d.setUTCDate(d.getUTCDate()-1);while(d.getUTCDay()===0||d.getUTCDay()===6)d.setUTCDate(d.getUTCDate()-1);
+ const days=[];while(days.length<count){if(d.getUTCDay()!==0&&d.getUTCDay()!==6)days.push(new Date(d));d.setUTCDate(d.getUTCDate()-1);}days.reverse();
+ return days.map((day,i)=>{const close=direction==='LONG'?100+i:300-i;return{time:day.getTime()/1000,open:close-.2,high:close+.5,low:close-.5,close,volume:1000};});
+}
 function candleRows(side='LONG') {
   const rows=Array.from({length:21},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[20]=side==='LONG'
@@ -40,19 +45,27 @@ function candleRows(side='LONG') {
     : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
   return rows;
 }
-test('strategy trigger ignores candle pressure and volume entirely',()=>{
+test('Opening Range trigger-quality helper enforces body, close location and same-session relative volume',()=>{
   const rows=candleRows('LONG');
-  rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
-  const result=confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time);
-  assert.equal(result.ok,true);
-  assert.equal(result.candleTime,rows[20].time);
-  assert.equal('relativeVolume' in result,false);
-  assert.equal('pressure' in result,false);
+  const valid=confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time);
+  assert.equal(valid.ok,true);
+  assert.equal(valid.referenceCandleCount,20);
+  assert.ok(valid.bodyStrength>=0.50);
+  assert.ok(valid.closePosition>=0.65);
+  assert.ok(valid.volumeRatio>=1.25);
+  const weakBody=[...rows]; weakBody[20]={...weakBody[20],open:100,high:104,low:99,close:100.5};
+  assert.equal(confirmStrategyTriggerCandle(weakBody,'LONG',101,weakBody[20].time).ok,false);
+  const weakVolume=[...rows]; weakVolume[20]={...weakVolume[20],volume:120};
+  assert.match(confirmStrategyTriggerCandle(weakVolume,'LONG',101,weakVolume[20].time).reason,/1.25x/);
+  const noReference=[{...rows[20],time:rows[20].time,volume:200}];
+  assert.match(confirmStrategyTriggerCandle(noReference,'LONG',101,noReference[0].time).reason,/prior same-session volume reference/);
+  const short=candleRows('SHORT');
+  assert.equal(confirmStrategyTriggerCandle(short,'SHORT',99,short[20].time).ok,true);
 });
 test('retest trigger still requires original completed-candle price-level cross',()=>{
   const rows=candleRows('LONG');
-  rows[20]={...rows[20],open:100,high:103,low:99.5,close:102.8,volume:0};
-  rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:0};
+  rows[20]={...rows[20],open:100,high:103,low:99.5,close:102.8,volume:200};
+  rows[21]={time:1800006300,open:102,high:103.5,low:102,close:103.4,volume:150};
   const retest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,true);
   assert.equal(retest.ok,true);
   assert.equal(retest.candleTime,rows[20].time);
@@ -119,7 +132,7 @@ test('diagnostic ledger uses strategy-specific rejection reasons when verified w
   assert.equal(result.strategyLedger.length,9);
   assert.ok(result.strategyLedger.every(row=>['DETECTED','REJECTED','BLOCKED','SKIPPED_AFTER_FIRST_PASS'].includes(row.status)&&row.reason));
   assert.ok(result.strategyLedger.some(row=>row.status==='REJECTED'&&row.reason.includes('EMA20')));
-  assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('15-minute candles')));
+  assert.ok(result.strategyLedger.some(row=>row.status==='BLOCKED'&&row.reason.includes('daily candles')));
 });
 
 test('early option entry exposes exact tick-aligned trigger while waiting inside the same 5-minute candle', () => {
@@ -249,10 +262,10 @@ test('research-enabled entry remains blocked until fresh 15-minute and 5-minute 
   assert.equal(result.target,undefined);
 });
 
-test('non-retest strategies validate their trigger candle without pressure or volume gates', () => {
+test('non-retest and retest strategies both apply the same candle-quality and volume gates', () => {
   const rows=Array.from({length:22},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[20]={time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:200};
-  rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:150};
+  rows[21]={time:1800006300,open:102,high:103.5,low:102,close:103.4,volume:150};
   const nonRetest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,false);
   assert.equal(nonRetest.ok,true);
 
@@ -262,11 +275,11 @@ test('non-retest strategies validate their trigger candle without pressure or vo
 });
 
 
-test('top-gainer breakout uses two contiguous candles and no fixed 20-candle volume warm-up', () => {
+test('Top Gainer keeps its own breakout rule and is not subjected to Opening Range candle-quality/volume gates', () => {
   const now=1800006901000;
   const start=Math.floor(now/1000)-2*300;
   const underlyingCandles=Array.from({length:2},(_,i)=>i===1
-    ? {time:start+i*300,open:100,high:103,low:99.8,close:102.5,volume:250}
+    ? {time:start+i*300,open:100,high:104,low:99,close:101.1,volume:100}
     : {time:start+i*300,open:100,high:101,low:99,close:100,volume:100});
   const result=detectNineStrategySetup({
     underlyingCandles,
@@ -278,9 +291,11 @@ test('top-gainer breakout uses two contiguous candles and no fixed 20-candle vol
   const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
   assert.equal(topGainer.status,'DETECTED');
   assert.equal(result.strategyLedger.filter(row=>row.status==='DETECTED').length,1);
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(result.triggerConfirmation,undefined,'Top Gainer must not receive the Opening Range-only candle-quality gate');
   assert.ok(result.strategyLedger.filter(row=>row.strategy!=='TOP_GAINER_MOMENTUM_BREAKOUT').every(row=>['BLOCKED','SKIPPED_AFTER_FIRST_PASS'].includes(row.status)));
   assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
-  assert.ok(result.strategyLedger.some(row=>row.strategy==='FIFTEEN_MIN_TREND_5M_PULLBACK'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
 });
 
 
@@ -322,7 +337,7 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
   assert.match(result.reason,/latest completed candle is stale/i);
 });
 
-test('opening-range setup confirms first breakout after the opening candle without a 20-candle warm-up', () => {
+test('opening-range setup confirms first breakout using the opening candle as its volume reference', () => {
   const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
   const baseline=[{time:start,open:100,high:101,low:99,close:100,volume:100}];
   const breakout={time:start+300,open:100,high:103,low:99.5,close:102.5,volume:200};
@@ -332,19 +347,39 @@ test('opening-range setup confirms first breakout after the opening candle witho
   const confirmation=confirmStrategyTriggerCandle([...baseline,breakout],'LONG',101,breakout.time);
   assert.equal(confirmation.ok,true);
   assert.equal(confirmation.candleTime,breakout.time);
-  assert.equal('pressure' in confirmation,false);
-  assert.equal('relativeVolume' in confirmation,false);
+  assert.ok(confirmation.bodyStrength>=0.50);
+  assert.ok(confirmation.closePosition>=0.65);
+  assert.ok(confirmation.volumeRatio>=1.25);
 });
 
-test('legacy confirmation export no longer applies pressure or volume filters',()=>{
+test('Opening Range breakout remains eligible through the final completed NSE candle at 15:25-15:30 IST',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
+  const end=Date.parse('2026-11-20T09:55:00Z')/1000; // 15:25 IST candle start; completes 15:30
+  const rows=[];
+  for(let time=start;time<=end;time+=300){
+    if(time===start) rows.push({time,open:100,high:101,low:99.5,close:100.5,volume:100});
+    else if(time===end) rows.push({time,open:100.5,high:103,low:100.4,close:102.5,volume:200});
+    else rows.push({time,open:100.2,high:100.8,low:99.8,close:100.5,volume:100});
+  }
+  assert.equal(rows.length,75,'the full 09:15-15:30 regular session must be represented by contiguous 5-minute candles');
+  const setup=detectOpeningRange(rows);
+  assert.equal(setup?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(setup?.side,'LONG');
+  assert.equal(setup?.confirmedAt,end);
+  const confirmation=confirmStrategyTriggerCandle(rows,'LONG',101,end);
+  assert.equal(confirmation.ok,true);
+  assert.equal(confirmation.candleTime,end);
+});
+
+test('Opening Range trigger-quality helper fails closed when candle quality and volume are invalid',()=>{
   const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
-  assert.equal(confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time).ok,true);
+  assert.equal(confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time).ok,false);
 });
 
 // Direct detector fixtures supplement the aggregate ledger tests. These
-// fixtures exercise representative positive and negative paths without
-// relaxing the common freshness, candle-continuity or option-entry gates.
+// fixtures exercise representative positive and negative paths while keeping
+// freshness, candle-continuity and option-entry gates independent.
 test('EMA20/EMA50 detector accepts aligned bullish trend and rejects flat history', () => {
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
   assert.equal(detectEmaTrend(rows)?.side,'LONG');
@@ -416,14 +451,14 @@ test('bullish and bearish flag detectors use price structure only, regardless of
   assert.equal(detectFlagPriceStructure(bearish)?.side,'SHORT');
 });
 
-test('15m trend pullback rejects stale 15m candles even when 5m candles are present',()=>{
+test('daily trend pullback rejects stale 15m candles even when 5m candles are present',()=>{
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
   const stale=Array.from({length:50},(_,i)=>({time:1700000000+i*900,open:100+i,high:101+i,low:99+i,close:100.5+i,volume:1000}));
-  assert.equal(detectFifteenMinuteTrendPullback(rows,stale,1800000000000),null);
+  assert.equal(detectDailyTrendPullback(rows,stale,1800000000000),null);
 });
-test('15m trend pullback detector blocks missing or stale 15m context', () => {
+test('daily trend pullback detector blocks missing or stale daily context', () => {
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
-  assert.equal(detectFifteenMinuteTrendPullback(rows,[],1800000000000),null);
+  assert.equal(detectDailyTrendPullback(rows,[],1800000000000),null);
 });
 
 
@@ -453,18 +488,17 @@ test('double-top and double-bottom detectors require a neckline break followed b
 });
 
 
-test('15m trend plus 5m pullback detector confirms bullish EMA alignment and resume after a pullback touch',()=>{
+test('daily trend plus 5m pullback detector confirms bullish EMA alignment and resume after a pullback touch',()=>{
   const now=Date.parse('2026-11-23T10:05:00Z');
   const start=Math.floor(now/1000)-60*300;
   const rows=Array.from({length:60},(_,i)=>{const close=100+i*.2;return{time:start+i*300,open:close-.05,high:close+.1,low:close-.1,close,volume:100};});
   rows[58]={time:start+58*300,open:109.05,high:109.15,low:108.7,close:108.9,volume:120};
   rows[59]={time:start+59*300,open:109.1,high:109.7,low:109,close:109.6,volume:150};
-  const m15Start=Date.parse('2026-11-20T03:45:00Z')/1000;
-  const fifteen=Array.from({length:50},(_,i)=>{const session=i<25?0:1,slot=i%25,day=session===0?'2026-11-20':'2026-11-23',time=Date.parse(day+'T03:45:00Z')/1000+slot*900,close=100+i;return{time,open:close-.2,high:close+.5,low:close-.5,close,volume:1000};});
-  const result=detectFifteenMinuteTrendPullback(rows,fifteen,now);
+  const daily=makeDailyCandles(now,'LONG');
+  const result=detectDailyTrendPullback(rows,daily,now);
   assert.equal(result?.side,'LONG');
-  assert.equal(result?.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
-  assert.equal(detectFifteenMinuteTrendPullback(rows,[],now),null);
+  assert.equal(result?.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(detectDailyTrendPullback(rows,[],now),null);
 });
 
 
@@ -511,6 +545,36 @@ test('all ten strategies enforce the full LONG/CE and SHORT/PE contract-side mat
     assert.equal(shortCe.ok,false,strategy+' SHORT must reject CE');
   }
 });
+test('contract expiry remains valid through the complete IST expiry day', () => {
+  const now=Date.parse('2026-11-26T09:30:00+05:30');
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
+    expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'FY123'};
+  const result=validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'LONG',
+    underlyingSymbol:'NSE:ABC-EQ',contract,now});
+  assert.equal(result.ok,true);
+});
+
+test('strategy option gate rejects option tick symbol and completed candle timestamp mismatches', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i};
+  });
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
+    expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const optionCandles=[{time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}];
+  const base={underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now};
+  const wrongTick=evaluateNineStrategies({...base,optionTick:{...base.optionTick,symbol:'NSE:ABC26NOV150PE'}});
+  assert.equal(wrongTick.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(wrongTick.reason,/tick symbol does not match/i);
+  const unaligned=evaluateNineStrategies({...base,optionCandles:[{...optionCandles[0],time:optionCandles[0].time+60}]});
+  assert.equal(unaligned.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(unaligned.reason,/session-aligned FYERS 5-minute candle/i);
+});
+
 test('directional contract matrix rejects unknown strategy, absent side, invalid tick size and non-NSE symbol', () => {
   const now=Date.parse('2026-11-19T08:00:00Z');
   const valid={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'FY123'};
@@ -521,7 +585,7 @@ test('directional contract matrix rejects unknown strategy, absent side, invalid
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,symbol:'BSE:ABC26NOV150CE'}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,underlying:'XYZ'}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,underlyingSymbol:'NSE:XYZ-EQ'}).ok,false);
-  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,expiry:now/1000-1}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,expiry:now/1000-86400}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,strike:0}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,fyToken:''}}).ok,false);
 });
@@ -611,8 +675,6 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan with one compl
     {time:start+900,open:101.2,high:102,low:100.9,close:101.7,volume:180}
   ];
   const option=makeOptionPipelineFields(start+300,'CE');
-  for(const candle of underlyingCandles) candle.volume=0;
-  option.optionCandles=option.optionCandles.map(c=>({...c,volume:0}));
   option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:101.7,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
   assert.equal(result.status,'SETUP_CONFIRMED');
@@ -626,21 +688,60 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan with one compl
   assert.match(delayedOption.reason,/Fresh FYERS option premium tick/);
 });
 
-test('end-to-end opening-range first-candle breakout passes with one completed option candle',()=>{
-  const start=Date.parse('2026-11-20T03:45:00Z')/1000, now=(start+900)*1000;
+test('Opening Bell: 09:20 is observation-only; earliest opening-range entry evaluation is after the 09:20-09:25 candle closes',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
   const underlyingCandles=[
-    {time:start,open:100,high:101,low:99,close:100,volume:100},
-    {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:200}
+    {time:start,open:100,high:101,low:99,close:100,volume:100}, // 09:15-09:20
+    {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:200} // 09:20-09:25
   ];
   const option=makeOptionPipelineFields(start-300,'CE');
   option.optionCandles=option.optionCandles.map(c=>({...c,time:start+300}));
+
+  // At 09:20 the second candle is still forming, so it must not be used.
+  const at0920=(start+300)*1000;
+  const beforeClose=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:at0920/1000,receivedAt:at0920},
+    ...option,
+    optionTick:{...option.optionTick,exchangeTime:at0920/1000,receivedAt:at0920},
+    now:at0920,
+    researchEnabled:false
+  });
+  assert.notEqual(beforeClose.status,'SETUP_CONFIRMED');
+  assert.equal(beforeClose.status,'DATA_UNAVAILABLE_NO_TRADE');
+
+  // At 09:25 both underlying candles and the matching option candle are complete.
+  const now=(start+600)*1000;
   option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
-  const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},
+    ...option,now,researchEnabled:false
+  });
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(result.underlyingSide,'LONG');
   assert.ok(result.rr>=2);
-  const stale=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,optionTick:{...option.optionTick,receivedAt:now-11000},now,researchEnabled:false});
+
+  const weakOpeningRange=evaluateNineStrategies({
+    underlyingCandles:[
+      {time:start,open:100,high:101,low:99,close:100,volume:100},
+      {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:100}
+    ],
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:(start+600),receivedAt:(start+600)*1000},
+    ...option,
+    optionTick:{...option.optionTick,exchangeTime:start+600,receivedAt:(start+600)*1000},
+    now:(start+600)*1000,
+    researchEnabled:false
+  });
+  assert.notEqual(weakOpeningRange.status,'SETUP_CONFIRMED');
+  assert.equal(weakOpeningRange.strategyLedger.find(row=>row.strategy==='OPENING_RANGE_BREAKOUT').status,'REJECTED');
+
+  const stale=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},
+    ...option,optionTick:{...option.optionTick,receivedAt:now-11000},now,researchEnabled:false
+  });
   assert.equal(stale.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.equal(stale.strategyLedger.find(row=>row.strategy==='OPENING_RANGE_BREAKOUT').status,'BLOCKED');
 });
@@ -705,7 +806,7 @@ test('end-to-end flag price-breakout is independently selectable when continuati
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:400});
   rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:400});
-  for(let i=0;i<12;i++){const close=108.5-i*.05;rows.push({time:start+(17+i)*300,open:close+.1,high:109.5,low:107.5,close,volume:0});}
+  for(let i=0;i<12;i++){const close=108.5-i*.05;rows.push({time:start+(17+i)*300,open:close+.1,high:109.5,low:107.5,close,volume:400});}
   rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:600});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
@@ -715,27 +816,26 @@ test('end-to-end flag price-breakout is independently selectable when continuati
   assertStaleOptionQuoteBlocks(rows,'LONG','FLAG_BREAKOUT_PRICE_STRUCTURE');
 });
 
-test('end-to-end 15m trend pullback requires fresh 15m context and completes the SHORT/PE risk plan',()=>{
-  const now=Date.parse('2026-11-23T12:00:00Z'),start=Math.floor(now/1000)-60*300;
+test('end-to-end daily trend pullback requires fresh daily context and completes the SHORT/PE risk plan',()=>{
+  const now=Date.parse('2026-11-23T08:00:00Z'),start=Math.floor(now/1000)-60*300;
   const rows=Array.from({length:60},(_,i)=>{const close=200-i*.2;return{time:start+i*300,open:close+.05,high:close+.1,low:close-.1,close,volume:100};});
   rows[58]={time:start+58*300,open:190,high:190.2,low:189.9,close:190.05,volume:120};
   rows[59]={time:start+59*300,open:189.8,high:189.85,low:189.2,close:189.3,volume:220};
   const lastTime=rows.at(-1).time,evaluationNow=(lastTime+360)*1000;
-  const fifteenStart=evaluationNow/1000-60*900;
-  const fifteen=Array.from({length:60},(_,i)=>{const close=300-i;return{time:fifteenStart+i*900,open:close+.2,high:close+.5,low:close-.5,close,volume:1000};});
+  const daily=makeDailyCandles(evaluationNow,'SHORT');
   const option=makeOptionPipelineFields(lastTime-600,'PE');
   option.optionTick={...option.optionTick,exchangeTime:evaluationNow/1000,receivedAt:evaluationNow};
-  const base={underlyingCandles:rows,underlyingTick:{symbol:'NSE:ABC-EQ',price:189.3,exchangeTime:evaluationNow/1000,receivedAt:evaluationNow},...option,dailyCandles:[],fifteenMinuteCandles:fifteen,now:evaluationNow,researchEnabled:false};
+  const base={underlyingCandles:rows,underlyingTick:{symbol:'NSE:ABC-EQ',price:189.3,exchangeTime:evaluationNow/1000,receivedAt:evaluationNow},...option,dailyCandles:daily,fifteenMinuteCandles:[],now:evaluationNow,researchEnabled:false};
   const result=evaluateNineStrategies(base);
   assert.equal(result.status,'SETUP_CONFIRMED');
-  assert.equal(result.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
+  assert.equal(result.strategy,'DAILY_TREND_5M_PULLBACK');
   assert.equal(result.underlyingSide,'SHORT');
   assert.equal(result.optionSide,'PE');
   assert.ok(result.rr>=2);
-  const missing15m=evaluateNineStrategies({...base,fifteenMinuteCandles:[]});
-  assert.notEqual(missing15m.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
-  assert.equal(missing15m.strategyLedger.find(row=>row.strategy==='FIFTEEN_MIN_TREND_5M_PULLBACK').status,'BLOCKED');
-  assertStaleOptionQuoteBlocks(rows,'SHORT','FIFTEEN_MIN_TREND_5M_PULLBACK',{fifteenMinuteCandles:fifteen});
+  const missingDaily=evaluateNineStrategies({...base,dailyCandles:[],fifteenMinuteCandles:[]});
+  assert.notEqual(missingDaily.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='DAILY_TREND_5M_PULLBACK').status,'BLOCKED');
+  assertStaleOptionQuoteBlocks(rows,'SHORT','DAILY_TREND_5M_PULLBACK',{dailyCandles:daily});
 });
 
 
@@ -780,13 +880,13 @@ test('end-to-end nine-strategy negative matrix rejects a fresh, contiguous but p
     time:start+i*300,open:100,high:101,low:99,close:100,volume:100
   }));
   const now=(underlyingCandles.at(-1).time+360)*1000;
-  const fifteenStart=now/1000-50*900;
-  const fifteenMinuteCandles=Array.from({length:50},(_,i)=>({time:fifteenStart+i*900,open:100,high:101,low:99,close:100,volume:1000}));
+  const dailyStart=Date.parse('2026-09-20T00:00:00Z')/1000;
+  const dailyCandles=Array.from({length:60},(_,i)=>({time:dailyStart+i*86400,open:100,high:101,low:99,close:100,volume:1000}));
   const result=evaluateNineStrategies({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:100,exchangeTime:now/1000,receivedAt:now},
-    dailyCandles:[],
-    fifteenMinuteCandles,
+    dailyCandles,
+    fifteenMinuteCandles:[],
     isTopGainer:true,
     researchEnabled:false,
     now
@@ -797,7 +897,7 @@ test('end-to-end nine-strategy negative matrix rejects a fresh, contiguous but p
   for(const strategy of STRATEGIES){
     const row=result.strategyLedger.find(item=>item.strategy===strategy);
     assert.ok(row, strategy+' must be present in the evaluator ledger');
-    assert.equal(row.status,'REJECTED',strategy+' must reject a neutral completed-candle pattern: '+row.reason);
+    assert.equal(row.status,strategy==='DAILY_TREND_5M_PULLBACK'?'REJECTED':'REJECTED',strategy+' must reject a neutral completed-candle pattern: '+row.reason);
     assert.ok(row.reason, strategy+' must expose its pattern rejection reason');
   }
 });
@@ -819,8 +919,8 @@ test('targeted strategy detector invalidation matrix rejects each missing patter
   assert.equal(detectTopGainerMomentum(rows5,false),null,'non-member cannot qualify as a Top Gainer');
   assert.equal(detectTopGainerMomentum(rows5,true),null,'Top Gainer membership without a breakout must reject');
 
-  // 15m trend pullback: absent verified 15m context cannot produce a setup.
-  assert.equal(detectFifteenMinuteTrendPullback(rows50,[],Date.parse('2026-11-23T12:00:00Z')),null,
+  // daily trend pullback: absent verified daily context cannot produce a setup.
+  assert.equal(detectDailyTrendPullback(rows50,[],Date.parse('2026-11-23T12:00:00Z')),null,
     '15m pullback must reject missing verified 15m history');
 
   // Day high/low retest: no prior level break means no reclaim/rejection setup.
@@ -892,3 +992,15 @@ test('fixed premium plan fails closed for invalid prices, tick size and target m
 });
 
 
+
+
+test('daily-history warmup prefilter queues only a fresh completed 5m pullback/resume structure',()=>{
+ const now=Date.parse('2026-11-26T08:00:30Z'),start=Date.parse('2026-11-26T03:45:00Z')/1000;
+ const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:100.4,low:99.6,close:100,volume:0}));
+ rows[48]={...rows[48],open:100,high:100.5,low:99.5,close:100};
+ rows[49]={...rows[49],open:100.4,high:101.2,low:100.2,close:101};
+ assert.equal(needsDailyTrendPullbackHistory(rows,now/1000),true);
+ const neutral=rows.map(row=>({...row,open:100,high:100.4,low:99.6,close:100}));
+ assert.equal(needsDailyTrendPullbackHistory(neutral,now/1000),false);
+ assert.equal(needsDailyTrendPullbackHistory(rows,now/1000-700),false);
+});

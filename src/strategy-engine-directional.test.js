@@ -8,7 +8,7 @@ import {
   detectDayHighLowRetest,
   detectFlagPriceStructure,
   detectOpeningRange,
-  detectFifteenMinuteTrendPullback
+  detectDailyTrendPullback
 } from './strategy-engine.js';
 
 test('EMA20/EMA50 bearish trend confirms SHORT and rejects a flat control', () => {
@@ -57,18 +57,20 @@ test('bearish flag price continuation confirms SHORT only after compact consolid
   assert.equal(detectFlagPriceStructure(rows.map(c => ({...c, volume: 0})))?.side, 'SHORT');
 });
 
-test('15m trend plus 5m bearish pullback requires fresh 15m context and a resumed breakdown',()=>{
+test('daily trend plus 5m bearish pullback requires fresh daily context and a resumed breakdown',()=>{
   const now=Date.parse('2026-11-23T10:05:00Z');
   const start=Math.floor(now/1000)-60*300;
   const rows=Array.from({length:60},(_,i)=>{const close=200-i*.2;return{time:start+i*300,open:close+.05,high:close+.1,low:close-.1,close,volume:100};});
   rows[58]={time:start+58*300,open:190,high:190.2,low:189.9,close:190.05,volume:120};
   const previous=rows[58];
   rows[59]={time:start+59*300,open:previous.low-.02,high:previous.low+.05,low:previous.low-.2,close:previous.low-.1,volume:150};
-  const fifteen=Array.from({length:50},(_,i)=>{const session=i<25?0:1,slot=i%25,day=session===0?'2026-11-20':'2026-11-23',time=Date.parse(day+'T03:45:00Z')/1000+slot*900,close=300-i;return{time,open:close+.2,high:close+.5,low:close-.5,close,volume:1000};});
-  const result=detectFifteenMinuteTrendPullback(rows,fifteen,now);
+  const dates=[];let day=new Date('2026-11-20T00:00:00Z');
+  while(dates.length<60){if(day.getUTCDay()!==0&&day.getUTCDay()!==6)dates.push(new Date(day));day.setUTCDate(day.getUTCDate()-1);}dates.reverse();
+  const daily=dates.map((d,i)=>{const close=300-i;return{time:d.getTime()/1000,open:close+.2,high:close+.5,low:close-.5,close,volume:1000};});
+  const result=detectDailyTrendPullback(rows,daily,now);
   assert.equal(result?.side,'SHORT');
-  assert.equal(result?.strategy,'FIFTEEN_MIN_TREND_5M_PULLBACK');
-  assert.equal(detectFifteenMinuteTrendPullback(rows,[],now),null);
+  assert.equal(result?.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(detectDailyTrendPullback(rows,[],now),null);
 });
 
 

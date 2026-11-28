@@ -2,19 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STRATEGIES, evaluateNineStrategies } from './strategy-engine.js';
 
-function neutralPipeline({ fifteen = true, isTopGainer = false } = {}) {
+function neutralPipeline({ daily = true, isTopGainer = false } = {}) {
   const fiveStart=Date.parse('2026-11-23T05:05:00Z')/1000;
   const underlyingCandles=Array.from({length:60},(_,i)=>({time:fiveStart+i*300,open:100,high:101,low:99,close:100,volume:100}));
   const now=Date.parse('2026-11-23T10:06:00Z');
-  const fifteenStart=Date.parse('2026-11-20T03:45:00Z')/1000;
-  const fifteenMinuteCandles=fifteen?Array.from({length:50},(_,i)=>{
-    const day=i<25?'2026-11-20':'2026-11-23',slot=i%25;
-    return{time:Date.parse(day+'T03:45:00Z')/1000+slot*900,open:100,high:101,low:99,close:100,volume:1000};
-  }):[];
+  const dailyStart=Date.parse('2026-09-22T00:00:00Z')/1000;
+  const dailyCandles=daily?Array.from({length:60},(_,i)=>({time:dailyStart+i*86400,open:100,high:101,low:99,close:100,volume:1000})): [];
   return {
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:100,exchangeTime:now/1000,receivedAt:now},
-    dailyCandles:[],fifteenMinuteCandles,isTopGainer,researchEnabled:false,now
+    dailyCandles,fifteenMinuteCandles:[],isTopGainer,researchEnabled:false,now
   };
 }
 
@@ -41,10 +38,10 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
       reason: /did not break/
     },
     {
-      strategy: 'FIFTEEN_MIN_TREND_5M_PULLBACK',
+      strategy: 'DAILY_TREND_5M_PULLBACK',
       input: neutralPipeline(),
       status: 'REJECTED',
-      reason: /EMA20 pullback touch/
+      reason: /daily EMA20\/EMA50 trend|5-minute EMA20 pullback touch/i
     },
     {
       strategy: 'DAY_HIGH_LOW_BREAK_RETEST',
@@ -96,14 +93,14 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
   }
 });
 
-test('full evaluator blocks 15m trend pullback when fresh 15m history is absent', () => {
-  const input = neutralPipeline({ fifteen: false });
+test('full evaluator blocks Daily trend pullback when fresh daily history is absent', () => {
+  const input = neutralPipeline({ daily: false });
   const result = evaluateNineStrategies(input);
-  assertNoActionablePlan(result, 'FIFTEEN_MIN_TREND_5M_PULLBACK');
+  assertNoActionablePlan(result, 'DAILY_TREND_5M_PULLBACK');
   assert.equal(result.status, 'NO_TRADE');
-  const row = result.strategyLedger.find(item => item.strategy === 'FIFTEEN_MIN_TREND_5M_PULLBACK');
+  const row = result.strategyLedger.find(item => item.strategy === 'DAILY_TREND_5M_PULLBACK');
   assert.equal(row.status, 'BLOCKED');
-  assert.match(row.reason, /50 fresh, contiguous completed FYERS 15-minute candles/);
+  assert.match(row.reason, /50 fresh completed FYERS daily candles/);
 });
 
 test('full evaluator blocks Top Gainer strategy when current verified membership is absent', () => {

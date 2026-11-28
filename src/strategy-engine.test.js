@@ -660,21 +660,46 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan with one compl
   assert.match(delayedOption.reason,/Fresh FYERS option premium tick/);
 });
 
-test('end-to-end opening-range first-candle breakout passes with one completed option candle',()=>{
-  const start=Date.parse('2026-11-20T03:45:00Z')/1000, now=(start+900)*1000;
+test('Opening Bell: 09:20 is observation-only; earliest opening-range entry evaluation is after the 09:20-09:25 candle closes',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
   const underlyingCandles=[
-    {time:start,open:100,high:101,low:99,close:100,volume:100},
-    {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:200}
+    {time:start,open:100,high:101,low:99,close:100,volume:100}, // 09:15-09:20
+    {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:200} // 09:20-09:25
   ];
   const option=makeOptionPipelineFields(start-300,'CE');
   option.optionCandles=option.optionCandles.map(c=>({...c,time:start+300}));
+
+  // At 09:20 the second candle is still forming, so it must not be used.
+  const at0920=(start+300)*1000;
+  const beforeClose=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:at0920/1000,receivedAt:at0920},
+    ...option,
+    optionTick:{...option.optionTick,exchangeTime:at0920/1000,receivedAt:at0920},
+    now:at0920,
+    researchEnabled:false
+  });
+  assert.notEqual(beforeClose.status,'SETUP_CONFIRMED');
+  assert.equal(beforeClose.status,'DATA_UNAVAILABLE_NO_TRADE');
+
+  // At 09:25 both underlying candles and the matching option candle are complete.
+  const now=(start+600)*1000;
   option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
-  const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},
+    ...option,now,researchEnabled:false
+  });
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(result.underlyingSide,'LONG');
   assert.ok(result.rr>=2);
-  const stale=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},...option,optionTick:{...option.optionTick,receivedAt:now-11000},now,researchEnabled:false});
+
+  const stale=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:now/1000,receivedAt:now},
+    ...option,optionTick:{...option.optionTick,receivedAt:now-11000},now,researchEnabled:false
+  });
   assert.equal(stale.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.equal(stale.strategyLedger.find(row=>row.strategy==='OPENING_RANGE_BREAKOUT').status,'BLOCKED');
 });

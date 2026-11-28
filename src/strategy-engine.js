@@ -65,11 +65,11 @@ const STRATEGIES = Object.freeze([
   'DAILY_TREND_5M_PULLBACK',
   'DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
-  'DAY_LOW_REVERSAL_BREAKOUT',
   'BULLISH_CONTINUATION',
   'BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE',
-  'OPENING_RANGE_BREAKOUT'
+  'OPENING_RANGE_BREAKOUT',
+  'DAY_LOW_REVERSAL_BREAKOUT'
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([

@@ -156,9 +156,10 @@ test('REST priority keeps entry verification ahead of chart, research, scanner a
   assert.deepEqual(sortRestQueue(jobs).map(job=>job.id), ['entry','chart','research','scanner','warmup']);
 });
 
-test('after a 429 cooldown, only a selected chart or higher-priority request may probe recovery', () => {
+test('after a 429 cooldown, only read-only Account or selected chart/higher requests may probe recovery', () => {
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.SCANNER}),false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.RESEARCH}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.ACCOUNT}),true);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,priority:REST_PRIORITY.CHART}),true);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.CHART}),false);
   assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.ENTRY}),false);

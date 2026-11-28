@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getRestWaitMs, isRestCooldownActive, createRestQueueWakeSignal, parseRetryAfterMs,
+  getRestWaitMs, isRestCooldownActive, createRestQueueWakeSignal, parseRetryAfterMs, canRunRestRecoveryProbe, REST_PRIORITY,
   getRateLimitCooldownUntil, getCloudflareRateLimitCooldownUntil,
   getUnknownRateLimitCooldownUntil, classifyRestRateLimit,
   getSocketRateLimitBackoffMs, canCompleteSocketRateLimitRecovery,
@@ -347,4 +347,14 @@ test('Account Feed retains two rolling-window slots without bypassing the global
   assert.ok(getRestRequestWindowWaitMs(background,now,getRestTotalWindowLimit(20))===0);
   const globalFive=[...background,...twoAccount,{at:new Date(now).toISOString(),priority:80,path:'/history'}];
   assert.ok(getRestRequestWindowWaitMs(globalFive,now,getRestTotalWindowLimit(100))>0);
+});
+
+
+test('read-only Account Feed may perform the single REST recovery probe while background work remains blocked', () => {
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:false,priority:REST_PRIORITY.ACCOUNT}),true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:false,priority:REST_PRIORITY.CHART}),true);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:false,priority:REST_PRIORITY.SCANNER}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:false,priority:REST_PRIORITY.RESEARCH}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:true,recoveryProbeAttempted:true,priority:REST_PRIORITY.ACCOUNT}),false);
+  assert.equal(canRunRestRecoveryProbe({recoveryProbeRequired:false,recoveryProbeAttempted:true,priority:REST_PRIORITY.SCANNER}),true);
 });

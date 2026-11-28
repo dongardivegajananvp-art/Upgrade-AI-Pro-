@@ -13,7 +13,9 @@ export function isRestBackgroundPriority(priority = 0) {
 // Allow a read-only Account Feed request to act as the one recovery probe after startup/cooldown.
 // Scanner, research, context and warmup remain blocked until a higher-trust request succeeds.
 export function canRunRestRecoveryProbe({ recoveryProbeRequired, recoveryProbeAttempted = false, priority } = {}) {
-  return !Boolean(recoveryProbeRequired) || (!Boolean(recoveryProbeAttempted) && Number(priority) >= REST_PRIORITY.ACCOUNT);
+  const level=Number(priority);
+  const trustedProbe=level===REST_PRIORITY.ACCOUNT || level>=REST_PRIORITY.CHART;
+  return !Boolean(recoveryProbeRequired) || (!Boolean(recoveryProbeAttempted) && trustedProbe);
 }
 
 export function isRestCooldownActive(now, cooldownUntil) {

@@ -370,6 +370,25 @@ test('opening-range setup confirms first breakout using the opening candle as it
   assert.ok(confirmation.volumeRatio>=1.25);
 });
 
+test('Opening Range 15-minute retest validates quality on the original breakout candle, not the retest candle', () => {
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:start+300,open:100.4,high:101.2,low:100.1,close:100.6,volume:110},
+    {time:start+600,open:100.5,high:101.1,low:100.2,close:100.7,volume:120},
+    {time:start+900,open:100.9,high:102,low:100.8,close:101.9,volume:220},
+    {time:start+1200,open:101.5,high:101.7,low:101.1,close:101.4,volume:0}
+  ];
+  const setup=detectOpeningRange(rows);
+  assert.equal(setup?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(setup?.pattern,'15M_OPENING_RANGE_BREAK_RETEST');
+  assert.equal(setup?.requiresLevelCross,true);
+  const confirmation=confirmStrategyTriggerCandle(rows,'LONG',setup.breakoutLevel,setup.confirmedAt,setup.requiresLevelCross);
+  assert.equal(confirmation.ok,true);
+  assert.equal(confirmation.candleTime,rows[3].time,'quality gate must inspect original breakout candle');
+  assert.notEqual(confirmation.candleTime,rows[4].time,'weak retest candle must not replace original trigger');
+});
+
 test('Opening Range breakout remains eligible through the final completed NSE candle at 15:25-15:30 IST',()=>{
   const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
   const end=Date.parse('2026-11-20T09:55:00Z')/1000; // 15:25 IST candle start; completes 15:30

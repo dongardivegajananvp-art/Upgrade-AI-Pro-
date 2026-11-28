@@ -226,7 +226,7 @@ async function refreshIndexStrategyScan() {
       card.append(title,result,detail,candle,reason);
       const details=document.createElement('details');
       const summary=document.createElement('summary');
-      summary.textContent='NINE-STRATEGY LEDGER · '+(row.strategyLedger||[]).length+' RULES';
+      summary.textContent='TEN-STRATEGY LEDGER · '+(row.strategyLedger||[]).length+' RULES';
       details.append(summary);
       for(const entry of row.strategyLedger||[]) {
         const line=document.createElement('div');
@@ -252,7 +252,7 @@ async function refreshIndexStrategyScan() {
     note.textContent='UNDERLYING SCAN ONLY · '+(data.scanReady?'3/3 FRESH INDEX FEED VERIFIED':'WAITING FOR 3/3 FRESH INDEX FEED')+' · OPTION CE/PE TICK + COMPLETED OPTION CANDLE REQUIRED BEFORE ANY TRADE · ORDERS DISABLED';
     container.append(note);
   } catch(error) {
-    status.textContent='INDEX NINE-STRATEGY SCAN UNAVAILABLE';
+    status.textContent='INDEX TEN-STRATEGY SCAN UNAVAILABLE';
     container.textContent=String(error.message||'Index strategy scanner unavailable');
   } finally {
     indexScanRefreshRunning=false;
@@ -1505,7 +1505,7 @@ function renderResearchResults(setup) {
   }
   const ledger=Array.isArray(setup?.strategyLedger)?setup.strategyLedger:[];
   if(ledger.length) {
-    const heading=document.createElement('strong');heading.textContent='NINE-STRATEGY DIAGNOSTIC LEDGER';container.append(heading);
+    const heading=document.createElement('strong');heading.textContent='TEN-STRATEGY DIAGNOSTIC LEDGER';container.append(heading);
     for(const item of ledger) {
       const row=document.createElement('div');row.className='strategy-ledger-row';
       const label=document.createElement('b');label.textContent=item.strategy+' · '+item.status;
@@ -1547,9 +1547,9 @@ async function evaluateSelectedSetup() {
   setupEvaluationRunning = true;
   const evaluatedSymbol=selectedSymbol,evaluatedContract=selectedContractSymbol;
   const state=document.querySelector('#setup-state');
-  state.textContent='VERIFYING 9 STRATEGIES · FYERS DATA';
+  state.textContent='VERIFYING 10 STRATEGIES · FYERS DATA';
   const researchStatus=document.querySelector('#research-status');
-  researchStatus.textContent=(evaluatedSymbol.replace(/^(NSE|BSE):/,'').replace(/-EQ$/,'')+' · NINE-STRATEGY RESEARCH RUNNING');
+  researchStatus.textContent=(evaluatedSymbol.replace(/^(NSE|BSE):/,'').replace(/-EQ$/,'')+' · TEN-STRATEGY RESEARCH RUNNING');
   const researchResults=document.querySelector('#research-results');
   researchResults.replaceChildren();
   const researchNote=document.createElement('div');

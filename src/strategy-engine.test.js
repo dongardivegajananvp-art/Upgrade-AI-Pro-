@@ -45,19 +45,27 @@ function candleRows(side='LONG') {
     : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
   return rows;
 }
-test('strategy trigger ignores candle pressure and volume entirely',()=>{
+test('common trigger gate enforces body, close location and same-session relative volume',()=>{
   const rows=candleRows('LONG');
-  rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
-  const result=confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time);
-  assert.equal(result.ok,true);
-  assert.equal(result.candleTime,rows[20].time);
-  assert.equal('relativeVolume' in result,false);
-  assert.equal('pressure' in result,false);
+  const valid=confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time);
+  assert.equal(valid.ok,true);
+  assert.equal(valid.referenceCandleCount,20);
+  assert.ok(valid.bodyStrength>=0.50);
+  assert.ok(valid.closePosition>=0.65);
+  assert.ok(valid.volumeRatio>=1.25);
+  const weakBody=[...rows]; weakBody[20]={...weakBody[20],open:100,high:104,low:99,close:100.5};
+  assert.equal(confirmStrategyTriggerCandle(weakBody,'LONG',101,weakBody[20].time).ok,false);
+  const weakVolume=[...rows]; weakVolume[20]={...weakVolume[20],volume:120};
+  assert.match(confirmStrategyTriggerCandle(weakVolume,'LONG',101,weakVolume[20].time).reason,/1.25x/);
+  const noReference=[{...rows[20],time:rows[20].time,volume:200}];
+  assert.match(confirmStrategyTriggerCandle(noReference,'LONG',101,noReference[0].time).reason,/prior same-session volume reference/);
+  const short=candleRows('SHORT');
+  assert.equal(confirmStrategyTriggerCandle(short,'SHORT',99,short[20].time).ok,true);
 });
 test('retest trigger still requires original completed-candle price-level cross',()=>{
   const rows=candleRows('LONG');
-  rows[20]={...rows[20],open:100,high:103,low:99.5,close:102.8,volume:0};
-  rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:0};
+  rows[20]={...rows[20],open:100,high:103,low:99.5,close:102.8,volume:200};
+  rows[21]={time:1800006300,open:102,high:103.5,low:102,close:103.4,volume:150};
   const retest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,true);
   assert.equal(retest.ok,true);
   assert.equal(retest.candleTime,rows[20].time);
@@ -254,10 +262,10 @@ test('research-enabled entry remains blocked until fresh 15-minute and 5-minute 
   assert.equal(result.target,undefined);
 });
 
-test('non-retest strategies validate their trigger candle without pressure or volume gates', () => {
+test('non-retest and retest strategies both apply the same candle-quality and volume gates', () => {
   const rows=Array.from({length:22},(_,i)=>({time:1800000000+i*300,open:100,high:101,low:99,close:100,volume:100}));
   rows[20]={time:1800006000,open:100,high:103,low:99.5,close:102.8,volume:200};
-  rows[21]={time:1800006300,open:103,high:103.5,low:102,close:102.5,volume:150};
+  rows[21]={time:1800006300,open:102,high:103.5,low:102,close:103.4,volume:150};
   const nonRetest=confirmStrategyTriggerCandle(rows,'LONG',101,rows[21].time,false);
   assert.equal(nonRetest.ok,true);
 
@@ -327,7 +335,7 @@ test('option premium gate rejects a missing 5-minute candle even when the latest
   assert.match(result.reason,/latest completed candle is stale/i);
 });
 
-test('opening-range setup confirms first breakout after the opening candle without a 20-candle warm-up', () => {
+test('opening-range setup confirms first breakout using the opening candle as its volume reference', () => {
   const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
   const baseline=[{time:start,open:100,high:101,low:99,close:100,volume:100}];
   const breakout={time:start+300,open:100,high:103,low:99.5,close:102.5,volume:200};
@@ -337,14 +345,15 @@ test('opening-range setup confirms first breakout after the opening candle witho
   const confirmation=confirmStrategyTriggerCandle([...baseline,breakout],'LONG',101,breakout.time);
   assert.equal(confirmation.ok,true);
   assert.equal(confirmation.candleTime,breakout.time);
-  assert.equal('pressure' in confirmation,false);
-  assert.equal('relativeVolume' in confirmation,false);
+  assert.ok(confirmation.bodyStrength>=0.50);
+  assert.ok(confirmation.closePosition>=0.65);
+  assert.ok(confirmation.volumeRatio>=1.25);
 });
 
-test('legacy confirmation export no longer applies pressure or volume filters',()=>{
+test('legacy confirmation export preserves the common candle-quality and volume filters',()=>{
   const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
-  assert.equal(confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time).ok,true);
+  assert.equal(confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time).ok,false);
 });
 
 // Direct detector fixtures supplement the aggregate ledger tests. These
@@ -645,8 +654,6 @@ test('end-to-end day-high breakout/retest reaches fixed-risk plan with one compl
     {time:start+900,open:101.2,high:102,low:100.9,close:101.7,volume:180}
   ];
   const option=makeOptionPipelineFields(start+300,'CE');
-  for(const candle of underlyingCandles) candle.volume=0;
-  option.optionCandles=option.optionCandles.map(c=>({...c,volume:0}));
   option.optionTick={...option.optionTick,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:101.7,exchangeTime:now/1000,receivedAt:now},...option,now,researchEnabled:false});
   assert.equal(result.status,'SETUP_CONFIRMED');
@@ -764,7 +771,7 @@ test('end-to-end flag price-breakout is independently selectable when continuati
   const start=Date.parse('2026-11-20T03:45:00Z')/1000, rows=[];
   for(let i=0;i<16;i++)rows.push({time:start+i*300,open:99.8,high:100.3,low:99.7,close:100,volume:400});
   rows.push({time:start+16*300,open:109,high:110.5,low:108.8,close:110,volume:400});
-  for(let i=0;i<12;i++){const close=108.5-i*.05;rows.push({time:start+(17+i)*300,open:close+.1,high:109.5,low:107.5,close,volume:0});}
+  for(let i=0;i<12;i++){const close=108.5-i*.05;rows.push({time:start+(17+i)*300,open:close+.1,high:109.5,low:107.5,close,volume:400});}
   rows.push({time:start+29*300,open:111,high:113.5,low:110.8,close:113.2,volume:600});
   const result=evaluateUnderlyingFixture(rows,'LONG');
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback, needsDailyTrendPullbackHistory } from './strategy-engine.js';
 
 test('exactly nine established NSE strategies are present', () => {
   assert.equal(STRATEGIES.length, 9);
@@ -925,3 +925,15 @@ test('fixed premium plan fails closed for invalid prices, tick size and target m
 });
 
 
+
+
+test('daily-history warmup prefilter queues only a fresh completed 5m pullback/resume structure',()=>{
+ const now=Date.parse('2026-11-26T08:00:30Z'),start=Date.parse('2026-11-26T03:45:00Z')/1000;
+ const rows=Array.from({length:50},(_,i)=>({time:start+i*300,open:100,high:100.4,low:99.6,close:100,volume:0}));
+ rows[48]={...rows[48],open:100,high:100.5,low:99.5,close:100};
+ rows[49]={...rows[49],open:100.4,high:101.2,low:100.2,close:101};
+ assert.equal(needsDailyTrendPullbackHistory(rows,now/1000),true);
+ const neutral=rows.map(row=>({...row,open:100,high:100.4,low:99.6,close:100}));
+ assert.equal(needsDailyTrendPullbackHistory(neutral,now/1000),false);
+ assert.equal(needsDailyTrendPullbackHistory(rows,now/1000-30),false);
+});

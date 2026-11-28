@@ -18,6 +18,7 @@ import { buildHealthStatus } from './src/health-status.js';
 import { getNextFreshFnoScanSymbol, getFnoScanSliceKey, shouldResetFnoScanCursor } from './src/rolling-fno-scanner.js';
 import { isFreshFnoTick } from './src/fno-scan-gate.js';
 import { validateFixedRiskPlan, updateActiveSetupFromTick } from './src/active-setup-lifecycle.js';
+import { planActiveSetupRestore } from './src/active-setup-restore.js';
 import { requiresFyersSession } from './src/api-access.js';
 import { isNseRegularSession, isNseSignalWindow } from './src/nse-session.js';
 import { createSingleFlight } from './src/setup-evaluation-flight.js';
@@ -711,17 +712,15 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'POST' && url.pathname === '/api/active-setups') {
     try {
       const body = await readJson(req);
-      if (!Array.isArray(body.setups) || body.setups.length > MAX_ACTIVE_SETUP_LEDGER) return send(res,400,{status:'REJECTED',reason:'At most two verified active setups may be restored'});
-      for (const input of body.setups) {
-        const normalized = normalizeActiveSetup(input);
-        if (!normalized) return send(res,400,{status:'REJECTED',reason:'Active setup identity or fixed Entry/SL/Target RR validation failed'});
-        const prior = activeSetupLedger.get(normalized.id);
-        if (prior?.status && prior.status !== 'ACTIVE') continue;
-        if (!prior && [...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').length >= MAX_ACTIVE_SETUP_LEDGER) {
-          return send(res,409,{status:'ACTIVE_SETUP_LIMIT',reason:'Maximum two active setups already retained'});
-        }
-        activeSetupLedger.set(normalized.id,{...prior,...normalized,status:prior?.status||'ACTIVE'});
-      }
+      const restore = planActiveSetupRestore({
+        currentSetups:[...activeSetupLedger.values()],
+        incomingSetups:body.setups,
+        normalizeSetup:normalizeActiveSetup,
+        maxActiveSetups:MAX_ACTIVE_SETUP_LEDGER
+      });
+      if (!restore.ok) return send(res,restore.reason.includes('Maximum two')?409:400,{status:'REJECTED',reason:restore.reason});
+      activeSetupLedger.clear();
+      for (const row of restore.setups) activeSetupLedger.set(row.id,row);
       const contracts=[...new Set([...activeSetupLedger.values()].filter(row=>row.status==='ACTIVE').map(row=>row.contract))];
       const subscription=setActiveTradeOptionSymbols(contracts);
       return send(res,200,{status:subscription.status,setups:[...activeSetupLedger.values()].map(row=>({...row})),subscription});

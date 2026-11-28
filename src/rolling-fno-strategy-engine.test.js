@@ -29,7 +29,7 @@ test('rolling scanner surfaces a fresh 5m price setup without daily/15m research
   const start=Date.parse('2026-11-26T03:45:00Z')/1000;
   const candles=Array.from({length:50},(_,i)=>{
     const open=100+i,close=open+1;
-    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:0};
+    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:i===49?150:100};
   });
   const tick={symbol,price:151,exchangeTime:now/1000-1,receivedAt:now};
   const result=evaluateRollingFnoUniverse({
@@ -56,7 +56,7 @@ test('next opportunity queue prefers a fresh Top-5 gainer without inventing a qu
   const start=Date.parse('2026-11-26T03:45:00Z')/1000;
   const candles=Array.from({length:50},(_,i)=>{
     const open=100+i,close=open+1;
-    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:0};
+    return {time:start+i*300,open,high:close+0.5,low:open-0.5,close,volume:i===49?150:100};
   });
   const symbols=['NSE:AAA-EQ','NSE:BBB-EQ'];
   const ticks=new Map(symbols.map(symbol=>[symbol,{symbol,price:151,exchangeTime:now/1000-1,receivedAt:now}]));

@@ -337,6 +337,8 @@ test('live setup and rolling research receive verified daily strategy context', 
   assert.match(flow, /dailyCandles:dailyHistory\.candles/);
   assert.doesNotMatch(flow, /Promise\.all\(/, 'entry history reads are not queued as a burst');
   assert.match(flow, /REST_PRIORITY\.ENTRY/, 'entry reads retain ENTRY priority');
+  assert.match(server, /daily:histories\.daily,fifteenMinute:histories\.fifteenMinute/);
+  assert.match(server, /dailyCandles:histories\.daily\.get\(item\.symbol\)\?\.candles/);
 });
 
 test('live ticks never replace the chart loading or history-error state when completed history is absent', () => {

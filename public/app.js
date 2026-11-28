@@ -1487,7 +1487,7 @@ function renderResearchResults(setup) {
   if(!ranking.length) {
     status.textContent=setup?.research?.status==='UNAVAILABLE'?'RESEARCH DATA INCOMPLETE':'NO VERIFIED RESEARCH RANKING';
     const note=document.createElement('div');note.className='empty-inline';
-    note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all nine-strategy and verified-data gates; no score is fabricated.';
+    note.textContent=setup?.reason||setup?.research?.reason||'No setup passed all ten-strategy and verified-data gates; no score is fabricated.';
     container.append(note);
   }
   if(ranking.length) status.textContent='VERIFIED MULTI-TIMEFRAME · TOP '+ranking.length+' · DIRECTION-AWARE CE/PE';

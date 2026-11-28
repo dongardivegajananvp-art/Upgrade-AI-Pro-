@@ -6,7 +6,7 @@ export function validateFixedRiskPlan({ entry, stopLoss, target, minRR = 2, tick
   const tick=Number(tickSize);
   const tickAligned=tickSize===null||tickSize===undefined||
     (Number.isFinite(tick)&&tick>0&&prices.every(price=>Math.abs(price/tick-Math.round(price/tick))<=1e-7));
-  const ok=[e,sl,t,minRR].every(Number.isFinite) && e>0 && sl>0 && sl<e && t>e && risk>0 && rr>=minRR && tickAligned;
+  const ok=[e,sl,t,minRR].every(Number.isFinite) && e>0 && sl>0 && sl<e && t>e && risk>0 && rr>=minRR-1e-9 && tickAligned;
   return {ok,entry:e,stopLoss:sl,target:t,risk,reward,rr:Number.isFinite(rr)?Number(rr.toFixed(4)):null,tickAligned};
 }
 

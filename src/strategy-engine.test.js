@@ -511,6 +511,36 @@ test('all ten strategies enforce the full LONG/CE and SHORT/PE contract-side mat
     assert.equal(shortCe.ok,false,strategy+' SHORT must reject CE');
   }
 });
+test('contract expiry remains valid through the complete IST expiry day', () => {
+  const now=Date.parse('2026-11-26T09:30:00+05:30');
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
+    expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'FY123'};
+  const result=validateStrategyOptionContract({strategy:STRATEGIES[0],underlyingSide:'LONG',
+    underlyingSymbol:'NSE:ABC-EQ',contract,now});
+  assert.equal(result.ok,true);
+});
+
+test('strategy option gate rejects option tick symbol and completed candle timestamp mismatches', () => {
+  const now=Date.parse('2026-11-19T08:00:00Z');
+  const start=Date.parse('2026-11-19T03:45:00Z')/1000;
+  const underlyingCandles=Array.from({length:50},(_,i)=>{
+    const open=100+i,close=open+1.2;
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:1000+i};
+  });
+  const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
+    expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};
+  const optionCandles=[{time:start+49*300,open:105,high:106,low:104,close:105.5,volume:520}];
+  const base={underlyingCandles,underlyingTick:{symbol:'NSE:ABC-EQ',price:149.8,exchangeTime:now/1000,receivedAt:now},
+    optionCandles,optionTick:{symbol:contract.symbol,price:106.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:false,now};
+  const wrongTick=evaluateNineStrategies({...base,optionTick:{...base.optionTick,symbol:'NSE:ABC26NOV150PE'}});
+  assert.equal(wrongTick.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(wrongTick.reason,/tick symbol does not match/i);
+  const unaligned=evaluateNineStrategies({...base,optionCandles:[{...optionCandles[0],time:optionCandles[0].time+60}]});
+  assert.equal(unaligned.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(unaligned.reason,/session-aligned FYERS 5-minute candle/i);
+});
+
 test('directional contract matrix rejects unknown strategy, absent side, invalid tick size and non-NSE symbol', () => {
   const now=Date.parse('2026-11-19T08:00:00Z');
   const valid={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'FY123'};

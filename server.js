@@ -837,7 +837,7 @@ const server = http.createServer(async (req,res) => {
         const strategyChecksThisSlice=Number(fnoStrategyScanStats.sliceStrategyCheckCount||0);
         const fullCycleMinutes=snapshot.activeSymbols?.length&&snapshot.scanPerSlice?Math.ceil((snapshot.universe?.length||0)/snapshot.activeSymbols.length)*Math.ceil(snapshot.activeSymbols.length/snapshot.scanPerSlice):null;
         // Candidate generation already requires a fresh underlying tick and a verified
-        // completed-candle nine-strategy confirmation. Do not hide valid rolling
+        // completed-candle ten-strategy confirmation. Do not hide valid rolling
         // candidates merely because the active WebSocket slice just rotated and
         // its per-slice diagnostic counter was reset.
         const safeTop3=Array.isArray(result.top3)?result.top3:[];

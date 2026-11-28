@@ -466,15 +466,18 @@ export function validateStrategyOptionContract({strategy,underlyingSide,underlyi
     return {ok:false,reason:'Verified active CE/PE contract and tick size are required'};
   const expectedSide=underlyingSide==='LONG'?'CE':'PE';
   if(contract.side!==expectedSide)return {ok:false,reason:'Selected option side does not match the confirmed underlying direction'};
-  const expectedUnderlying=String(underlyingSymbol||'').trim().toUpperCase().replace(/^NSE:/,'').replace(/-(EQ|FUT|INDEX)$/,'');
+  const underlyingMatch=String(underlyingSymbol||'').trim().toUpperCase().match(/^NSE:([A-Z0-9&._-]+)-EQ$/);
+  const expectedUnderlying=underlyingMatch?.[1]||'';
   if(!expectedUnderlying||String(contract.underlying||'').trim().toUpperCase()!==expectedUnderlying)
     return {ok:false,reason:'Official option contract underlying does not match the selected NSE underlying'};
+  const expiryDay=finite(contract.expiry)?istDayKey(number(contract.expiry)):'';
+  const today=istDayKey(number(now)/1000);
   if(typeof contract.symbol!=='string'||!/^NSE:/.test(contract.symbol)||
-     !finite(contract.expiry)||number(contract.expiry)<=number(now)/1000||
+     !contract.symbol.endsWith(expectedSide)||!expiryDay||expiryDay<today||
      !finite(contract.strike)||number(contract.strike)<=0||
      !finite(contract.lotSize)||number(contract.lotSize)<=0||
      typeof contract.fyToken!=='string'||!contract.fyToken.trim())
-    return {ok:false,reason:'Official NSE contract identity, future expiry, strike, lot size and FY token are required'};
+    return {ok:false,reason:'Official NSE contract identity, active expiry day, strike, lot size and FY token are required'};
   return {ok:true,expectedSide,underlying:expectedUnderlying};
 }
 
@@ -492,10 +495,20 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const chosen=setup;
   const contractGate=validateStrategyOptionContract({strategy:chosen.strategy,underlyingSide:chosen.side,underlyingSymbol:underlyingTick?.symbol,contract,now});
   if(!contractGate.ok)return blockDetected(contractGate.reason);
+  if(optionTick.symbol!==contract.symbol)return blockDetected('Fresh option tick symbol does not match the verified official contract');
+  if(underlyingTick.symbol!=='NSE:'+contractGate.underlying+'-EQ')return blockDetected('Underlying tick symbol does not match the verified official NSE underlying');
   const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds,null,1);
   if(o.error)return blockDetected(o.error);
   if(!contiguousWindow(o.rows,1,sessionStartMinute,sessionCloseMinute))return blockDetected('Option premium needs one fresh completed 5-minute candle');
   const confirmation=o.rows.at(-1),tickSize=number(contract.tickSize);
+  const optionCandleTime=number(confirmation.time);
+  const optionCandleIst=new Date((optionCandleTime+19800)*1000);
+  const optionCandleMinute=optionCandleIst.getUTCHours()*60+optionCandleIst.getUTCMinutes();
+  const currentOptionBucket=Math.floor(number(optionTick.exchangeTime)/300)*300;
+  if(!Number.isFinite(optionCandleTime)||optionCandleTime%300!==0||
+     optionCandleMinute<sessionStartMinute||optionCandleMinute>=sessionCloseMinute||
+     optionCandleTime>=currentOptionBucket)
+    return blockDetected('Option premium candle must be a completed, session-aligned FYERS 5-minute candle');
   if(number(confirmation.close)<=number(confirmation.open))
     return blockDetected('The latest completed option 5-minute candle must close bullish');
   const premiumLevel=number(confirmation.high);

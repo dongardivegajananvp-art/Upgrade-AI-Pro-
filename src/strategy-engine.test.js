@@ -1,15 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback, needsDailyTrendPullbackHistory } from './strategy-engine.js';
+import { STRATEGIES, detectNineStrategySetup, evaluateNineStrategies, buildFixedPremiumPlan, canAcceptStrategyTrade, confirmStrategyTriggerCandle, analyzeSetupResearch, validateStrategyOptionContract, detectOpeningRange, detectEmaTrend, detectTopGainerMomentum, detectDayHighLowRetest, detectDayLowReversal, detectDoublePattern, detectContinuation, detectFlagPriceStructure, detectDailyTrendPullback, needsDailyTrendPullbackHistory } from './strategy-engine.js';
 
-test('exactly nine established NSE strategies are present', () => {
-  assert.equal(STRATEGIES.length, 9);
+test('exactly ten established NSE strategies are present, including Day-Low reversal', () => {
+  assert.equal(STRATEGIES.length, 10);
   assert.deepEqual(STRATEGIES, [
     'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK',
     'DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION',
-    'BEARISH_CONTINUATION','FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT'
+    'BEARISH_CONTINUATION','FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','DAY_LOW_REVERSAL_BREAKOUT'
   ]);
 });
+test('Day-Low reversal requires an established session low, bullish rejection and next-candle high breakout', () => {
+  const start = Date.parse('2026-11-20T03:45:00Z') / 1000;
+  const rows = [
+    {time:start,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+300,open:99,high:100,low:98,close:99,volume:110},
+    {time:start+600,open:98.9,high:99.6,low:97.95,close:99.4,volume:150},
+    {time:start+900,open:99.4,high:100.2,low:98.2,close:100,volume:170}
+  ];
+  const result = detectDayLowReversal(rows);
+  assert.equal(result?.strategy, 'DAY_LOW_REVERSAL_BREAKOUT');
+  assert.equal(result?.side, 'LONG');
+  assert.equal(result?.dayLowLevel, 98);
+  assert.equal(result?.breakoutLevel, 99.6);
+  assert.equal(result?.confirmedAt, rows[3].time);
+  assert.equal(detectDayLowReversal(rows.map((c,i)=>i===3?{...c,low:97.8}:c)), null, 'trigger candle must hold the established low');
+  assert.equal(detectDayLowReversal(rows.map((c,i)=>i===2?{...c,close:97.9}:c)), null, 'rejection must close above established support');
+});
+
 test('scanner fails closed without a fresh exchange tick', () => {
   const result = detectNineStrategySetup({ underlyingCandles: [], underlyingTick: null, now: 1800000000000 });
   assert.equal(result.status, 'DATA_UNAVAILABLE_NO_TRADE');
@@ -98,7 +116,7 @@ test('multi-timeframe research refuses to invent a score when 15m history is inc
 });
 
 
-test('diagnostic ledger reports all nine strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
+test('diagnostic ledger reports all ten strategies with DETECTED, REJECTED or BLOCKED and exact gate reason', () => {
   const now=1800000000000;
   const result=detectNineStrategySetup({underlyingCandles:[],underlyingTick:null,now});
   assert.equal(result.strategyLedger.length,9);

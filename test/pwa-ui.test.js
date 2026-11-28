@@ -226,6 +226,14 @@ test('scanner UI reports twenty-symbol rotation and actual strategy checks', () 
 });
 
 
+test('ten-strategy index scanner uses daily context and avoids an unused 15m REST request', () => {
+  assert.match(app, /CHECKS '\+\(row\.strategyCheckCount\|\|0\)\+'\/10 · DAILY CONTEXT/);
+  assert.match(server, /NOT_REQUIRED_STRATEGY3_USES_DAILY/);
+  assert.doesNotMatch(server, /getFifteenMinuteHistory\(symbol,Date\.now\(\),REST_PRIORITY\.CONTEXT,'index-nine-strategy-15m'\)/);
+  assert.match(app, /VERIFYING 10 STRATEGIES/);
+  assert.match(app, /TEN-STRATEGY DIAGNOSTIC LEDGER/);
+});
+
 test('fresh FYERS ticks are never labelled LIVE outside NSE regular session', () => {
   const closed = Date.parse('2026-11-20T10:18:00Z'); // 15:48 IST
   const freshGainers = { status: 'ROTATING_LIVE_COVERAGE', topGainers: Array.from({length:5},(_,i)=>({symbol:'NSE:STOCK'+i+'-EQ',price:100,changePercent:1,fresh:true})) };

@@ -173,6 +173,17 @@ function startIndexStrategyScanner() {
       } catch(error) {
         fifteenMinuteHistoryError=String(error?.message||'15-minute index context unavailable').slice(0,160);
       }
+      // Strategy 3 uses daily trend, not 15m trend. Request daily context only
+      // after the verified 5m pullback/resume prefilter passes.
+      let dailyHistory={candles:[]};
+      let dailyHistoryError=null;
+      if(needsDailyTrendPullbackHistory(history.candles,latestTick.exchangeTime)) {
+        try {
+          dailyHistory=await getDailyHistory(symbol,Date.now(),REST_PRIORITY.CONTEXT,'index-nine-strategy-daily');
+        } catch(error) {
+          dailyHistoryError=String(error?.message||'Daily index context unavailable').slice(0,160);
+        }
+      }
       const evaluationAt=Date.now();
       const evaluationMarket=getMarketData(evaluationAt);
       const evaluationTick=evaluationMarket.indices?.[symbol]||null;
@@ -183,7 +194,7 @@ function startIndexStrategyScanner() {
       const result=detectNineStrategySetup({
         underlyingCandles:history.candles,
         underlyingTick:evaluationTick,
-        dailyCandles:[],
+        dailyCandles:dailyHistory.candles||[],
         fifteenMinuteCandles:fifteenMinuteHistory.candles||[],
         isTopGainer:false,
         researchEnabled:false,
@@ -196,6 +207,9 @@ function startIndexStrategyScanner() {
       record.fifteenMinuteCandleCount=Array.isArray(fifteenMinuteHistory.candles)?fifteenMinuteHistory.candles.length:0;
       record.fifteenMinuteHistoryStatus=record.fifteenMinuteCandleCount>=50?'FYERS_15M_CONTEXT_AVAILABLE':'BLOCKED';
       record.fifteenMinuteHistoryReason=fifteenMinuteHistoryError;
+      record.dailyCandleCount=Array.isArray(dailyHistory.candles)?dailyHistory.candles.length:0;
+      record.dailyHistoryStatus=record.dailyCandleCount>=50?'FYERS_DAILY_CONTEXT_AVAILABLE':needsDailyTrendPullbackHistory(history.candles,evaluationTick.exchangeTime)?'BLOCKED':'NOT_REQUIRED_5M_PREFILTER';
+      record.dailyHistoryReason=dailyHistoryError;
       indexStrategyScanStats[symbol]=record;
       indexStrategyScannerStatus='RUNNING';
       console.info('[FYERS_INDEX_SCANNER] completed:',JSON.stringify({
@@ -845,6 +859,17 @@ const server = http.createServer(async (req,res) => {
           getFiveMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-5m'),
           getFifteenMinuteHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-15m')
         ]);
+        const preDailyMarket = getMarketData();
+        const preDailyUnderlying = preDailyMarket.selectedUnderlying;
+        if (!preDailyUnderlying?.fresh || preDailyUnderlying.symbol !== symbol) {
+          return send(res,200,{status:'DATA_UNAVAILABLE_NO_TRADE',researchRanking:[],reason:'Underlying tick became stale while verified research history was loading'});
+        }
+        // Daily EMA20/EMA50 is Strategy 3's required context. Avoid a daily
+        // REST call unless completed 5m structure reaches its pullback/resume prefilter.
+        let dailyHistory={candles:[]};
+        if(needsDailyTrendPullbackHistory(fiveMinute.candles,preDailyUnderlying.exchangeTime)) {
+          dailyHistory=await getDailyHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-daily');
+        }
         const latestMarket = getMarketData();
         const latestUnderlying = latestMarket.selectedUnderlying;
         if (!latestUnderlying?.fresh || latestUnderlying.symbol !== symbol) {
@@ -853,7 +878,7 @@ const server = http.createServer(async (req,res) => {
         const isTopGainer = (latestMarket.fno?.topGainers || []).some(item => item.symbol === symbol);
         const research = detectNineStrategySetup({
           underlyingCandles:fiveMinute.candles, underlyingTick:latestUnderlying,
-          fifteenMinuteCandles:fifteenMinute.candles,
+          dailyCandles:dailyHistory.candles||[],fifteenMinuteCandles:fifteenMinute.candles,
           isTopGainer, researchEnabled:true, now:Date.now()
         });
         return send(res,200,{

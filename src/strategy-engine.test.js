@@ -45,7 +45,7 @@ function candleRows(side='LONG') {
     : {time:1800006000,open:100,high:100.5,low:97,close:97.2,volume:160};
   return rows;
 }
-test('common trigger gate enforces body, close location and same-session relative volume',()=>{
+test('Opening Range trigger-quality helper enforces body, close location and same-session relative volume',()=>{
   const rows=candleRows('LONG');
   const valid=confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time);
   assert.equal(valid.ok,true);
@@ -275,11 +275,11 @@ test('non-retest and retest strategies both apply the same candle-quality and vo
 });
 
 
-test('top-gainer breakout uses two contiguous candles and no fixed 20-candle volume warm-up', () => {
+test('Top Gainer keeps its own breakout rule and is not subjected to Opening Range candle-quality/volume gates', () => {
   const now=1800006901000;
   const start=Math.floor(now/1000)-2*300;
   const underlyingCandles=Array.from({length:2},(_,i)=>i===1
-    ? {time:start+i*300,open:100,high:103,low:99.8,close:102.5,volume:250}
+    ? {time:start+i*300,open:100,high:104,low:99,close:101.1,volume:100}
     : {time:start+i*300,open:100,high:101,low:99,close:100,volume:100});
   const result=detectNineStrategySetup({
     underlyingCandles,
@@ -291,6 +291,8 @@ test('top-gainer breakout uses two contiguous candles and no fixed 20-candle vol
   const topGainer=result.strategyLedger.find(row=>row.strategy==='TOP_GAINER_MOMENTUM_BREAKOUT');
   assert.equal(topGainer.status,'DETECTED');
   assert.equal(result.strategyLedger.filter(row=>row.status==='DETECTED').length,1);
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(result.triggerConfirmation,undefined,'Top Gainer must not receive the Opening Range-only candle-quality gate');
   assert.ok(result.strategyLedger.filter(row=>row.strategy!=='TOP_GAINER_MOMENTUM_BREAKOUT').every(row=>['BLOCKED','SKIPPED_AFTER_FIRST_PASS'].includes(row.status)));
   assert.ok(result.strategyLedger.some(row=>row.strategy==='EMA20_EMA50_TREND'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
   assert.ok(result.strategyLedger.some(row=>row.strategy==='DAILY_TREND_5M_PULLBACK'&&row.status==='SKIPPED_AFTER_FIRST_PASS'));
@@ -350,15 +352,15 @@ test('opening-range setup confirms first breakout using the opening candle as it
   assert.ok(confirmation.volumeRatio>=1.25);
 });
 
-test('legacy confirmation export preserves the common candle-quality and volume filters',()=>{
+test('Opening Range trigger-quality helper fails closed when candle quality and volume are invalid',()=>{
   const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};
   assert.equal(confirmStrategyTriggerCandle(rows,'LONG',101,rows[20].time).ok,false);
 });
 
 // Direct detector fixtures supplement the aggregate ledger tests. These
-// fixtures exercise representative positive and negative paths without
-// relaxing the common freshness, candle-continuity or option-entry gates.
+// fixtures exercise representative positive and negative paths while keeping
+// freshness, candle-continuity and option-entry gates independent.
 test('EMA20/EMA50 detector accepts aligned bullish trend and rejects flat history', () => {
   const rows=Array.from({length:50},(_,i)=>({time:1800000000+i*300,open:100+i*.1,high:100.2+i*.1,low:99.9+i*.1,close:100.1+i*.1,volume:100}));
   assert.equal(detectEmaTrend(rows)?.side,'LONG');
@@ -701,6 +703,20 @@ test('Opening Bell: 09:20 is observation-only; earliest opening-range entry eval
   assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(result.underlyingSide,'LONG');
   assert.ok(result.rr>=2);
+
+  const weakOpeningRange=evaluateNineStrategies({
+    underlyingCandles:[
+      {time:start,open:100,high:101,low:99,close:100,volume:100},
+      {time:start+300,open:100,high:103,low:99.5,close:102.8,volume:100}
+    ],
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:102.8,exchangeTime:(start+600),receivedAt:(start+600)*1000},
+    ...option,
+    optionTick:{...option.optionTick,exchangeTime:start+600,receivedAt:(start+600)*1000},
+    now:(start+600)*1000,
+    researchEnabled:false
+  });
+  assert.notEqual(weakOpeningRange.status,'SETUP_CONFIRMED');
+  assert.equal(weakOpeningRange.strategyLedger.find(row=>row.strategy==='OPENING_RANGE_BREAKOUT').status,'REJECTED');
 
   const stale=evaluateNineStrategies({
     underlyingCandles,

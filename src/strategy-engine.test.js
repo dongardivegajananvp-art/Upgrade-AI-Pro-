@@ -911,7 +911,7 @@ test('end-to-end double-bottom neckline breakout/retest validates LONG→CE with
   assertStaleOptionQuoteBlocks(rows,'LONG','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST');
 });
 
-test('end-to-end nine-strategy negative matrix rejects a fresh, contiguous but pattern-neutral session',()=>{
+test('end-to-end ten-strategy negative matrix rejects a fresh, contiguous but pattern-neutral session',()=>{
   const start=Date.parse('2026-11-19T03:45:00Z')/1000; // 09:15 IST
   const underlyingCandles=Array.from({length:60},(_,i)=>({
     time:start+i*300,open:100,high:101,low:99,close:100,volume:100

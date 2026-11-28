@@ -518,7 +518,7 @@ function normalizeActiveSetup(input) {
   const contractSymbol = String(input.contract || '');
   const contract = getVerifiedOptionContract(contractSymbol);
   const entry = Number(input.entry), stopLoss = Number(input.stopLoss), target = Number(input.target);
-  const riskPlan = validateFixedRiskPlan({entry,stopLoss,target,minRR:2});
+  const riskPlan = validateFixedRiskPlan({entry,stopLoss,target,minRR:2,tickSize:contract?.tickSize});
   const expectedUnderlying = underlying.replace(/^NSE:/,'').replace(/-EQ$/,'').toUpperCase();
   if (!validateNseSymbol(underlying) || !contract || contract.symbol !== contractSymbol ||
       contract.underlying !== expectedUnderlying || !riskPlan.ok) return null;

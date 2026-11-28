@@ -50,6 +50,12 @@ test('full evaluator negative E2E matrix blocks strategy-specific invalidation c
       reason: /day-high.*break|day-high.*retest|day-high\/day-low/i
     },
     {
+      strategy: 'DAY_LOW_REVERSAL_BREAKOUT',
+      input: neutralPipeline(),
+      status: 'REJECTED',
+      reason: /established session-low support hold/
+    },
+    {
       strategy: 'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
       input: neutralPipeline(),
       status: 'REJECTED',

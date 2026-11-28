@@ -334,8 +334,8 @@ export function detectOpeningRange(rows, sessionStartMinute = 555) {
   if(!rangePrior.length)return null;
   const brokeHigh=rangePrior.some(c=>number(c.close)>high);
   const brokeLow=rangePrior.some(c=>number(c.close)<low);
-  if(brokeHigh&&number(rangeLast.low)<=high*1.002&&number(rangeLast.close)>high)return candidate('OPENING_RANGE_BREAKOUT','LONG',high,rangeLast);
-  if(brokeLow&&number(rangeLast.high)>=low*0.998&&number(rangeLast.close)<low)return candidate('OPENING_RANGE_BREAKOUT','SHORT',low,rangeLast);
+  if(brokeHigh&&number(rangeLast.low)<=high*1.002&&number(rangeLast.close)>high)return candidate('OPENING_RANGE_BREAKOUT','LONG',high,rangeLast,{pattern:'15M_OPENING_RANGE_BREAK_RETEST',requiresLevelCross:true});
+  if(brokeLow&&number(rangeLast.high)>=low*0.998&&number(rangeLast.close)<low)return candidate('OPENING_RANGE_BREAKOUT','SHORT',low,rangeLast,{pattern:'15M_OPENING_RANGE_BREAK_RETEST',requiresLevelCross:true});
   return null;
 }
 export function detectDayHighLowRetest(rows) {
@@ -480,7 +480,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
     // The stricter body/close-location/relative-volume filter belongs only to
     // the morning Opening Range Breakout strategy; never impose it on the other eight.
     if(result.strategy==='OPENING_RANGE_BREAKOUT'){
-      const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,false);
+      const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,Boolean(result.requiresLevelCross));
       if(!confirmation.ok){
         triggerRejected.push({strategy:result.strategy,reason:confirmation.reason});
         strategyLedger.push({strategy:name,status:'REJECTED',reason:confirmation.reason});

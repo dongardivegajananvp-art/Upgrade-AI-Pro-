@@ -28,6 +28,33 @@ test('Day-Low reversal requires an established session low, bullish rejection an
   assert.equal(detectDayLowReversal(rows.map((c,i)=>i===2?{...c,close:97.9}:c)), null, 'rejection must close above established support');
 });
 
+test('Day-Low reversal reaches the independent CE option gate and fixed 2R risk plan end-to-end', () => {
+  const now=Date.parse('2026-11-20T04:05:00Z');
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000;
+  const underlyingCandles=[
+    {time:start,open:100,high:101,low:99,close:100,volume:100},
+    {time:start+300,open:99,high:100,low:98,close:99,volume:110},
+    {time:start+600,open:98.9,high:99.6,low:97.95,close:99.4,volume:150},
+    {time:start+900,open:99.4,high:100.2,low:98.2,close:100,volume:170}
+  ];
+  const contract={symbol:'NSE:ABC26NOV100CE',underlying:'ABC',side:'CE',tickSize:0.05,expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:100,lotSize:1,fyToken:'ABC-CE-100'};
+  const optionCandle={time:start+900,open:50,high:51,low:49,close:50.8,volume:500};
+  const result=evaluateNineStrategies({
+    underlyingCandles,
+    underlyingTick:{symbol:'NSE:ABC-EQ',price:100,exchangeTime:now/1000,receivedAt:now},
+    optionCandles:[optionCandle],
+    optionTick:{symbol:contract.symbol,price:51.05,exchangeTime:now/1000,receivedAt:now},
+    contract,dailyCandles:[],isTopGainer:false,researchEnabled:false,now
+  });
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'DAY_LOW_REVERSAL_BREAKOUT');
+  assert.equal(result.underlyingSide,'LONG');
+  assert.equal(result.optionSide,'CE');
+  assert.equal(result.entry,51.05);
+  assert.ok(result.rr>=2);
+  assert.ok(result.strategyLedger.some(row=>row.strategy==='DAY_LOW_REVERSAL_BREAKOUT'&&row.status==='DETECTED'));
+});
+
 test('scanner fails closed without a fresh exchange tick', () => {
   const result = detectNineStrategySetup({ underlyingCandles: [], underlyingTick: null, now: 1800000000000 });
   assert.equal(result.status, 'DATA_UNAVAILABLE_NO_TRADE');

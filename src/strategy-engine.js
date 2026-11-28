@@ -164,8 +164,8 @@ function pivotLow(rows, i, width=2) {
   for(let j=Math.max(0,i-width);j<=Math.min(rows.length-1,i+width);j++) if(j!==i&&number(rows[j].low)<=value)return false;
   return true;
 }
-// This is a shared entry-quality condition across the strategy set. For retest setups, validate the original level-crossing
-// candle; for trend/pullback setups without a fresh level cross, validate trigger candle.
+// Opening Range Breakout only: validate the opening-range trigger candle.
+// For retest setups, validate the original level-crossing candle rather than the retest candle.
 export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, signalTime = null, requireLevelCross = false) {
   if (!Array.isArray(rows) || !['LONG','SHORT'].includes(side)) return { ok:false, reason:'Verified completed 5-minute candles and strategy direction are required' };
   const signalIndex=signalTime==null?rows.length-1:rows.findIndex(c=>number(c.time)===number(signalTime));
@@ -445,14 +445,17 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
       strategyLedger.push({strategy:name,status:'REJECTED',reason:rejectedReason});
       return;
     }
-    const requireOriginalCross=['DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST'].includes(result.strategy);
-    const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,requireOriginalCross);
-    if(!confirmation.ok){
-      triggerRejected.push({strategy:result.strategy,reason:confirmation.reason});
-      strategyLedger.push({strategy:name,status:'REJECTED',reason:confirmation.reason});
-      return;
+    // The stricter body/close-location/relative-volume filter belongs only to
+    // the morning Opening Range Breakout strategy; never impose it on the other eight.
+    if(result.strategy==='OPENING_RANGE_BREAKOUT'){
+      const confirmation=confirmStrategyTriggerCandle(rows,result.side,result.breakoutLevel,result.confirmedAt,false);
+      if(!confirmation.ok){
+        triggerRejected.push({strategy:result.strategy,reason:confirmation.reason});
+        strategyLedger.push({strategy:name,status:'REJECTED',reason:confirmation.reason});
+        return;
+      }
+      result.triggerConfirmation=confirmation;
     }
-    result.triggerConfirmation=confirmation;
     candidates.push(result);
     strategyLedger.push({strategy:name,status:'DETECTED',reason:'First valid strategy passed its own completed-candle trigger; Entry verification starts immediately',side:result.side,confirmedAt:result.confirmedAt});
   };

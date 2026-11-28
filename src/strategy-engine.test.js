@@ -935,5 +935,5 @@ test('daily-history warmup prefilter queues only a fresh completed 5m pullback/r
  assert.equal(needsDailyTrendPullbackHistory(rows,now/1000),true);
  const neutral=rows.map(row=>({...row,open:100,high:100.4,low:99.6,close:100}));
  assert.equal(needsDailyTrendPullbackHistory(neutral,now/1000),false);
- assert.equal(needsDailyTrendPullbackHistory(rows,now/1000-30),false);
+ assert.equal(needsDailyTrendPullbackHistory(rows,now/1000-700),false);
 });

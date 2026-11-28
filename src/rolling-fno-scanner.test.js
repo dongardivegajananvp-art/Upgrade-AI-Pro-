@@ -163,7 +163,7 @@ test('218-symbol scanner simulation survives changing Top-5, 1015 cooldown, stal
   }
   for(const symbol of chosen){
    visited.add(symbol);attempts.set(symbol,(attempts.get(symbol)||0)+1);
-   const index=Number(symbol.match(/STOCK(\\d+)/)?.[1]||0);
+   const index=Number(symbol.match(/STOCK(\d+)/)?.[1]||0);
    if(active.includes(symbol)&&index%19===0)warmupPending=true;
   }
   minute++;rotation=getNextFnoRotationIndex(total,rotation,FNO_SOCKET_ROTATION_ADVANCE);if(rotation===0)cycles++;

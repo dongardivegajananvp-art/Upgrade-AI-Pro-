@@ -789,7 +789,7 @@ async function selectIndexSymbol(symbol) {
   document.querySelector('#expiry-select').replaceChildren(new Option('—',''));
   document.querySelector('#strike-select').replaceChildren(new Option('—',''));
   document.querySelector('#research-status').textContent='INDEX VIEW · STOCK SETUP RESEARCH NOT RUN';
-  document.querySelector('#research-results').textContent='Select an NSE F&O gainer to run the nine-strategy research engine.';
+  document.querySelector('#research-results').textContent='Select an NSE F&O gainer to run the ten-strategy research engine.';
   renderLiveCandleSummary(null);
   try {
     await clearSelectedOption();

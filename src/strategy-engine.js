@@ -172,7 +172,6 @@ export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, s
   if(signalIndex<0)return{ok:false,reason:'The strategy trigger candle is missing from verified history'};
   let triggerIndex=signalIndex,levelCrossFound=false;
   // Retest patterns retain their original level-cross -> retest sequence.
-  // No candle-body, buying/selling-pressure, or volume threshold is applied.
   if(requireLevelCross&&finite(breakoutLevel)){
     for(let i=signalIndex;i>=1;i--){
       const crossed=side==='LONG'
@@ -184,9 +183,42 @@ export function confirmStrategyTriggerCandle(rows, side, breakoutLevel = null, s
   if(requireLevelCross&&!levelCrossFound)return{ok:false,reason:'Original completed-candle level break could not be verified; retest candle cannot substitute'};
   const candle=rows[triggerIndex];
   if(!validOhlcv(candle))return{ok:false,reason:'Strategy trigger candle OHLC is missing or invalid'};
-  return{ok:true,reason:'Strategy trigger candle and required price-level sequence verified',
-    candleTime:number(candle.time),breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
-    retestSequenceVerified:Boolean(requireLevelCross)};
+  const open=number(candle.open),high=number(candle.high),low=number(candle.low),close=number(candle.close);
+  const range=high-low,body=Math.abs(close-open),bodyStrength=range>0?body/range:0;
+  if(!(range>0)||!Number.isFinite(bodyStrength)||bodyStrength<0.50)
+    return{ok:false,reason:'Strategy trigger candle body strength must be at least 50% of its range',candleTime:number(candle.time),bodyStrength};
+  const closePosition=(close-low)/range;
+  if(side==='LONG'?(close<=open||closePosition<0.65):(close>=open||closePosition>0.35))
+    return{ok:false,reason:side==='LONG'?'BUY trigger candle must close in its upper 35% with bullish body':'SELL trigger candle must close in its lower 35% with bearish body',candleTime:number(candle.time),bodyStrength,closePosition};
+  const triggerTime=number(candle.time),triggerDay=istDayKey(triggerTime);
+  const triggerMinute=(()=>{const d=new Date((triggerTime+19800)*1000);return d.getUTCHours()*60+d.getUTCMinutes();})();
+  const priorSession=[];
+  for(let i=0;i<triggerIndex;i++){
+    const row=rows[i],time=number(row?.time);
+    if(!Number.isFinite(time)||istDayKey(time)!==triggerDay)continue;
+    const d=new Date((time+19800)*1000),minute=d.getUTCHours()*60+d.getUTCMinutes();
+    if(minute<555||minute>=930||time>=triggerTime)continue;
+    priorSession.push(row);
+  }
+  // Use every available consecutive valid same-session candle before the
+  // breakout, with no fixed 20-candle cap or warm-up period.
+  const reference=[];
+  for(let i=priorSession.length-1;i>=0;i--){
+    const row=priorSession[i],previous=reference[0];
+    if(!validOhlcv(row)||!finite(row.volume)||number(row.volume)<=0)break;
+    if(previous&&number(previous.time)-number(row.time)!==INTERVAL_SECONDS)break;
+    reference.unshift(row);
+  }
+  if(!reference.length)return{ok:false,reason:'A valid prior same-session volume reference is required; NO TRADE',candleTime:triggerTime,bodyStrength,closePosition};
+  const referenceVolume=reference.reduce((sum,row)=>sum+number(row.volume),0)/reference.length;
+  const triggerVolume=number(candle.volume);
+  const requiredVolume=referenceVolume*1.25;
+  if(!finite(triggerVolume)||triggerVolume<requiredVolume)
+    return{ok:false,reason:'Breakout/breakdown volume must be at least 1.25x the average of all available consecutive valid prior same-session candles',candleTime:triggerTime,bodyStrength,closePosition,triggerVolume:Number.isFinite(triggerVolume)?triggerVolume:null,referenceCandleCount:reference.length,referenceVolume,requiredVolume};
+  return{ok:true,reason:'Strategy trigger candle passed body, close-location and 1.25x same-session relative-volume gates',
+    candleTime:triggerTime,breakoutLevel:finite(breakoutLevel)?number(breakoutLevel):null,
+    retestSequenceVerified:Boolean(requireLevelCross),bodyStrength,closePosition,triggerVolume,
+    referenceCandleCount:reference.length,referenceVolume,volumeRatio:triggerVolume/referenceVolume};
 }
 
 function candidate(strategy, side, level, candle, details={}) {

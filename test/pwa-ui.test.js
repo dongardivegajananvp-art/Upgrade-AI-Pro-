@@ -316,7 +316,7 @@ test('research context warms fresh 15m history without requesting daily candles'
   const end = server.indexOf("if (url.pathname === '/api/research/historical-universe')", start);
   const flow = server.slice(start, end);
   assert.match(flow, /getFifteenMinuteHistory/);
-  assert.match(flow, /getDailyHistory/);
+  assert.doesNotMatch(flow, /getDailyHistory/);
   assert.match(flow, /entryContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE'/);
 });
 

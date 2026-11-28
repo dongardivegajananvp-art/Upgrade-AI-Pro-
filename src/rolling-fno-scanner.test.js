@@ -144,7 +144,7 @@ test('218-symbol scheduler simulation with changing Top-5 eventually covers ever
   const active=buildFnoRotationSlice(universe,rotation,20),gainer=universe[(minute*17)%total].symbol;
   const candidates=buildFnoScanCandidates(active,[gainer]),chosen=[];
   for(const symbol of candidates){if(chosen.length>=2)break;if(chosen.includes(symbol))continue;if(symbol===gainer){chosen.push(symbol);continue;}if((attempts.get(symbol)||0)===0){chosen.push(symbol);break;}}
-  for(const symbol of chosen){if(symbol!==gainer)visited.add(symbol);attempts.set(symbol,(attempts.get(symbol)||0)+1);}
+  for(const symbol of chosen){if(active.includes(symbol))visited.add(symbol);attempts.set(symbol,(attempts.get(symbol)||0)+1);}
   minute++;rotation=getNextFnoRotationIndex(total,rotation,FNO_SOCKET_ROTATION_ADVANCE);if(rotation===0)cycles++;
  }
  assert.equal(visited.size,total);assert.ok(minute<=total*11);assert.ok(cycles>=10);

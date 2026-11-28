@@ -128,5 +128,5 @@ export function buildFnoScanCandidates(activeSymbols=[],topGainerSymbols=[]) {
 }
 export function isRetryableFnoScanError(error) {
  const message=String(error?.message||error||'');
- return /queued request expired|queue capacity|queue is full|cooldown active|recovery probe required|429|tick became stale|fresh .* tick is required after history wait/i.test(message);
+ return /queued request expired|queue capacity|queue is full|cooldown active|recovery probe required|429|1015|tick became stale|fresh .* tick is required after history wait/i.test(message);
 }

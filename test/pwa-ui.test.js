@@ -316,7 +316,7 @@ test('research context warms fresh 15m history without requesting daily candles'
   const end = server.indexOf("if (url.pathname === '/api/research/historical-universe')", start);
   const flow = server.slice(start, end);
   assert.match(flow, /getFifteenMinuteHistory/);
-  assert.doesNotMatch(flow, /getDailyHistory/);
+  assert.match(flow, /getDailyHistory/);
   assert.match(flow, /entryContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE'/);
 });
 
@@ -325,14 +325,14 @@ test('index chart selection does not request equity-only research context', () =
   assert.match(app, /researchContextReadySymbol = symbol;[\s\S]*?return;/);
 });
 
-test('live setup loads 15m and 5m context without daily-history dependency', () => {
+test('live setup loads 5m and daily context sequentially', () => {
   const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
   const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);
   const flow = server.slice(start, end);
   const underlying = flow.indexOf("const underlyingHistory = await getFiveMinuteHistory");
   const option = flow.indexOf("const optionHistory = await getFiveMinuteHistory");
-  const fifteen = flow.indexOf("const fifteenMinuteHistory = await getFifteenMinuteHistory");
-  assert.ok(underlying >= 0 && option > underlying && fifteen > option, '5m underlying, option and 15m trend histories are sequential');
+  const daily = flow.indexOf("const dailyHistory = await getDailyHistory");
+  assert.ok(underlying >= 0 && option > underlying && daily > option, '5m underlying, option and daily trend histories are sequential');
   assert.doesNotMatch(flow, /getDailyHistory/);
   assert.match(flow, /fifteenMinuteCandles:fifteenMinuteHistory\.candles/);
   assert.doesNotMatch(flow, /Promise\.all\(/, 'entry history reads are not queued as a burst');

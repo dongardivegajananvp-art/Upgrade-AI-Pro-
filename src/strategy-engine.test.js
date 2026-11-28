@@ -248,7 +248,7 @@ test('research-enabled entry remains blocked until fresh 15-minute and 5-minute 
     contract,dailyCandles:[],fifteenMinuteCandles:[],researchEnabled:true,now
   });
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
-  assert.match(result.reason,/50 fresh, contiguous completed daily candles/i);
+  assert.match(result.reason,/50 fresh, contiguous completed 15-minute candles/i);
   assert.equal(result.entry,undefined);
   assert.equal(result.stopLoss,undefined);
   assert.equal(result.target,undefined);
@@ -765,7 +765,7 @@ test('end-to-end daily trend pullback requires fresh daily context and completes
   assert.equal(result.underlyingSide,'SHORT');
   assert.equal(result.optionSide,'PE');
   assert.ok(result.rr>=2);
-  const missingDaily=evaluateNineStrategies({...base,fifteenMinuteCandles:[]});
+  const missingDaily=evaluateNineStrategies({...base,dailyCandles:[],fifteenMinuteCandles:[]});
   assert.notEqual(missingDaily.strategy,'DAILY_TREND_5M_PULLBACK');
   assert.equal(missingDaily.strategyLedger.find(row=>row.strategy==='DAILY_TREND_5M_PULLBACK').status,'BLOCKED');
   assertStaleOptionQuoteBlocks(rows,'SHORT','DAILY_TREND_5M_PULLBACK',{dailyCandles:daily});
@@ -813,13 +813,13 @@ test('end-to-end nine-strategy negative matrix rejects a fresh, contiguous but p
     time:start+i*300,open:100,high:101,low:99,close:100,volume:100
   }));
   const now=(underlyingCandles.at(-1).time+360)*1000;
-  const fifteenStart=now/1000-50*900;
-  const fifteenMinuteCandles=Array.from({length:50},(_,i)=>({time:fifteenStart+i*900,open:100,high:101,low:99,close:100,volume:1000}));
+  const dailyStart=Date.parse('2026-09-20T00:00:00Z')/1000;
+  const dailyCandles=Array.from({length:60},(_,i)=>({time:dailyStart+i*86400,open:100,high:101,low:99,close:100,volume:1000}));
   const result=evaluateNineStrategies({
     underlyingCandles,
     underlyingTick:{symbol:'NSE:ABC-EQ',price:100,exchangeTime:now/1000,receivedAt:now},
-    dailyCandles:[],
-    fifteenMinuteCandles,
+    dailyCandles,
+    fifteenMinuteCandles:[],
     isTopGainer:true,
     researchEnabled:false,
     now
@@ -830,7 +830,7 @@ test('end-to-end nine-strategy negative matrix rejects a fresh, contiguous but p
   for(const strategy of STRATEGIES){
     const row=result.strategyLedger.find(item=>item.strategy===strategy);
     assert.ok(row, strategy+' must be present in the evaluator ledger');
-    assert.equal(row.status,'REJECTED',strategy+' must reject a neutral completed-candle pattern: '+row.reason);
+    assert.equal(row.status,strategy==='DAILY_TREND_5M_PULLBACK'?'REJECTED':'REJECTED',strategy+' must reject a neutral completed-candle pattern: '+row.reason);
     assert.ok(row.reason, strategy+' must expose its pattern rejection reason');
   }
 });

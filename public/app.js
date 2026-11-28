@@ -219,7 +219,7 @@ async function refreshIndexStrategyScan() {
       const candle=document.createElement('div');
       const candleTime=row.lastCompletedCandleTime?new Date(Number(row.lastCompletedCandleTime)*1000).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false})+' IST':'—';
       const scannedAt=row.lastScanAt?new Date(row.lastScanAt).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'WAITING';
-      candle.textContent='COMPLETED 5M CANDLE '+candleTime+' · SCANNED '+scannedAt+' · CHECKS '+(row.strategyCheckCount||0)+'/9 · 15M CONTEXT '+(row.fifteenMinuteHistoryStatus||'WAITING')+' ('+(row.fifteenMinuteCandleCount||0)+')';
+      candle.textContent='COMPLETED 5M CANDLE '+candleTime+' · SCANNED '+scannedAt+' · CHECKS '+(row.strategyCheckCount||0)+'/10 · DAILY CONTEXT '+(row.dailyHistoryStatus||'WAITING')+' ('+(row.dailyCandleCount||0)+')';
       const reason=document.createElement('small');
       reason.className='empty-inline';
       reason.textContent=row.reason||'Waiting for next verified completed 5-minute candle';

@@ -538,7 +538,7 @@ test('strategy option gate rejects option tick symbol and completed candle times
   const start=Date.parse('2026-11-19T03:45:00Z')/1000;
   const underlyingCandles=Array.from({length:50},(_,i)=>{
     const open=100+i,close=open+1.2;
-    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:1000+i};
+    return {time:start+i*300,open,high:close+.1,low:open-.1,close,volume:i===49?2000:1000+i};
   });
   const contract={symbol:'NSE:ABC26NOV150CE',underlying:'ABC',side:'CE',tickSize:0.05,
     expiry:Date.parse('2026-11-26T00:00:00Z')/1000,strike:150,lotSize:1,fyToken:'ABC-CE-150'};

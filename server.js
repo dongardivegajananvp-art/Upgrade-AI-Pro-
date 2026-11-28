@@ -867,8 +867,14 @@ const server = http.createServer(async (req,res) => {
         // Daily EMA20/EMA50 is Strategy 3's required context. Avoid a daily
         // REST call unless completed 5m structure reaches its pullback/resume prefilter.
         let dailyHistory={candles:[]};
-        if(needsDailyTrendPullbackHistory(fiveMinute.candles,preDailyUnderlying.exchangeTime)) {
-          dailyHistory=await getDailyHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-daily');
+        let dailyHistoryError=null;
+        const dailyContextRequired=needsDailyTrendPullbackHistory(fiveMinute.candles,preDailyUnderlying.exchangeTime);
+        if(dailyContextRequired) {
+          try {
+            dailyHistory=await getDailyHistory(symbol,Date.now(),REST_PRIORITY.RESEARCH,'manual-research-daily');
+          } catch(error) {
+            dailyHistoryError=String(error?.message||'Daily research context unavailable').slice(0,160);
+          }
         }
         const latestMarket = getMarketData();
         const latestUnderlying = latestMarket.selectedUnderlying;
@@ -888,7 +894,11 @@ const server = http.createServer(async (req,res) => {
           research:research.research || null,
           strategyLedger:research.strategyLedger || [],
           underlying:symbol,
-          source:'FYERS_VERIFIED_15M_5M_OHLCV',
+          source:'FYERS_VERIFIED_DAILY_15M_5M_OHLCV',
+          dailyContextRequired,
+          dailyCandleCount:Array.isArray(dailyHistory.candles)?dailyHistory.candles.length:0,
+          dailyContextStatus:dailyContextRequired?(dailyHistory.candles.length>=50?'FYERS_DAILY_CONTEXT_AVAILABLE':'BLOCKED'):'NOT_REQUIRED_5M_PREFILTER',
+          dailyContextReason:dailyHistoryError,
           asOfExchangeTime:latestUnderlying.exchangeTime
         });
       }

@@ -15,7 +15,7 @@ test('fixed risk plan requires positive ordered levels and at least 2R',()=>{
 test('restored fixed risk levels must align to the official option tick size',()=>{
   assert.equal(validateFixedRiskPlan({entry:100.05,stopLoss:99.95,target:100.25,tickSize:0.05}).ok,true);
   assert.equal(validateFixedRiskPlan({entry:100.03,stopLoss:99.95,target:100.25,tickSize:0.05}).ok,false);
-  assert.equal(validateFixedRiskPlan({entry:100.05,stopLoss:99.90,target:100.25,tickSize:0.05}).ok,true);
+  assert.equal(validateFixedRiskPlan({entry:100.05,stopLoss:99.90,target:100.35,tickSize:0.05}).ok,true);
 });
 
 test('active setup monitor rejects a tick whose symbol is not its pinned contract',()=>{

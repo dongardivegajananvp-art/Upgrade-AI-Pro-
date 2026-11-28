@@ -333,7 +333,7 @@ test('live setup loads 5m and daily context sequentially', () => {
   const option = flow.indexOf("const optionHistory = await getFiveMinuteHistory");
   const daily = flow.indexOf("const dailyHistory = await getDailyHistory");
   assert.ok(underlying >= 0 && option > underlying && daily > option, '5m underlying, option and daily trend histories are sequential');
-  assert.doesNotMatch(flow, /getDailyHistory/);
+  assert.match(flow, /getDailyHistory/);
   assert.match(flow, /fifteenMinuteCandles:fifteenMinuteHistory\.candles/);
   assert.doesNotMatch(flow, /Promise\.all\(/, 'entry history reads are not queued as a burst');
   assert.match(flow, /REST_PRIORITY\.ENTRY/, 'entry reads retain ENTRY priority');

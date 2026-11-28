@@ -1164,6 +1164,14 @@ const server = http.createServer(async (req,res) => {
       const market = getMarketData();
       const identity = verifyOptionContractUnderlying(contract, market.selectedUnderlyingSymbol);
       if (identity.status !== 'CONTRACT_IDENTITY_VERIFIED') {
+        // Log only public instrument identifiers; never log FYERS credentials or tokens.
+        console.warn('[FYERS_OPTION] contract identity rejected:',JSON.stringify({
+          requestedContract:String(body.symbol||'').slice(0,80),
+          officialContract:String(contract.symbol||'').slice(0,80),
+          officialUnderlying:String(contract.underlying||'').slice(0,40),
+          selectedUnderlying:String(market.selectedUnderlyingSymbol||'').slice(0,40),
+          verification:identity.status
+        }));
         return send(res,409,{status:'CONTRACT_NOT_VERIFIED',verification:identity.status,reason:identity.reason});
       }
       const subscription = setSelectedOptionSymbol(contract.symbol);

@@ -352,6 +352,25 @@ test('opening-range setup confirms first breakout using the opening candle as it
   assert.ok(confirmation.volumeRatio>=1.25);
 });
 
+test('Opening Range breakout remains eligible through the final completed NSE candle at 15:25-15:30 IST',()=>{
+  const start=Date.parse('2026-11-20T03:45:00Z')/1000; // 09:15 IST
+  const end=Date.parse('2026-11-20T09:55:00Z')/1000; // 15:25 IST candle start; completes 15:30
+  const rows=[];
+  for(let time=start;time<=end;time+=300){
+    if(time===start) rows.push({time,open:100,high:101,low:99.5,close:100.5,volume:100});
+    else if(time===end) rows.push({time,open:100.5,high:103,low:100.4,close:102.5,volume:200});
+    else rows.push({time,open:100.2,high:100.8,low:99.8,close:100.5,volume:100});
+  }
+  assert.equal(rows.length,75,'the full 09:15-15:30 regular session must be represented by contiguous 5-minute candles');
+  const setup=detectOpeningRange(rows);
+  assert.equal(setup?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(setup?.side,'LONG');
+  assert.equal(setup?.confirmedAt,end);
+  const confirmation=confirmStrategyTriggerCandle(rows,'LONG',101,end);
+  assert.equal(confirmation.ok,true);
+  assert.equal(confirmation.candleTime,end);
+});
+
 test('Opening Range trigger-quality helper fails closed when candle quality and volume are invalid',()=>{
   const rows=candleRows('LONG');
   rows[20]={...rows[20],open:100,high:104,low:99,close:100.5,volume:0};

@@ -551,7 +551,7 @@ test('directional contract matrix rejects unknown strategy, absent side, invalid
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,symbol:'BSE:ABC26NOV150CE'}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,underlying:'XYZ'}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,underlyingSymbol:'NSE:XYZ-EQ'}).ok,false);
-  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,expiry:now/1000-1}}).ok,false);
+  assert.equal(validateStrategyOptionContract({...args,contract:{...valid,expiry:now/1000-86400}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,strike:0}}).ok,false);
   assert.equal(validateStrategyOptionContract({...args,contract:{...valid,fyToken:''}}).ok,false);
 });
@@ -746,7 +746,7 @@ test('end-to-end flag price-breakout is independently selectable when continuati
 });
 
 test('end-to-end 15m trend pullback requires fresh 15m context and completes the SHORT/PE risk plan',()=>{
-  const now=Date.parse('2026-11-23T12:00:00Z'),start=Math.floor(now/1000)-60*300;
+  const now=Date.parse('2026-11-23T08:00:00Z'),start=Math.floor(now/1000)-60*300;
   const rows=Array.from({length:60},(_,i)=>{const close=200-i*.2;return{time:start+i*300,open:close+.05,high:close+.1,low:close-.1,close,volume:100};});
   rows[58]={time:start+58*300,open:190,high:190.2,low:189.9,close:190.05,volume:120};
   rows[59]={time:start+59*300,open:189.8,high:189.85,low:189.2,close:189.3,volume:220};

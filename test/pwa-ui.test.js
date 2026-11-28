@@ -317,7 +317,7 @@ test('research context warms fresh 15m history without requesting daily candles'
   const flow = server.slice(start, end);
   assert.match(flow, /getFifteenMinuteHistory/);
   assert.doesNotMatch(flow, /getDailyHistory/);
-  assert.match(flow, /entryContext:'15M_TREND_PLUS_5M_PRICE_STRUCTURE'/);
+  assert.match(flow, /researchContext:'15M_5M_RESEARCH_ONLY_NOT_STRATEGY_3'/);
 });
 
 test('index chart selection does not request equity-only research context', () => {
@@ -325,7 +325,7 @@ test('index chart selection does not request equity-only research context', () =
   assert.match(app, /researchContextReadySymbol = symbol;[\s\S]*?return;/);
 });
 
-test('live setup loads 5m and daily context sequentially', () => {
+test('live setup and rolling research receive verified daily strategy context', () => {
   const start = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/evaluate-setup')");
   const end = server.indexOf("if (req.method === 'POST' && url.pathname === '/api/auto-select-option')", start);
   const flow = server.slice(start, end);

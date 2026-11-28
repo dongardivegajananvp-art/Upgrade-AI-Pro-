@@ -1,6 +1,6 @@
 import { isValidOhlcvCandle, validateSessionCandleWindow } from './candle-validation.js';
 import { buildRiskPlan } from './safety.js';
-// NSE-only nine-strategy engine with the original approved rules preserved.
+// NSE-only ten-strategy engine. Strategy-specific rules remain isolated; common safety gates are applied separately.
 // Research enrichment is deliberately unavailable until its separate data sources are implemented.
 function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, contiguousCount = 21) {
   const stamp = Number(exchangeTime);
@@ -65,6 +65,7 @@ const STRATEGIES = Object.freeze([
   'DAILY_TREND_5M_PULLBACK',
   'DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',
+  'DAY_LOW_REVERSAL_BREAKOUT',
   'BULLISH_CONTINUATION',
   'BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE',
@@ -73,7 +74,7 @@ const STRATEGIES = Object.freeze([
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
   'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
-  'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
+  'DAY_LOW_REVERSAL_BREAKOUT','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_PRICE_STRUCTURE','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
 
@@ -354,6 +355,37 @@ export function detectDayHighLowRetest(rows) {
   }
   return null;
 }
+// Day-Low reversal: use a support low established BEFORE the rejection candle.
+// A completed bullish rejection must hold that level, then the next completed
+// candle must close above the rejection high. This is long-only and never buys
+// simply because price is falling toward a new low.
+export function detectDayLowReversal(rows) {
+  if (!Array.isArray(rows) || rows.length < 4) return null;
+  const key = istDayKey(number(rows.at(-1).time));
+  const day = rows.filter(c => istDayKey(number(c.time)) === key);
+  if (day.length < 4) return null;
+  const anchor = day.slice(0, -2);
+  if (anchor.length < 2) return null;
+  const dayLow = Math.min(...anchor.map(c => number(c.low)));
+  const rejection = day.at(-2);
+  const trigger = day.at(-1);
+  const values = [dayLow, number(rejection.open), number(rejection.high), number(rejection.low), number(rejection.close), number(trigger.open), number(trigger.high), number(trigger.low), number(trigger.close)];
+  if (!values.every(Number.isFinite) || dayLow <= 0) return null;
+  const tolerance = dayLow * 0.0015;
+  const body = Math.abs(number(rejection.close) - number(rejection.open));
+  const lowerWick = Math.min(number(rejection.open), number(rejection.close)) - number(rejection.low);
+  const touchedEstablishedSupport = number(rejection.low) <= dayLow + tolerance && number(rejection.low) >= dayLow - tolerance;
+  const heldSupport = number(rejection.close) > dayLow && number(trigger.low) >= dayLow;
+  const bullishRejection = number(rejection.close) > number(rejection.open) && body > 0 && lowerWick >= body;
+  const confirmedBreakout = number(trigger.close) > number(trigger.open) && number(trigger.close) > number(rejection.high);
+  if (!touchedEstablishedSupport || !heldSupport || !bullishRejection || !confirmedBreakout) return null;
+  return candidate('DAY_LOW_REVERSAL_BREAKOUT', 'LONG', number(rejection.high), trigger, {
+    dayLowLevel: dayLow,
+    rejectionCandleTime: number(rejection.time),
+    entryPattern: 'ESTABLISHED_DAY_LOW_HOLD_BULLISH_REJECTION_HIGH_BREAK'
+  });
+}
+
 export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow, targetR = 2 }) {
   const values=[breakoutLevel,tickSize,livePremium,swingLow];
   if(!values.every(finite)||values.some(v=>number(v)<=0))return{status:'NO_TRADE',reason:'Breakout, tick size, live premium and confirmed-candle swing low must be positive'};
@@ -473,6 +505,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No current-session day-high/day-low break followed by a retest and close reclaim/rejection was confirmed');
+  consider('DAY_LOW_REVERSAL_BREAKOUT',sessionRows.length>=4&&sessionContiguous,()=>detectDayLowReversal(sessionRows),sessionRows.length<4?'Requires at least four current-session completed 5-minute candles':'Current-session candles are not contiguous','No established session-low support hold, bullish rejection candle and next-candle high breakout were all confirmed');
   consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',w48,()=>detectDoublePattern(rows),'Requires 48 contiguous completed 5-minute candles','No two comparable swing highs/lows, neckline break, and subsequent neckline retest were all confirmed');
   consider('BULLISH_CONTINUATION',w30,()=>detectContinuation(rows,'LONG'),'Requires 30 contiguous completed 5-minute candles','No bullish impulse of at least 1.5x the consolidation range followed by a bullish continuation breakout');
   consider('BEARISH_CONTINUATION',w30,()=>detectContinuation(rows,'SHORT'),'Requires 30 contiguous completed 5-minute candles','No bearish impulse of at least 1.5x the consolidation range followed by a bearish continuation breakdown');
@@ -510,7 +543,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
 }
 
 export function validateStrategyOptionContract({strategy,underlyingSide,underlyingSymbol,contract,now=Date.now()}={}) {
-  if(!STRATEGIES.includes(strategy))return {ok:false,reason:'A recognized one of nine strategies is required'};
+  if(!STRATEGIES.includes(strategy))return {ok:false,reason:'A recognized one of ten strategies is required'};
   if(!['LONG','SHORT'].includes(underlyingSide))return {ok:false,reason:'Confirmed LONG/SHORT underlying direction is required'};
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)
     return {ok:false,reason:'Verified active CE/PE contract and tick size are required'};
